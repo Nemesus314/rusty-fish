@@ -11,6 +11,7 @@ fn request(writer: Option<Gender>, reader: Option<Gender>) -> Request<'static> {
         context: &[],
         writer_gender: writer,
         reader_gender: reader,
+        informal: false,
     }
 }
 

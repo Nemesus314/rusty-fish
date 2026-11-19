@@ -50,6 +50,9 @@ enum Command {
         /// Grammatical gender of the reader, for languages that mark it
         #[arg(long, value_enum)]
         reader: Option<Who>,
+        /// Address the reader informally, the way friends do
+        #[arg(long)]
+        informal: bool,
         /// The text to translate
         text: String,
     },
@@ -171,7 +174,7 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Translate { to, keep, model, base_url, writer, reader, text } => {
+        Command::Translate { to, keep, model, base_url, writer, reader, informal, text } => {
             let fish =
                 OpenAi::new(&base_url, &model, stored(Which::Openai)?).map_err(|e| e.to_string())?;
             let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
@@ -183,6 +186,7 @@ async fn run(command: Command) -> Result<(), String> {
                 context: &[],
                 writer_gender: writer.map(Who::gender),
                 reader_gender: reader.map(Who::gender),
+                informal,
             };
             match translate(&fish, &request).await.map_err(|e| e.to_string())? {
                 Outcome::Translated(translation) => println!("{translation}"),

@@ -357,6 +357,8 @@ where
             writer_gender: None,
             // Die Bitte spricht die Person an diesem Platz an.
             reader_gender: seat.and_then(|s| s.gender),
+            // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
+            informal: true,
         };
         // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist er
         // leer, fragt der Fisch auf Englisch.

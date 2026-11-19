@@ -197,6 +197,8 @@ async fn spread<M: Model + Sync>(
                     context,
                     writer_gender: piece.writer_gender,
                     reader_gender: seat.gender,
+                    // Was Menschen einander schreiben, behält seine Anrede.
+                    informal: false,
                 };
                 let (translated, mark) = match translate(model, &request).await {
                     Ok(Outcome::Translated(t)) => (t, Mark::Translated),

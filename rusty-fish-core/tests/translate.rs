@@ -61,6 +61,7 @@ fn request<'a>(text: &'a str) -> Request<'a> {
         context: &[],
         writer_gender: None,
         reader_gender: None,
+        informal: false,
     }
 }
 
@@ -177,4 +178,17 @@ fn the_bite_can_cross_threads() {
     let fake = Fake::says("x");
     let r = request("Hallo");
     assert_send(translate(&fake, &r));
+}
+
+#[test]
+fn the_informal_address_is_asked_for_only_when_set() {
+    let plain = build_prompt(&request("Hello! Press OK to agree."));
+    assert!(!plain.system.contains("informally"));
+
+    let mut r = request("Hello! Press OK to agree.");
+    r.informal = true;
+    let friendly = build_prompt(&r);
+    assert!(friendly.system.contains("Address the reader informally"));
+    // Sonst ändert sich am Auftrag nichts.
+    assert!(friendly.system.starts_with(&plain.system));
 }

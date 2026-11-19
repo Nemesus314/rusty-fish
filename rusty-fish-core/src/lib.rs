@@ -70,6 +70,12 @@ pub struct Request<'a> {
     /// Geschlecht der Person, die die Übersetzung liest und im Text mit „du"
     /// angesprochen sein kann, falls angegeben.
     pub reader_gender: Option<Gender>,
+    /// Soll der Leser geduzt werden? Englisch kennt kein Du und Sie, deshalb
+    /// rät die KI bei einem englischen Ausgangstext die Anrede. Gemessen am
+    /// 19.11.2026: die Bitte um Zustimmung kam auf Russisch mit „вы" an.
+    /// Nemesus am selben Tag: „Auf Du ändern". Für Sätze, die Menschen
+    /// einander schreiben, bleibt das aus: dort folgt die Anrede dem Original.
+    pub informal: bool,
 }
 
 /// Was an die KI geht.
@@ -250,6 +256,12 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
         system.push_str(&hints.join(" "));
         system.push(' ');
         system.push_str(GRAMMAR_ONLY);
+    }
+    if req.informal {
+        system.push_str(
+            " Address the reader informally, the way friends do (for example \"du\" in \
+             German, \"ты\" in Russian).",
+        );
     }
 
     Prompt { system, user }
