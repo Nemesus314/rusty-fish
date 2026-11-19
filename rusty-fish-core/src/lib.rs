@@ -123,7 +123,11 @@ pub enum FishError {
 
 impl fmt::Display for ModelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "model failed: {}", self.0)
+        // Bis zum 19.11.2026 stand hier „model failed: " davor. Im ersten
+        // Durchlauf las sich das bei leerem Kontingent falsch: „model failed:
+        // today's translation budget is used up", obwohl die KI nicht
+        // ausgefallen war. Die Gründe sprechen jetzt für sich.
+        write!(f, "{}", self.0)
     }
 }
 

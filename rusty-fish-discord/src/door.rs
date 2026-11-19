@@ -418,8 +418,13 @@ where
 
         // Über alle Kanäle hinweg in der Reihenfolge, in der geschrieben wurde.
         missed.sort_by_key(|m| m.id);
-        if !missed.is_empty() {
-            eprintln!("rusty-fish: catching up on {} missed message(s)", missed.len());
+        // Gezählt werden nur Nachrichten von Menschen. Die eigenen Spiegelungen
+        // des Fischs liegen auch im Verlauf, werden aber übersprungen; bis zum
+        // 19.11.2026 zählte die Meldung sie mit und war dadurch irreführend.
+        let from_people =
+            missed.iter().filter(|m| !m.author.bot && m.webhook_id.is_none()).count();
+        if from_people > 0 {
+            eprintln!("rusty-fish: catching up on {from_people} missed message(s)");
         }
         for msg in &missed {
             self.handle(http, msg).await;
