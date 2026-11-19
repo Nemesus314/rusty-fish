@@ -1,15 +1,14 @@
-//! Rusty Fish, das Programm. Noch ohne Tür: es verwaltet den Schlüssel und
-//! übersetzt einen einzelnen Text zur Probe. Die Türen (Discord, später
-//! Matrix) kommen als weitere Befehle dazu.
+//! Rusty Fish, das Programm: Schlüssel verwalten, einen Text zur Probe
+//! übersetzen, die Discord-Tür öffnen. Weitere Türen kommen als Befehle dazu.
 
 mod keys;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use rusty_fish_core::{Outcome, Request, translate};
+use rusty_fish_discord::config::Config;
 use rusty_fish_openai::{OPENAI_BASE_URL, OpenAi, Secret};
+use std::path::PathBuf;
 use std::process::ExitCode;
-
-const PROVIDER: &str = "openai";
 
 #[derive(Parser)]
 #[command(name = "rusty-fish", version, about)]
@@ -20,7 +19,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Manage the API key in this system's credential store
+    /// Manage the secrets in this system's credential store
     Key {
         #[command(subcommand)]
         action: KeyAction,
@@ -48,16 +47,57 @@ enum Command {
         /// The text to translate
         text: String,
     },
+    /// Open the Discord door and translate between the configured channels
+    Run {
+        /// Settings file; see rusty-fish.example.toml
+        #[arg(long, default_value = "rusty-fish.toml")]
+        config: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
 enum KeyAction {
-    /// Ask for the key (input stays hidden) and store it
-    Set,
-    /// Tell whether a key is stored, without showing it
-    Status,
-    /// Delete the stored key
-    Forget,
+    /// Ask for the secret (input stays hidden) and store it
+    Set {
+        #[arg(value_enum, default_value_t = Which::Openai)]
+        which: Which,
+    },
+    /// Tell whether a secret is stored, without showing it
+    Status {
+        #[arg(value_enum, default_value_t = Which::Openai)]
+        which: Which,
+    },
+    /// Delete the stored secret
+    Forget {
+        #[arg(value_enum, default_value_t = Which::Openai)]
+        which: Which,
+    },
+}
+
+/// Die Geheimnisse, die der Fisch kennt. Jedes liegt für sich in der Ablage.
+#[derive(Clone, Copy, ValueEnum)]
+enum Which {
+    /// API key of the translating AI
+    Openai,
+    /// Token of your Discord bot
+    Discord,
+}
+
+impl Which {
+    /// Name des Eintrags in der Ablage.
+    fn entry(self) -> &'static str {
+        match self {
+            Which::Openai => "openai",
+            Which::Discord => "discord",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Which::Openai => "API key",
+            Which::Discord => "Discord bot token",
+        }
+    }
 }
 
 #[tokio::main]
@@ -73,43 +113,44 @@ async fn main() -> ExitCode {
 
 async fn run(command: Command) -> Result<(), String> {
     match command {
-        Command::Key { action: KeyAction::Set } => {
-            // Der Schlüssel geht vom Terminal direkt in die Ablage des Systems.
-            // Er steht in keinem Argument, keiner Datei und keiner Ausgabe.
-            let typed = rpassword::prompt_password("API key (input stays hidden): ")
+        Command::Key { action: KeyAction::Set { which } } => {
+            // Das Geheimnis geht vom Terminal direkt in die Ablage des Systems.
+            // Es steht in keinem Argument, keiner Datei und keiner Ausgabe.
+            let typed = rpassword::prompt_password(format!("{} (input stays hidden): ", which.label()))
                 .map_err(|e| format!("cannot read from the terminal: {e}"))?;
             let typed = typed.trim();
             if typed.is_empty() {
-                return Err("no key entered, nothing stored".to_owned());
+                return Err("nothing entered, nothing stored".to_owned());
             }
-            keys::store(PROVIDER, typed)?;
-            println!("Key stored in this system's credential store.");
+            keys::store(which.entry(), typed)?;
+            println!("{} stored in this system's credential store.", which.label());
             Ok(())
         }
-        Command::Key { action: KeyAction::Status } => {
-            match keys::load(PROVIDER)? {
-                Some(_) => println!("A key is stored."),
-                None => println!("No key is stored."),
+        Command::Key { action: KeyAction::Status { which } } => {
+            match keys::load(which.entry())? {
+                Some(_) => println!("{}: stored.", which.label()),
+                None => println!("{}: not stored.", which.label()),
             }
             Ok(())
         }
-        Command::Key { action: KeyAction::Forget } => {
-            if keys::forget(PROVIDER)? {
-                println!("Key deleted.");
+        Command::Key { action: KeyAction::Forget { which } } => {
+            if keys::forget(which.entry())? {
+                println!("{} deleted.", which.label());
             } else {
-                println!("No key was stored.");
+                println!("{}: nothing was stored.", which.label());
             }
             Ok(())
         }
         Command::Models { base_url } => {
-            let fish = OpenAi::new(&base_url, "", stored_key()?).map_err(|e| e.to_string())?;
+            let fish = OpenAi::new(&base_url, "", stored(Which::Openai)?).map_err(|e| e.to_string())?;
             for id in fish.models().await.map_err(|e| e.to_string())? {
                 println!("{id}");
             }
             Ok(())
         }
         Command::Translate { to, keep, model, base_url, text } => {
-            let fish = OpenAi::new(&base_url, &model, stored_key()?).map_err(|e| e.to_string())?;
+            let fish =
+                OpenAi::new(&base_url, &model, stored(Which::Openai)?).map_err(|e| e.to_string())?;
             let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
             let request = Request {
                 speaker: "me",
@@ -124,9 +165,29 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
+        Command::Run { config: path } => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let config = Config::parse(&text)?;
+            // Erst alles prüfen, dann verbinden: fehlt etwas, scheitert der
+            // Fisch, bevor er sich bei Discord zeigt.
+            let key = stored(Which::Openai)?;
+            let token = stored(Which::Discord)?;
+            let base_url = config.base_url.clone().unwrap_or_else(|| OPENAI_BASE_URL.to_owned());
+            let fish = OpenAi::new(&base_url, &config.model, key).map_err(|e| e.to_string())?;
+            // Der Zustand liegt neben den Einstellungen: rusty-fish.state.json
+            let state_path = path.with_extension("state.json");
+            rusty_fish_discord::door::run(token.expose(), config, &state_path, fish).await
+        }
     }
 }
 
-fn stored_key() -> Result<Secret, String> {
-    keys::load(PROVIDER)?.ok_or_else(|| "no key stored; run `rusty-fish key set` first".to_owned())
+fn stored(which: Which) -> Result<Secret, String> {
+    keys::load(which.entry())?.ok_or_else(|| {
+        format!(
+            "{} not stored; run `rusty-fish key set {}` first",
+            which.label(),
+            which.entry()
+        )
+    })
 }

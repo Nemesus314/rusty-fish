@@ -1,1 +1,6 @@
 /target
+
+# Eigene Einstellungen und Zustand eines Betreibers gehören nicht ins Repository.
+/rusty-fish.toml
+*.state.json
+*.state.json.tmp

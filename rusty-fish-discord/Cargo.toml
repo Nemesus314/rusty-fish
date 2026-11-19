@@ -1,0 +1,15 @@
+[package]
+name = "rusty-fish-discord"
+description = "Discord door of Rusty Fish. Thin: it hands messages to the room logic and delivers what comes out."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusty-fish-core = { path = "../rusty-fish-core" }
+rusty-fish-room = { path = "../rusty-fish-room" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+serenity = { version = "0.12.5", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
+tokio = { version = "1.54.1", features = ["sync"] }
+toml = "1.2.1"

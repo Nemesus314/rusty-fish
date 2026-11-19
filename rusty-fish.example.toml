@@ -1,0 +1,34 @@
+# Rusty Fish, settings for the Discord door.
+# Copy this file to rusty-fish.toml, fill it in, then: rusty-fish run
+#
+# Secrets do not belong here. Store them once with:
+#   rusty-fish key set openai
+#   rusty-fish key set discord
+
+# The model that translates. `rusty-fish models` lists what your key can use.
+model = "put-a-model-name-here"
+
+# Optional: another service that speaks the OpenAI chat format.
+# base_url = "https://api.openai.com/v1"
+
+# Your own Discord user id. Whoever runs the fish has agreed to the AI reading
+# along; everyone else is asked once in their channel.
+# In Discord: Settings -> Advanced -> Developer Mode, then right-click yourself -> Copy User ID.
+host = "000000000000000000"
+
+# A room is one conversation. Every seat is a channel with a language.
+# What is written at one seat appears at all others in their language.
+[[room]]
+# Languages that pass untranslated, as a fallback when a translation misleads.
+pass_through = ["English"]
+# How many earlier messages the AI sees for context. Each one costs with every translation.
+context_lines = 10
+
+  # Right-click a channel -> Copy Channel ID.
+  [[room.seat]]
+  channel = "000000000000000001"
+  lang = "German"
+
+  [[room.seat]]
+  channel = "000000000000000002"
+  lang = "Russian"

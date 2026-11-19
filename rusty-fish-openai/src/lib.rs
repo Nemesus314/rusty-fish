@@ -23,7 +23,9 @@ impl Secret {
         Secret(value.into())
     }
 
-    fn expose(&self) -> &str {
+    /// Der einzige Weg an den Wert. Wer ihn ruft, übergibt ihn sofort an den
+    /// Dienst, für den er gedacht ist, und gibt ihn nirgends aus.
+    pub fn expose(&self) -> &str {
         &self.0
     }
 }
