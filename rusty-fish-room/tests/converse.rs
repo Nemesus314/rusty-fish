@@ -67,8 +67,8 @@ fn now<F: Future>(f: F) -> F::Output {
 fn room() -> Room {
     Room {
         seats: vec![
-            Seat { channel: "de".to_owned(), lang: "German".to_owned() },
-            Seat { channel: "ru".to_owned(), lang: "Russian".to_owned() },
+            Seat { channel: "de".to_owned(), lang: "German".to_owned(), gender: None },
+            Seat { channel: "ru".to_owned(), lang: "Russian".to_owned(), gender: None },
         ],
         pass_through: vec![],
         context_lines: 5,

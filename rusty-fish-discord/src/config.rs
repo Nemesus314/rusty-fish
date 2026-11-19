@@ -1,7 +1,7 @@
 //! Einstellungen der Tür, als TOML-Datei. Nichts ist auf einen bestimmten
 //! Betreiber zugeschnitten: andere sollen den Fisch bei sich laufen lassen.
 
-use rusty_fish_room::{Limits, Room, Seat};
+use rusty_fish_room::{Gender, Limits, Room, Seat};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +57,7 @@ struct RawRoom {
 struct RawSeat {
     channel: String,
     lang: String,
+    gender: Option<String>,
 }
 
 fn default_context_lines() -> usize {
@@ -95,7 +96,8 @@ impl Config {
                     return Err(format!("configuration: channel {channel} is used twice"));
                 }
                 taken.push(channel.clone());
-                seats.push(Seat { channel, lang });
+                let gender = read_gender(seat.gender.as_deref(), &channel)?;
+                seats.push(Seat { channel, lang, gender });
             }
             rooms.push(Room {
                 seats,
@@ -126,13 +128,29 @@ impl Config {
         self.rooms.iter().position(|r| r.seats.iter().any(|s| s.channel == channel))
     }
 
+    /// Der Platz an diesem Kanal.
+    pub fn seat_of(&self, channel: &str) -> Option<&Seat> {
+        self.rooms.iter().flat_map(|r| r.seats.iter()).find(|s| s.channel == channel)
+    }
+
     /// Welche Sprache hat der Platz an diesem Kanal?
     pub fn lang_of(&self, channel: &str) -> Option<&str> {
-        self.rooms
-            .iter()
-            .flat_map(|r| r.seats.iter())
-            .find(|s| s.channel == channel)
-            .map(|s| s.lang.as_str())
+        self.seat_of(channel).map(|s| s.lang.as_str())
+    }
+}
+
+/// Liest die freiwillige Angabe zum grammatischen Geschlecht eines Platzes.
+/// Erlaubt sind "female" und "male"; alles andere wird laut abgelehnt, damit
+/// ein Tippfehler nicht still zu „keine Angabe" wird.
+fn read_gender(value: Option<&str>, channel: &str) -> Result<Option<Gender>, String> {
+    let Some(value) = value else { return Ok(None) };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "female" => Ok(Some(Gender::Female)),
+        "male" => Ok(Some(Gender::Male)),
+        _ => Err(format!(
+            "configuration: `gender` for channel {channel} must be \"female\" or \"male\" \
+             (or be left out), got {value:?}"
+        )),
     }
 }
 

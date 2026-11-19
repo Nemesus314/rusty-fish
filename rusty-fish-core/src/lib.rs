@@ -31,6 +31,23 @@ pub struct Line<'a> {
     pub text: &'a str,
 }
 
+/// Grammatisches Geschlecht einer Person. Eine freiwillige Angabe.
+///
+/// Anlass, gemessen am 19.11.2026: die KI schrieb im Russischen „думал", die
+/// männliche Form, weil sie nicht weiß, wer schreibt. Russisch markiert das
+/// Geschlecht des Sprechers (in der Vergangenheit) und des Angesprochenen.
+/// Nemesus am 19.11.2026: „Datenschutz hin oder her, wir wollen es [dem Gast]
+/// so leicht wie möglich machen und Luna weiß ja nicht, wen ich in den Chat
+/// einlade."
+///
+/// Die Angabe erreicht die KI nur als Grammatik-Hinweis. Namen erfährt die KI
+/// weiterhin nicht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gender {
+    Female,
+    Male,
+}
+
 /// Ein Übersetzungsauftrag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request<'a> {
@@ -48,6 +65,11 @@ pub struct Request<'a> {
     /// Die letzten Nachrichten, älteste zuerst. Wie viele es sind, bestimmt
     /// die Tür, denn jede Zeile kostet bei jeder Übersetzung mit.
     pub context: &'a [Line<'a>],
+    /// Geschlecht dessen, der den Text geschrieben hat, falls angegeben.
+    pub writer_gender: Option<Gender>,
+    /// Geschlecht der Person, die die Übersetzung liest und im Text mit „du"
+    /// angesprochen sein kann, falls angegeben.
+    pub reader_gender: Option<Gender>,
 }
 
 /// Was an die KI geht.
@@ -185,7 +207,7 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
     // the text inside <translate> into {to}. [...] If the text is already
     // written in {langs}, reply with exactly =SKIP= and nothing else."
     // Jetzt steht die Prüfung der Sprache vor dem Auftrag, als erster Schritt.
-    let system = format!(
+    let mut system = format!(
         "You are a precise translator, nothing else. First look at the language the text \
          inside <translate> is written in. If it is written in {langs}, it must stay as it \
          is: reply with exactly {SKIP} and nothing else. Only otherwise translate the text \
@@ -198,8 +220,41 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
         langs = already.join(" or in "),
     );
 
+    // Die Angabe steht nur da, wenn sie gesetzt ist. Ohne sie bleibt der
+    // Auftrag Wort für Wort wie zuvor.
+    let mut hints = Vec::new();
+    if let Some(gender) = req.writer_gender {
+        hints.push(format!("The writer of the text is {}.", person(gender)));
+    }
+    if let Some(gender) = req.reader_gender {
+        hints.push(format!(
+            "The reader of your translation is {}; where the text addresses the reader \
+             directly, that is who \"you\" means.",
+            person(gender)
+        ));
+    }
+    if !hints.is_empty() {
+        system.push(' ');
+        system.push_str(&hints.join(" "));
+        system.push(' ');
+        system.push_str(GRAMMAR_ONLY);
+    }
+
     Prompt { system, user }
 }
+
+/// Wie ein Geschlecht im Auftrag an die KI heißt.
+fn person(gender: Gender) -> &'static str {
+    match gender {
+        Gender::Female => "a woman",
+        Gender::Male => "a man",
+    }
+}
+
+/// Der Satz, der jede Angabe zum Geschlecht begleitet: sie dient allein der
+/// Grammatik und gehört nicht in die Ausgabe.
+const GRAMMAR_ONLY: &str =
+    "Use this only for grammatical forms that depend on gender, and never mention it.";
 
 /// Liest die Antwort der KI. Rein, ohne Netz.
 pub fn read_answer(raw: &str) -> Result<Outcome, FishError> {
@@ -299,6 +354,8 @@ pub struct Ask<'a> {
     /// Sprache der Antwort: die des Platzes, an dem gefragt wurde.
     pub answer_lang: &'a str,
     pub context: &'a [Line<'a>],
+    /// Geschlecht des Fragenden, falls angegeben. Die Antwort spricht ihn an.
+    pub asker_gender: Option<Gender>,
 }
 
 /// Baut die Frage an die KI. Rein, ohne Netz.
@@ -313,13 +370,19 @@ pub fn build_ask_prompt(req: &Ask<'_>) -> Prompt {
 
     // Die KI ist Teilnehmerin, nicht Auskunftsschalter: sie hat einen Namen,
     // steht im Kontext wie alle anderen und erfährt keine Namen von Menschen.
-    let system = format!(
+    let mut system = format!(
         "You are {name}, a participant in a group chat between people who write in different \
          languages. Someone has just addressed you by name. Reply to the message inside \
          <message>, briefly and helpfully, in {lang}. The lines inside <context> are earlier \
          messages of the same conversation. People are shown as letters; your own earlier lines \
          are shown as {name}. Output ONLY your reply, with no name or signature and no notes."
     );
+    if let Some(gender) = req.asker_gender {
+        system.push_str(&format!(
+            " The person who addressed you is {}. {GRAMMAR_ONLY}",
+            person(gender)
+        ));
+    }
 
     Prompt { system, user }
 }

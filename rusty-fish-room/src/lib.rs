@@ -26,6 +26,8 @@ use rusty_fish_core::{
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub use rusty_fish_core::Gender;
+
 /// Ein Platz im Raum: ein Kanal, eine Sprache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seat {
@@ -33,6 +35,12 @@ pub struct Seat {
     pub channel: String,
     /// Sprache der Leser an diesem Platz, als Wort ("Russian").
     pub lang: String,
+    /// Grammatisches Geschlecht der Person an diesem Platz, freiwillig. Es gilt
+    /// für das, was sie schreibt, und für das, was sie liest.
+    ///
+    /// Benannte Grenze: sitzen an einem Platz mehrere Menschen verschiedenen
+    /// Geschlechts, bleibt die Angabe weg. Dann wählt die KI wie bisher selbst.
+    pub gender: Option<Gender>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,9 +119,9 @@ pub async fn relay<M: Model + Sync>(
     state: &mut RoomState,
     msg: &Incoming<'_>,
 ) -> Vec<Delivery> {
-    if !room.seats.iter().any(|s| s.channel == msg.channel) {
+    let Some(origin) = room.seats.iter().find(|s| s.channel == msg.channel) else {
         return Vec::new();
-    }
+    };
 
     // Ohne Zustimmung: zustellen, ehrlich markiert, und nichts merken. Was
     // nicht gemerkt wird, kann auch später nicht als Kontext zur KI gelangen.
@@ -132,10 +140,30 @@ pub async fn relay<M: Model + Sync>(
     }
 
     let context = state.lines();
-    let out = spread(model, room, &context, msg.channel, msg.author, msg.text, Sender::Writer).await;
+    let piece = Piece {
+        origin: msg.channel,
+        speaker: msg.author,
+        // Wer an einem Platz schreibt, hat das Geschlecht dieses Platzes.
+        writer_gender: origin.gender,
+        text: msg.text,
+        from: Sender::Writer,
+    };
+    let out = spread(model, room, &context, &piece).await;
     drop(context);
     state.remember(msg.author, msg.text, room.context_lines);
     out
+}
+
+/// Ein Text auf dem Weg an die anderen Plätze.
+struct Piece<'a> {
+    /// Der Kanal, an dem der Text entstand. Dorthin geht er nicht noch einmal.
+    origin: &'a str,
+    speaker: &'a str,
+    /// Geschlecht des Schreibenden, falls sein Platz es angibt. Die KI als
+    /// Schreibende hat keines.
+    writer_gender: Option<Gender>,
+    text: &'a str,
+    from: Sender,
 }
 
 /// Bringt einen Text an alle Plätze außer dem, an dem er entstand, jeweils in
@@ -144,28 +172,31 @@ async fn spread<M: Model + Sync>(
     model: &M,
     room: &Room,
     context: &[Line<'_>],
-    origin: &str,
-    speaker: &str,
-    text: &str,
-    from: Sender,
+    piece: &Piece<'_>,
 ) -> Vec<Delivery> {
     let pass_through: Vec<&str> = room.pass_through.iter().map(String::as_str).collect();
+    let text = piece.text;
 
-    // Eine Sprache, eine bezahlte Übersetzung, auch wenn mehrere Plätze sie lesen.
-    let mut done: Vec<(String, String, Mark)> = Vec::new();
+    // Eine Sprache, eine bezahlte Übersetzung, auch wenn mehrere Plätze sie
+    // lesen. Das gilt nur für Plätze mit gleicher Sprache und gleichem
+    // Geschlecht: „Hast du geschlafen?" lautet im Russischen an eine Frau
+    // anders als an einen Mann.
+    let mut done: Vec<((String, Option<Gender>), String, Mark)> = Vec::new();
     let mut out = Vec::new();
-    for seat in room.seats.iter().filter(|s| s.channel != origin) {
+    for seat in room.seats.iter().filter(|s| s.channel != piece.origin) {
         let lang = seat.lang.trim();
-        let key = lang.to_lowercase();
+        let key = (lang.to_lowercase(), seat.gender);
         let (translated, mark) = match done.iter().find(|(k, _, _)| *k == key) {
             Some((_, translated, mark)) => (translated.clone(), mark.clone()),
             None => {
                 let request = Request {
-                    speaker,
+                    speaker: piece.speaker,
                     text,
                     target_lang: lang,
                     pass_through: &pass_through,
                     context,
+                    writer_gender: piece.writer_gender,
+                    reader_gender: seat.gender,
                 };
                 let (translated, mark) = match translate(model, &request).await {
                     Ok(Outcome::Translated(t)) => (t, Mark::Translated),
@@ -177,7 +208,12 @@ async fn spread<M: Model + Sync>(
                 (translated, mark)
             }
         };
-        out.push(Delivery { channel: seat.channel.clone(), text: translated, mark, from });
+        out.push(Delivery {
+            channel: seat.channel.clone(),
+            text: translated,
+            mark,
+            from: piece.from,
+        });
     }
     out
 }
@@ -233,9 +269,52 @@ pub struct Tally {
     pub day: String,
     pub translation_tokens: u64,
     pub questions: BTreeMap<String, u32>,
+    /// Was der Gastgeber heute zusätzlich zum Tagesbetrag freigegeben hat.
+    pub raised_tokens: u64,
+    /// Ob der Gastgeber über die laufende Erschöpfung schon benachrichtigt ist.
+    pub host_notified: bool,
 }
 
 impl Tally {
+    /// Wie viele Tokens heute insgesamt erlaubt sind: der eingestellte
+    /// Tagesbetrag plus das, was der Gastgeber heute nachgelegt hat.
+    pub fn allowed_today(&self, limits: &Limits) -> u64 {
+        limits.translation_tokens_per_day.saturating_add(self.raised_tokens)
+    }
+
+    /// Ist das heutige Kontingent verbraucht und gäbe es etwas nachzulegen?
+    /// Bei einem Tagesbetrag von null will der Gastgeber keine Übersetzung;
+    /// „um weitere 0 Tokens erhöhen" wäre Unsinn.
+    fn used_up(&self, limits: &Limits) -> bool {
+        limits.translation_tokens_per_day > 0 && self.tokens_left(limits) == 0
+    }
+
+    /// Legt genau einen Tagesbetrag nach, aber nur, wenn das Kontingent
+    /// verbraucht ist. Liefert, ob erhöht wurde. So erhöht ein doppelter Klick
+    /// des Gastgebers nicht doppelt.
+    ///
+    /// Nemesus am 19.11.2026: „Gleich mit Abfage, ob er es wieder um den selben
+    /// Betrag erhöhen soll, mit Beitragnennung".
+    pub fn raise(&mut self, limits: &Limits) -> bool {
+        if !self.used_up(limits) {
+            return false;
+        }
+        self.raised_tokens = self.raised_tokens.saturating_add(limits.translation_tokens_per_day);
+        // Eine neue Erschöpfung soll wieder gemeldet werden.
+        self.host_notified = false;
+        true
+    }
+
+    /// Ist ein Hinweis an den Gastgeber fällig? Wahr genau einmal je
+    /// Erschöpfung: der Aufruf merkt sich, dass benachrichtigt wurde.
+    pub fn notice_due(&mut self, limits: &Limits) -> bool {
+        if self.host_notified || !self.used_up(limits) {
+            return false;
+        }
+        self.host_notified = true;
+        true
+    }
+
     /// Beginnt bei null, sobald das Datum wechselt. Das Datum kommt von außen,
     /// damit diese Schicht keine Uhr braucht.
     pub fn start_day(&mut self, today: &str) {
@@ -246,7 +325,7 @@ impl Tally {
 
     /// Wie viele Tokens heute noch zum Übersetzen frei sind.
     pub fn tokens_left(&self, limits: &Limits) -> u64 {
-        limits.translation_tokens_per_day.saturating_sub(self.translation_tokens)
+        self.allowed_today(limits).saturating_sub(self.translation_tokens)
     }
 
     pub fn spend(&mut self, tokens: u64) {
@@ -272,6 +351,17 @@ fn estimate(chars: usize) -> u64 {
 /// Was die KI meldet, wenn der Übersetzungstopf leer ist. Es erscheint als
 /// Grund an der unübersetzt zugestellten Nachricht.
 pub const BUDGET_USED_UP: &str = "today's translation budget is used up";
+
+/// Ging in diesen Zustellungen etwas unübersetzt hinaus, weil das Kontingent
+/// leer war? Die Tür fragt das, um den Gastgeber zu benachrichtigen.
+pub fn budget_ran_out(deliveries: &[Delivery]) -> bool {
+    // Erkannt am Grund, den der Zähler selbst setzt. Ein Ausfall des Anbieters
+    // trägt einen anderen Grund und zählt hier nicht.
+    deliveries.iter().any(|d| match &d.mark {
+        Mark::Untranslated(Reason::Failed(why)) => why.contains(BUDGET_USED_UP),
+        _ => false,
+    })
+}
 
 /// Zählt an der Grenze zur KI, weil dort jeder Aufruf vorbeikommt, auch der
 /// gescheiterte. Ist nichts mehr frei, findet kein Aufruf statt.
@@ -412,6 +502,7 @@ pub async fn converse<M: Model + Sync>(
         text: msg.text,
         answer_lang: &seat.lang,
         context: &context,
+        asker_gender: seat.gender,
     };
     let answer = match ask(model, &question).await {
         Ok(answer) => answer,
@@ -433,9 +524,16 @@ pub async fn converse<M: Model + Sync>(
         from: Sender::Assistant,
     });
     let context = state.lines();
-    out.extend(
-        spread(model, room, &context, msg.channel, ASSISTANT, &answer, Sender::Assistant).await,
-    );
+    let piece = Piece {
+        origin: msg.channel,
+        speaker: ASSISTANT,
+        // Benannte Grenze: die KI hat kein eingestelltes Geschlecht. Spricht
+        // sie in einer Sprache wie Russisch über sich selbst, wählt sie die Form.
+        writer_gender: None,
+        text: &answer,
+        from: Sender::Assistant,
+    };
+    out.extend(spread(model, room, &context, &piece).await);
     drop(context);
     state.remember(ASSISTANT, &answer, room.context_lines);
     out

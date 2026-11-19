@@ -85,6 +85,7 @@ fn question<'a>(context: &'a [Line<'a>]) -> Ask<'a> {
         text: "Fisch, что он имел в виду?",
         answer_lang: "Russian",
         context,
+        asker_gender: None,
     }
 }
 

@@ -45,7 +45,7 @@ fn now<F: Future>(f: F) -> F::Output {
 }
 
 fn seat(channel: &str, lang: &str) -> Seat {
-    Seat { channel: channel.to_owned(), lang: lang.to_owned() }
+    Seat { channel: channel.to_owned(), lang: lang.to_owned(), gender: None }
 }
 
 fn two_seats() -> Room {

@@ -4,7 +4,7 @@
 mod keys;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use rusty_fish_core::{Outcome, Request, translate};
+use rusty_fish_core::{Gender, Outcome, Request, translate};
 use rusty_fish_discord::config::Config;
 use rusty_fish_openai::{OPENAI_BASE_URL, OpenAi, Secret};
 use std::path::PathBuf;
@@ -44,6 +44,12 @@ enum Command {
         /// Address of a service that speaks the OpenAI chat format
         #[arg(long, default_value = OPENAI_BASE_URL)]
         base_url: String,
+        /// Grammatical gender of the writer, for languages that mark it
+        #[arg(long, value_enum)]
+        writer: Option<Who>,
+        /// Grammatical gender of the reader, for languages that mark it
+        #[arg(long, value_enum)]
+        reader: Option<Who>,
         /// The text to translate
         text: String,
     },
@@ -72,6 +78,23 @@ enum KeyAction {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
     },
+}
+
+/// Grammatisches Geschlecht für den Probe-Befehl, damit sich der Hinweis an
+/// die KI mit einem echten Modell messen lässt.
+#[derive(Clone, Copy, ValueEnum)]
+enum Who {
+    Female,
+    Male,
+}
+
+impl Who {
+    fn gender(self) -> Gender {
+        match self {
+            Who::Female => Gender::Female,
+            Who::Male => Gender::Male,
+        }
+    }
 }
 
 /// Die Geheimnisse, die der Fisch kennt. Jedes liegt für sich in der Ablage.
@@ -148,7 +171,7 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Translate { to, keep, model, base_url, text } => {
+        Command::Translate { to, keep, model, base_url, writer, reader, text } => {
             let fish =
                 OpenAi::new(&base_url, &model, stored(Which::Openai)?).map_err(|e| e.to_string())?;
             let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
@@ -158,6 +181,8 @@ async fn run(command: Command) -> Result<(), String> {
                 target_lang: &to,
                 pass_through: &keep,
                 context: &[],
+                writer_gender: writer.map(Who::gender),
+                reader_gender: reader.map(Who::gender),
             };
             match translate(&fish, &request).await.map_err(|e| e.to_string())? {
                 Outcome::Translated(translation) => println!("{translation}"),

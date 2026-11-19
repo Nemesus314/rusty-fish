@@ -25,6 +25,12 @@ pub struct Store {
     translation_tokens: u64,
     #[serde(default)]
     questions: BTreeMap<String, u32>,
+    /// Was der Gastgeber heute nachgelegt hat, und ob er über die laufende
+    /// Erschöpfung schon benachrichtigt ist.
+    #[serde(default)]
+    raised_tokens: u64,
+    #[serde(default)]
+    host_notified: bool,
 }
 
 impl Store {
@@ -68,6 +74,8 @@ impl Store {
             day: self.day.clone(),
             translation_tokens: self.translation_tokens,
             questions: self.questions.clone(),
+            raised_tokens: self.raised_tokens,
+            host_notified: self.host_notified,
         }
     }
 
@@ -76,6 +84,8 @@ impl Store {
         self.day = tally.day.clone();
         self.translation_tokens = tally.translation_tokens;
         self.questions = tally.questions.clone();
+        self.raised_tokens = tally.raised_tokens;
+        self.host_notified = tally.host_notified;
     }
 
     /// Schreibt die Datei so, dass ein Absturz mittendrin sie nicht zerstört:

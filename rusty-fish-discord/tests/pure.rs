@@ -2,9 +2,12 @@
 
 use rusty_fish_discord::clock::utc_date;
 use rusty_fish_discord::config::Config;
-use rusty_fish_discord::render::{chunks, hook_name, render};
+use rusty_fish_discord::render::{
+    KEEP_LABEL, budget_notice, chunks, grouped, hook_name, nothing_to_raise, raise_label,
+    raised_notice, render,
+};
 use rusty_fish_discord::state::Store;
-use rusty_fish_room::{Delivery, Limits, Mark, Reason, Sender, Tally};
+use rusty_fish_room::{Delivery, Gender, Limits, Mark, Reason, Sender, Tally};
 
 const GOOD: &str = r#"
 model = "some-model"
@@ -270,4 +273,107 @@ fn the_store_holds_no_message_text() {
     let raw = std::fs::read_to_string(&path).unwrap();
     assert!(raw.contains("consented") && raw.contains("last_seen"));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+// --- das grammatische Geschlecht je Platz --------------------------------------
+
+fn with_gender(lang: &str, value: &str) -> String {
+    GOOD.replace(
+        &format!("lang = \"{lang}\""),
+        &format!("lang = \"{lang}\"\n  gender = \"{value}\""),
+    )
+}
+
+#[test]
+fn a_seats_gender_is_optional_and_read_when_given() {
+    let c = Config::parse(GOOD).unwrap();
+    assert!(c.rooms[0].seats.iter().all(|s| s.gender.is_none()));
+
+    let c = Config::parse(&with_gender("Russian", "female")).unwrap();
+    assert_eq!(c.seat_of("111").unwrap().gender, None);
+    assert_eq!(c.seat_of("222").unwrap().gender, Some(Gender::Female));
+    assert!(c.seat_of("333").is_none());
+
+    // Groß und Klein und Leerraum sind kein Grund für eine Ablehnung.
+    let c = Config::parse(&with_gender("German", " Male ")).unwrap();
+    assert_eq!(c.seat_of("111").unwrap().gender, Some(Gender::Male));
+}
+
+#[test]
+fn any_other_gender_value_is_refused_loudly() {
+    for bad in ["f", "woman", "", "divers", "none", "femal"] {
+        let err = Config::parse(&with_gender("Russian", bad))
+            .expect_err("a misspelt gender must not silently become no gender");
+        assert!(err.contains("gender"), "expected the field in: {err}");
+        assert!(err.contains("222"), "expected the channel in: {err}");
+    }
+}
+
+#[test]
+fn the_shipped_example_shows_the_gender_setting_commented_out() {
+    let example = include_str!("../../rusty-fish.example.toml");
+    assert!(example.contains("# gender = \"female\""));
+    let filled = example.replace("host = \"000000000000000000\"", "host = \"42\"");
+    let c = Config::parse(&filled).unwrap();
+    assert!(c.rooms[0].seats.iter().all(|s| s.gender.is_none()));
+
+    // Wer das Zeichen davor entfernt, bekommt eine gültige Einstellung.
+    let switched_on = filled.replace("# gender = \"female\"", "gender = \"female\"");
+    let c = Config::parse(&switched_on).unwrap();
+    assert_eq!(c.rooms[0].seats.iter().filter(|s| s.gender == Some(Gender::Female)).count(), 1);
+}
+
+// --- der Hinweis an den Gastgeber ----------------------------------------------
+
+#[test]
+fn the_raise_and_the_notified_mark_survive_a_restart() {
+    let path = temp_file("raise");
+    let mut store = Store::open(&path).unwrap();
+    let tally = Tally {
+        day: "2026-11-19".to_owned(),
+        translation_tokens: 300,
+        raised_tokens: 200,
+        host_notified: true,
+        ..Tally::default()
+    };
+    store.set_tally(&tally);
+    store.save().unwrap();
+
+    let again = Store::open(&path).unwrap();
+    assert_eq!(again.tally(), tally);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn numbers_are_grouped_for_reading() {
+    assert_eq!(grouped(0), "0");
+    assert_eq!(grouped(999), "999");
+    assert_eq!(grouped(1000), "1,000");
+    assert_eq!(grouped(100_000), "100,000");
+    assert_eq!(grouped(1_234_567), "1,234,567");
+}
+
+#[test]
+fn the_notice_to_the_host_names_both_amounts_and_asks() {
+    let text = budget_notice(200_000, 100_000);
+    assert!(text.contains("200,000 tokens"), "got: {text}");
+    assert!(text.contains("another 100,000 tokens"), "got: {text}");
+    assert!(text.contains("untranslated and marked"), "got: {text}");
+    assert!(text.trim_end().ends_with('?'), "it must end with the question: {text}");
+
+    assert_eq!(raise_label(100_000), "Raise by 100,000");
+    // Discord nimmt für Knöpfe höchstens 80 Zeichen.
+    assert!(raise_label(u64::MAX).chars().count() <= 80);
+    assert!(KEEP_LABEL.chars().count() <= 80);
+}
+
+#[test]
+fn the_answers_to_the_host_name_the_state_of_the_day() {
+    let raised = raised_notice(200_000, 95_000);
+    assert!(raised.contains("200,000"), "got: {raised}");
+    assert!(raised.contains("95,000"), "got: {raised}");
+
+    let nothing = nothing_to_raise(100_000, 40_000);
+    assert!(nothing.contains("40,000"), "got: {nothing}");
+    assert!(nothing.contains("100,000"), "got: {nothing}");
 }

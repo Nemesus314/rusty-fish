@@ -26,7 +26,8 @@ host = "000000000000000000"
 # Leave a line out and the value shown here applies.
 [limits]
 # Tokens for translating what people write, for everyone together. When they
-# are used up, messages are still delivered, untranslated and marked.
+# are used up, messages are still delivered, untranslated and marked, and the
+# fish asks you in a direct message whether to add the same amount for today.
 translation_tokens_per_day = 100000
 # Questions to the AI per guest. You as the host have no limit. Questions and
 # the translation of their answers never use up the tokens above.
@@ -48,3 +49,9 @@ context_lines = 10
   [[room.seat]]
   channel = "000000000000000002"
   lang = "Russian"
+  # Optional: "female" or "male", for the person at this seat. Some languages
+  # mark the gender of who speaks and who is spoken to ("I was tired", "did you
+  # sleep?"); with this the AI picks the right forms instead of guessing. It is
+  # passed to the AI as a grammar hint only. Leave it out if several people of
+  # different gender share the seat.
+  # gender = "female"

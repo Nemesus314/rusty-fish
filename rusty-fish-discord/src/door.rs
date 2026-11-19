@@ -12,6 +12,12 @@
 //! - Die Zustimmung lässt sich noch nicht im Chat widerrufen.
 //! - Die KI hat ein eigenes Bild nur, wenn Discord dem Webhook eines gibt; sie
 //!   erscheint unter ihrem Namen mit dem Standardbild.
+//! - Der Hinweis an den Gastgeber bei leerem Kontingent geht als
+//!   Direktnachricht hinaus. Scheitert sie (etwa weil der Gastgeber keine
+//!   Direktnachrichten von Servermitgliedern annimmt), steht der Grund nur in
+//!   der Programmausgabe, und es gibt keinen zweiten Versuch vor der nächsten
+//!   Erhöhung oder dem nächsten Tag. Der Hinweis ist englisch und wird nicht
+//!   übersetzt.
 //!
 //! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Die
 //! Tür reicht nur das heutige Datum und den Tageszähler hinein und legt den
@@ -22,15 +28,20 @@
 
 use crate::clock::today;
 use crate::config::Config;
-use crate::render::{MESSAGE_LIMIT, chunks, hook_name, render};
+use crate::render::{
+    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, hook_name,
+    nothing_to_raise, raise_label, raised_notice, render,
+};
 use crate::state::Store;
 use rusty_fish_core::{Model, Outcome, Request, translate};
-use rusty_fish_room::{House, Incoming, Metered, RoomState, Sender, Tally, converse};
+use rusty_fish_room::{
+    House, Incoming, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
+};
 use serenity::all::{
-    ButtonStyle, ChannelId, Client, Context, CreateAllowedMentions, CreateButton,
-    CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage, CreateWebhook,
-    EventHandler, ExecuteWebhook, GatewayIntents, GetMessages, Http, Interaction, Message,
-    MessageId, Ready, UserId, Webhook,
+    ButtonStyle, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
+    CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
+    CreateWebhook, EditInteractionResponse, EventHandler, ExecuteWebhook, GatewayIntents,
+    GetMessages, Http, Interaction, Message, MessageId, Ready, UserId, Webhook,
 };
 use serenity::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -38,6 +49,9 @@ use std::path::Path;
 use tokio::sync::Mutex;
 
 const CONSENT_BUTTON: &str = "rusty-fish-consent";
+/// Die beiden Knöpfe am Hinweis an den Gastgeber.
+const RAISE_BUTTON: &str = "rusty-fish-raise";
+const KEEP_BUTTON: &str = "rusty-fish-keep";
 const WEBHOOK_NAME: &str = "Rusty Fish";
 
 /// Der Text, mit dem der Fisch um Zustimmung bittet. Er wird in die Sprache
@@ -104,9 +118,20 @@ where
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         let Interaction::Component(click) = interaction else { return };
-        if click.data.custom_id != CONSENT_BUTTON {
-            return;
+        match click.data.custom_id.as_str() {
+            CONSENT_BUTTON => self.consent_clicked(&ctx.http, &click).await,
+            RAISE_BUTTON | KEEP_BUTTON => self.budget_clicked(&ctx.http, &click).await,
+            _ => {}
         }
+    }
+}
+
+impl<M> Fish<M>
+where
+    M: Model + Send + Sync + 'static,
+{
+    /// Jemand hat den Knopf unter der Bitte um Zustimmung gedrückt.
+    async fn consent_clicked(&self, http: &Http, click: &ComponentInteraction) {
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
         let saved = {
             let mut inner = self.inner.lock().await;
@@ -123,16 +148,83 @@ where
         let response = CreateInteractionResponse::Message(
             CreateInteractionResponseMessage::new().content(reply).ephemeral(true),
         );
-        if let Err(why) = click.create_response(&ctx.http, response).await {
+        if let Err(why) = click.create_response(http, response).await {
             eprintln!("rusty-fish: cannot confirm the consent: {why}");
         }
     }
-}
 
-impl<M> Fish<M>
-where
-    M: Model + Send + Sync + 'static,
-{
+    /// Jemand hat einen Knopf am Hinweis zum leeren Kontingent gedrückt.
+    async fn budget_clicked(&self, http: &Http, click: &ComponentInteraction) {
+        // Nur der Klick des Gastgebers zählt: es ist sein Schlüssel und sein Geld.
+        if click.user.id.to_string() != self.config.host {
+            let response = CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new().content(NOT_THE_HOST).ephemeral(true),
+            );
+            if let Err(why) = click.create_response(http, response).await {
+                eprintln!("rusty-fish: cannot answer a click on the budget notice: {why}");
+            }
+            return;
+        }
+
+        // Discord will binnen drei Sekunden eine Antwort. Das Schloss kann
+        // länger besetzt sein, solange eine Nachricht übersetzt wird. Deshalb
+        // erst quittieren, dann rechnen, dann den Hinweis ersetzen.
+        if let Err(why) = click.defer(http).await {
+            eprintln!("rusty-fish: cannot acknowledge the host's click: {why}");
+        }
+
+        let text = if click.data.custom_id == KEEP_BUTTON {
+            KEPT_NOTICE.to_owned()
+        } else {
+            let limits = &self.config.limits;
+            let mut inner = self.inner.lock().await;
+            let mut tally = inner.store.tally();
+            // Seit der Hinweis hinausging, kann ein neuer Tag begonnen haben.
+            tally.start_day(&today());
+            let raised = tally.raise(limits);
+            let (allowed, left) = (tally.allowed_today(limits), tally.tokens_left(limits));
+            inner.store.set_tally(&tally);
+            if let Err(why) = inner.store.save() {
+                eprintln!("rusty-fish: {why}");
+            }
+            if raised { raised_notice(allowed, left) } else { nothing_to_raise(allowed, left) }
+        };
+
+        // Die Antwort ersetzt den Hinweis und nimmt die Knöpfe weg, damit kein
+        // alter Knopf stehen bleibt.
+        let edit = EditInteractionResponse::new().content(text).components(Vec::new());
+        if let Err(why) = click.edit_response(http, edit).await {
+            eprintln!("rusty-fish: cannot answer the host: {why}");
+        }
+    }
+
+    /// Sagt dem Gastgeber, und nur ihm, dass das heutige Kontingent verbraucht
+    /// ist, und fragt, ob er um denselben Betrag erhöhen will.
+    ///
+    /// Nemesus am 19.11.2026: „Meine Idee wäre eine Systemnachricht, der nur an
+    /// den Gastgeber geht. Gleich mit Abfage, ob er es wieder um den selben
+    /// Betrag erhöhen soll, mit Beitragnennung".
+    async fn notify_host(&self, http: &Http, tally: &Tally) {
+        let Ok(id) = self.config.host.parse::<u64>() else { return };
+        let limits = &self.config.limits;
+        let step = limits.translation_tokens_per_day;
+        let message = CreateMessage::new()
+            .content(budget_notice(tally.allowed_today(limits), step))
+            .button(
+                CreateButton::new(RAISE_BUTTON)
+                    .label(raise_label(step))
+                    .style(ButtonStyle::Success),
+            )
+            .button(CreateButton::new(KEEP_BUTTON).label(KEEP_LABEL).style(ButtonStyle::Secondary));
+        let sent = match UserId::new(id).create_dm_channel(http).await {
+            Ok(dm) => dm.id.send_message(http, message).await.map(|_| ()),
+            Err(why) => Err(why),
+        };
+        if let Err(why) = sent {
+            eprintln!("rusty-fish: cannot tell the host that the budget is used up: {why}");
+        }
+    }
+
     /// Eine Nachricht aus einem Kanal: an alle anderen Plätze des Raums verteilen.
     async fn handle(&self, http: &Http, msg: &Message) {
         // Was der Fisch selbst abgesetzt hat, darf nicht wieder hereinkommen.
@@ -202,6 +294,12 @@ where
             self.ask_consent(http, msg.channel_id, &channel, &mut tally).await;
         }
 
+        // Ging etwas unübersetzt hinaus, weil das Kontingent leer ist, erfährt
+        // es der Gastgeber, einmal je Erschöpfung.
+        if budget_ran_out(&deliveries) && tally.notice_due(&self.config.limits) {
+            self.notify_host(http, &tally).await;
+        }
+
         inner.store.set_tally(&tally);
         inner.store.saw(&channel, msg.id.get());
         if let Err(why) = inner.store.save() {
@@ -217,13 +315,17 @@ where
         channel: &str,
         tally: &mut Tally,
     ) {
-        let lang = self.config.lang_of(channel).unwrap_or("English");
+        let seat = self.config.seat_of(channel);
+        let lang = seat.map(|s| s.lang.as_str()).unwrap_or("English");
         let request = Request {
             speaker: "fish",
             text: CONSENT_TEXT,
             target_lang: lang,
             pass_through: &[],
             context: &[],
+            writer_gender: None,
+            // Die Bitte spricht die Person an diesem Platz an.
+            reader_gender: seat.and_then(|s| s.gender),
         };
         // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist er
         // leer, fragt der Fisch auf Englisch.

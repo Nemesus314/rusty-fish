@@ -59,6 +59,8 @@ fn request<'a>(text: &'a str) -> Request<'a> {
         target_lang: "Russian",
         pass_through: &["English"],
         context: &[],
+        writer_gender: None,
+        reader_gender: None,
     }
 }
 

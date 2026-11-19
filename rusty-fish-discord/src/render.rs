@@ -23,6 +23,75 @@ pub fn render(delivery: &Delivery) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Der Hinweis an den Gastgeber, wenn das Übersetzungskontingent leer ist
+//
+// Nemesus am 19.11.2026: „Meine Idee wäre eine Systemnachricht, der nur an den
+// Gastgeber geht. Gleich mit Abfage, ob er es wieder um den selben Betrag
+// erhöhen soll, mit Beitragnennung".
+// ---------------------------------------------------------------------------
+
+/// Eine Zahl mit Tausendertrennern, wie im Englischen üblich: 100,000.
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+/// Die Direktnachricht an den Gastgeber. `allowed` ist, was heute insgesamt
+/// erlaubt war, `step` der eingestellte Tagesbetrag, um den erhöht würde.
+/// Genannt werden Tokens, kein Geld: der Fisch kennt die Preise der Anbieter nicht.
+pub fn budget_notice(allowed: u64, step: u64) -> String {
+    format!(
+        "Rusty Fish: today's translation budget of {} tokens is used up. Messages still \
+         arrive, untranslated and marked. Do you want to raise today's budget by another {} \
+         tokens?",
+        grouped(allowed),
+        grouped(step)
+    )
+}
+
+/// Beschriftung des Knopfs zum Erhöhen, mit Betrag.
+pub fn raise_label(step: u64) -> String {
+    format!("Raise by {}", grouped(step))
+}
+
+/// Beschriftung des Knopfs, mit dem der Gastgeber es dabei belässt.
+pub const KEEP_LABEL: &str = "Leave it";
+
+/// Bestätigung nach dem Erhöhen, mit dem neuen Tagesstand.
+pub fn raised_notice(allowed: u64, left: u64) -> String {
+    format!(
+        "Raised. Today's translation budget is now {} tokens, {} of them are left. \
+         Translation continues with the next message.",
+        grouped(allowed),
+        grouped(left)
+    )
+}
+
+/// Antwort, wenn es nichts zu erhöhen gibt: ein zweiter Klick, oder ein neuer
+/// Tag hat inzwischen begonnen.
+pub fn nothing_to_raise(allowed: u64, left: u64) -> String {
+    format!(
+        "Nothing to raise: {} of today's {} tokens are still left.",
+        grouped(left),
+        grouped(allowed)
+    )
+}
+
+/// Antwort, wenn der Gastgeber es dabei belässt.
+pub const KEPT_NOTICE: &str = "Left as it is. Messages keep arriving, untranslated and marked, \
+    until the new day begins (UTC).";
+
+/// Antwort an jemanden, der nicht der Gastgeber ist und trotzdem drückt.
+pub const NOT_THE_HOST: &str = "Only the host can decide this.";
+
 /// Teilt einen Text in Stücke, die Discord annimmt. Nichts geht verloren.
 pub fn chunks(text: &str, limit: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
