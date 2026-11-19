@@ -403,6 +403,81 @@ fn the_shipped_example_shows_the_gender_setting_commented_out() {
     assert_eq!(c.rooms[0].seats.iter().filter(|s| s.gender == Some(Gender::Female)).count(), 1);
 }
 
+// --- das grammatische Geschlecht je Person -------------------------------------
+
+fn with_people(block: &str) -> String {
+    format!("{GOOD}\n{block}")
+}
+
+#[test]
+fn a_persons_gender_is_optional_and_read_when_given() {
+    let c = Config::parse(GOOD).unwrap();
+    assert!(c.people.is_empty());
+    assert_eq!(c.gender_of("777"), None);
+
+    let c = Config::parse(&with_people(
+        "[[person]]\nid = \"777\"\ngender = \"female\"\n\n[[person]]\nid = \" 888 \"\ngender = \" Male \"\n",
+    ))
+    .unwrap();
+    assert_eq!(c.gender_of("777"), Some(Gender::Female));
+    // Groß und Klein und Leerraum sind kein Grund für eine Ablehnung.
+    assert_eq!(c.gender_of("888"), Some(Gender::Male));
+    assert_eq!(c.gender_of("999"), None);
+}
+
+#[test]
+fn the_person_goes_before_the_seat_and_the_seat_before_nothing() {
+    // Platz 111 (German) ist männlich, Platz 222 (Russian) sagt nichts.
+    let text = with_gender("German", "male") + "\n[[person]]\nid = \"777\"\ngender = \"female\"\n";
+    let c = Config::parse(&text).unwrap();
+    assert_eq!(c.gender_for("777", "111"), Some(Gender::Female), "the person decides");
+    assert_eq!(c.gender_for("777", "222"), Some(Gender::Female), "at every seat");
+    assert_eq!(c.gender_for("555", "111"), Some(Gender::Male), "else the seat decides");
+    assert_eq!(c.gender_for("555", "222"), None, "else nothing is said");
+    assert_eq!(c.gender_for("555", "333"), None, "a channel outside every room");
+}
+
+#[test]
+fn a_wrong_person_entry_is_refused_loudly() {
+    for bad in ["f", "woman", "", "divers"] {
+        let text = with_people(&format!("[[person]]\nid = \"777\"\ngender = \"{bad}\"\n"));
+        let err = Config::parse(&text)
+            .expect_err("a misspelt gender must not silently become no gender");
+        assert!(err.contains("gender"), "expected the field in: {err}");
+        assert!(err.contains("777"), "expected the person in: {err}");
+    }
+    // Ein Name ist keine Discord-Kennung.
+    refused(&with_people("[[person]]\nid = \"quokka\"\ngender = \"female\"\n"), "quokka");
+    // Zwei Angaben zur selben Person widersprächen sich oder wären ein Versehen.
+    refused(
+        &with_people(
+            "[[person]]\nid = \"777\"\ngender = \"female\"\n\n[[person]]\nid = \"777\"\ngender = \"male\"\n",
+        ),
+        "777",
+    );
+    // Ein Eintrag ohne Angabe sagt nichts und ist deshalb ein Versehen.
+    refused(&with_people("[[person]]\nid = \"777\"\n"), "gender");
+    refused(&with_people("[[person]]\nid = \"777\"\ngender = \"female\"\nnick = \"x\"\n"), "nick");
+}
+
+#[test]
+fn the_shipped_example_shows_a_person_commented_out() {
+    let example = include_str!("../../rusty-fish.example.toml");
+    assert!(example.contains("# [[person]]"));
+    let filled = example.replace("host = \"000000000000000000\"", "host = \"42\"");
+    let c = Config::parse(&filled).unwrap();
+    assert!(c.people.is_empty());
+
+    // Wer die Zeichen davor entfernt, bekommt eine gültige Einstellung.
+    let switched_on = filled
+        .replace("# [[person]]", "[[person]]")
+        .replace("# id = \"000000000000000003\"", "id = \"000000000000000003\"")
+        .replace("# gender = \"male\"", "gender = \"male\"");
+    let c = Config::parse(&switched_on).unwrap();
+    assert_eq!(c.gender_of("000000000000000003"), Some(Gender::Male));
+    assert!(c.rooms[0].seats.iter().all(|s| s.gender.is_none()));
+}
+
 // --- der Hinweis an den Gastgeber ----------------------------------------------
 
 #[test]

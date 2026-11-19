@@ -35,11 +35,17 @@ pub struct Seat {
     pub channel: String,
     /// Sprache der Leser an diesem Platz, als Wort ("Russian").
     pub lang: String,
-    /// Grammatisches Geschlecht der Person an diesem Platz, freiwillig. Es gilt
-    /// für das, was sie schreibt, und für das, was sie liest.
+    /// Grammatisches Geschlecht der Person, die gewöhnlich an diesem Platz
+    /// sitzt, freiwillig. Es gilt für das, was hier gelesen wird, und für das,
+    /// was hier jemand schreibt, über den die Tür nichts Eigenes weiß (siehe
+    /// [`Incoming::author_gender`]).
     ///
-    /// Benannte Grenze: sitzen an einem Platz mehrere Menschen verschiedenen
-    /// Geschlechts, bleibt die Angabe weg. Dann wählt die KI wie bisher selbst.
+    /// Benannte Grenzen:
+    /// - Sitzen an einem Platz mehrere Menschen verschiedenen Geschlechts,
+    ///   bleibt die Angabe weg. Dann wählt die KI wie bisher selbst.
+    /// - Der Leser ist immer „wer hier gewöhnlich sitzt". Wer wirklich
+    ///   mitliest, weiß der Fisch nicht: schaut jemand am Platz des anderen
+    ///   zu, liest er dort Sätze, deren Anrede dem anderen gilt.
     pub gender: Option<Gender>,
 }
 
@@ -68,6 +74,14 @@ pub struct Incoming<'a> {
     pub text: &'a str,
     /// Hat der Schreibende zugestimmt, dass eine KI seine Sätze liest?
     pub consented: bool,
+    /// Grammatisches Geschlecht des Schreibenden selbst, falls die Tür es für
+    /// diese Person kennt. Es geht der Angabe des Platzes vor.
+    ///
+    /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
+    /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
+    /// reinschalten." Hinge das Geschlecht nur am Platz, bekäme, wer am Platz
+    /// des anderen schreibt, dessen Formen.
+    pub author_gender: Option<Gender>,
 }
 
 /// Wie eine Zustellung zu kennzeichnen ist.
@@ -143,8 +157,7 @@ pub async fn relay<M: Model + Sync>(
     let piece = Piece {
         origin: msg.channel,
         speaker: msg.author,
-        // Wer an einem Platz schreibt, hat das Geschlecht dieses Platzes.
-        writer_gender: origin.gender,
+        writer_gender: writer_gender(msg, origin),
         text: msg.text,
         from: Sender::Writer,
     };
@@ -154,13 +167,19 @@ pub async fn relay<M: Model + Sync>(
     out
 }
 
+/// Das grammatische Geschlecht dessen, der schreibt: zuerst die Angabe zur
+/// Person, sonst die des Platzes, an dem geschrieben wird, sonst keine.
+fn writer_gender(msg: &Incoming<'_>, seat: &Seat) -> Option<Gender> {
+    msg.author_gender.or(seat.gender)
+}
+
 /// Ein Text auf dem Weg an die anderen Plätze.
 struct Piece<'a> {
     /// Der Kanal, an dem der Text entstand. Dorthin geht er nicht noch einmal.
     origin: &'a str,
     speaker: &'a str,
-    /// Geschlecht des Schreibenden, falls sein Platz es angibt. Die KI als
-    /// Schreibende hat keines.
+    /// Geschlecht des Schreibenden, falls es für ihn selbst oder für seinen
+    /// Platz angegeben ist. Die KI als Schreibende hat keines.
     writer_gender: Option<Gender>,
     text: &'a str,
     from: Sender,
@@ -511,7 +530,7 @@ pub async fn converse<M: Model + Sync>(
         text: msg.text,
         answer_lang: &seat.lang,
         context: &context,
-        asker_gender: seat.gender,
+        asker_gender: writer_gender(msg, seat),
     };
     let answer = match ask(model, &question).await {
         Ok(answer) => answer,

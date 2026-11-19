@@ -3,6 +3,7 @@
 
 use rusty_fish_room::{Gender, Limits, Room, Seat};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -22,6 +23,14 @@ pub struct Config {
     /// Was der Gastgeber pro Tag erlaubt.
     pub limits: Limits,
     pub rooms: Vec<Room>,
+    /// Was der Gastgeber über einzelne Menschen eingetragen hat: Discord-
+    /// Kennung und grammatisches Geschlecht. Freiwillig.
+    ///
+    /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
+    /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
+    /// reinschalten." Seine Frage, weil das Geschlecht bis dahin am Platz
+    /// hing: „Wie können wir das ändern?"
+    pub people: BTreeMap<String, Gender>,
 }
 
 #[derive(Deserialize)]
@@ -35,6 +44,15 @@ struct RawConfig {
     limits: RawLimits,
     #[serde(rename = "room", default)]
     rooms: Vec<RawRoom>,
+    #[serde(rename = "person", default)]
+    people: Vec<RawPerson>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPerson {
+    id: String,
+    gender: String,
 }
 
 /// `ai_name` darf ein einzelner Text sein, wie von Anfang an, oder eine Liste.
@@ -108,7 +126,7 @@ impl Config {
                     return Err(format!("configuration: channel {channel} is used twice"));
                 }
                 taken.push(channel.clone());
-                let gender = read_gender(seat.gender.as_deref(), &channel)?;
+                let gender = read_gender(seat.gender.as_deref(), &format!("channel {channel}"))?;
                 seats.push(Seat { channel, lang, gender });
             }
             rooms.push(Room {
@@ -131,7 +149,33 @@ impl Config {
                 .questions_per_guest_per_day
                 .unwrap_or(defaults.questions_per_guest_per_day),
         };
-        Ok(Config { model, base_url, host, ai_names, limits, rooms })
+        let mut people = BTreeMap::new();
+        for person in raw.people {
+            let id = discord_id(&person.id, "id")?;
+            // Ein Eintrag ohne brauchbare Angabe sagt nichts; deshalb ist das
+            // Geschlecht hier Pflicht und wird wie beim Platz streng geprüft.
+            let Some(gender) = read_gender(Some(&person.gender), &format!("person {id}"))? else {
+                continue;
+            };
+            // Zwei Einträge zur selben Person wären ein Versehen oder ein Widerspruch.
+            if people.insert(id.clone(), gender).is_some() {
+                return Err(format!("configuration: person {id} is listed twice"));
+            }
+        }
+        Ok(Config { model, base_url, host, ai_names, limits, rooms, people })
+    }
+
+    /// Das grammatische Geschlecht, das der Gastgeber für diese Person
+    /// eingetragen hat.
+    pub fn gender_of(&self, user: &str) -> Option<Gender> {
+        self.people.get(user).copied()
+    }
+
+    /// Das grammatische Geschlecht für jemanden, der an diesem Kanal schreibt
+    /// oder dort angesprochen wird: zuerst die Angabe zur Person, sonst die
+    /// des Platzes, sonst keine.
+    pub fn gender_for(&self, user: &str, channel: &str) -> Option<Gender> {
+        self.gender_of(user).or_else(|| self.seat_of(channel).and_then(|s| s.gender))
     }
 
     /// Der Name, unter dem die KI erscheint: ihr erster Rufname.
@@ -182,17 +226,17 @@ fn read_names(raw: Option<RawNames>) -> Result<Vec<String>, String> {
     }
 }
 
-/// Liest die freiwillige Angabe zum grammatischen Geschlecht eines Platzes.
-/// Erlaubt sind "female" und "male"; alles andere wird laut abgelehnt, damit
-/// ein Tippfehler nicht still zu „keine Angabe" wird.
-fn read_gender(value: Option<&str>, channel: &str) -> Result<Option<Gender>, String> {
+/// Liest die Angabe zum grammatischen Geschlecht eines Platzes oder einer
+/// Person. Erlaubt sind "female" und "male"; alles andere wird laut abgelehnt,
+/// damit ein Tippfehler nicht still zu „keine Angabe" wird. `whose` nennt in
+/// der Fehlermeldung die Stelle, etwa "channel 222" oder "person 777".
+fn read_gender(value: Option<&str>, whose: &str) -> Result<Option<Gender>, String> {
     let Some(value) = value else { return Ok(None) };
     match value.trim().to_ascii_lowercase().as_str() {
         "female" => Ok(Some(Gender::Female)),
         "male" => Ok(Some(Gender::Male)),
         _ => Err(format!(
-            "configuration: `gender` for channel {channel} must be \"female\" or \"male\" \
-             (or be left out), got {value:?}"
+            "configuration: `gender` for {whose} must be \"female\" or \"male\", got {value:?}"
         )),
     }
 }

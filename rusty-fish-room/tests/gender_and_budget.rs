@@ -67,7 +67,17 @@ fn room(seats: Vec<Seat>) -> Room {
 }
 
 fn from<'a>(channel: &'a str, author: &'a str, text: &'a str) -> Incoming<'a> {
-    Incoming { channel, author, text, consented: true }
+    Incoming { channel, author, text, consented: true, author_gender: None }
+}
+
+/// Wie `from`, aber die Tür kennt das Geschlecht dieser Person.
+fn from_person<'a>(
+    channel: &'a str,
+    author: &'a str,
+    text: &'a str,
+    gender: Gender,
+) -> Incoming<'a> {
+    Incoming { channel, author, text, consented: true, author_gender: Some(gender) }
 }
 
 const WRITER_IS: &str = "The writer of the text is";
@@ -177,6 +187,79 @@ fn an_asker_without_the_setting_gets_no_hint_and_the_ai_has_no_gender_as_a_write
     assert!(answer_translation.user.contains("ANSWER"));
     assert!(answer_translation.system.contains("The reader of your translation is a woman"));
     assert!(!answer_translation.system.contains(WRITER_IS), "got: {}", answer_translation.system);
+}
+
+// --- das grammatische Geschlecht der Person geht dem des Platzes vor ---------
+
+#[test]
+fn a_person_with_their_own_setting_keeps_their_forms_at_the_other_seat() {
+    let room = room(vec![
+        seat("de", "German", Some(Gender::Male)),
+        seat("ru", "Russian", Some(Gender::Female)),
+    ]);
+    let fake = Fake::new();
+    let mut state = RoomState::default();
+    // Sie schreibt am deutschen Platz, an dem sonst ein Mann sitzt.
+    let msg = from_person("de", "quokka#2", "Я устала.", Gender::Female);
+    let _ = now(relay(&fake, &room, &mut state, &msg));
+
+    let p = fake.translations().pop().unwrap();
+    assert!(p.system.contains("The writer of the text is a woman."), "got: {}", p.system);
+    assert!(!p.system.contains("The writer of the text is a man."), "got: {}", p.system);
+    // Der Leser bleibt der Zielplatz: wer dort gewöhnlich sitzt.
+    assert!(p.system.contains("The reader of your translation is a woman"), "got: {}", p.system);
+}
+
+#[test]
+fn without_a_personal_setting_the_seat_decides_as_before() {
+    let room = room(vec![
+        seat("de", "German", Some(Gender::Male)),
+        seat("ru", "Russian", Some(Gender::Female)),
+    ]);
+    let fake = Fake::new();
+    let mut state = RoomState::default();
+    let _ = now(relay(&fake, &room, &mut state, &from("de", "quokka#2", "Я устала.")));
+    let p = fake.translations().pop().unwrap();
+    assert!(p.system.contains("The writer of the text is a man."), "got: {}", p.system);
+}
+
+#[test]
+fn a_personal_setting_is_enough_when_the_seats_say_nothing() {
+    let room = room(vec![seat("de", "German", None), seat("ru", "Russian", None)]);
+    let fake = Fake::new();
+    let mut state = RoomState::default();
+    let msg = from_person("ru", "zebra#1", "Ich war müde.", Gender::Male);
+    let _ = now(relay(&fake, &room, &mut state, &msg));
+    let p = fake.translations().pop().unwrap();
+    assert!(p.system.contains("The writer of the text is a man."), "got: {}", p.system);
+    assert!(!p.system.contains(READER_IS), "got: {}", p.system);
+}
+
+#[test]
+fn the_askers_own_gender_goes_before_the_seats_in_a_question() {
+    let room = room(vec![
+        seat("de", "German", Some(Gender::Male)),
+        seat("ru", "Russian", Some(Gender::Female)),
+    ]);
+    let limits = Limits { translation_tokens_per_day: 10_000, questions_per_guest_per_day: 5 };
+
+    // Mit eigener Angabe am fremden Platz.
+    let fake = Fake::new();
+    let mut state = RoomState::default();
+    let mut tally = Tally::default();
+    let msg = from_person("de", "quokka#2", "Fisch, что это значит?", Gender::Female);
+    let _ = now(converse(&fake, &room, &mut state, &mut tally, &house(&limits, DAY), &msg, false));
+    let q = fake.questions().pop().unwrap();
+    assert!(q.system.contains("The person who addressed you is a woman."), "got: {}", q.system);
+
+    // Ohne eigene Angabe gilt der Platz, wie bisher.
+    let fake = Fake::new();
+    let mut state = RoomState::default();
+    let mut tally = Tally::default();
+    let msg = from("de", "quokka#2", "Fisch, что это значит?");
+    let _ = now(converse(&fake, &room, &mut state, &mut tally, &house(&limits, DAY), &msg, false));
+    let q = fake.questions().pop().unwrap();
+    assert!(q.system.contains("The person who addressed you is a man."), "got: {}", q.system);
 }
 
 // --- der Hinweis an den Gastgeber --------------------------------------------

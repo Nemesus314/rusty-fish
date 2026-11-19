@@ -60,3 +60,11 @@ context_lines = 10
   # passed to the AI as a grammar hint only. Leave it out if several people of
   # different gender share the seat.
   # gender = "female"
+
+# Optional, as often as you like: the same grammar hint for one person, by
+# Discord user id (right-click the person -> Copy User ID). A person's own
+# entry goes before the gender of the seat, so people keep their own forms
+# when they write at someone else's seat.
+# [[person]]
+# id = "000000000000000003"
+# gender = "male"

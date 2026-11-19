@@ -287,7 +287,15 @@ where
             .first()
             .and_then(|name| mention_as_call(&msg.content, self.me.load(Ordering::Relaxed), name));
         let text = called.as_deref().unwrap_or(&msg.content);
-        let incoming = Incoming { channel: &channel, author: &author, text, consented };
+        let incoming = Incoming {
+            channel: &channel,
+            author: &author,
+            text,
+            consented,
+            // Die Raum-Logik kennt keine Discord-Kennungen. Was der Gastgeber
+            // über diese Person eingetragen hat, reicht die Tür hinein.
+            author_gender: self.config.gender_of(&author),
+        };
         let room = &self.config.rooms[room_index];
         let today = today();
         let house = House { limits: &self.config.limits, ai_names: &names, today: &today };
@@ -329,7 +337,7 @@ where
         }
 
         if !consented && inner.asked.insert(msg.author.id) {
-            self.ask_consent(http, msg.channel_id, &channel, &mut tally).await;
+            self.ask_consent(http, msg.channel_id, &channel, &author, &mut tally).await;
         }
 
         // Ging etwas unübersetzt hinaus, weil das Kontingent leer ist, erfährt
@@ -351,6 +359,7 @@ where
         http: &Http,
         channel_id: ChannelId,
         channel: &str,
+        author: &str,
         tally: &mut Tally,
     ) {
         let seat = self.config.seat_of(channel);
@@ -363,8 +372,9 @@ where
             pass_through: &[],
             context: &[],
             writer_gender: None,
-            // Die Bitte spricht die Person an diesem Platz an.
-            reader_gender: seat.and_then(|s| s.gender),
+            // Die Bitte spricht den Menschen an, der eben geschrieben hat:
+            // zuerst die Angabe zu ihm selbst, sonst die des Platzes.
+            reader_gender: self.config.gender_for(author, channel),
             // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
             informal: true,
         };

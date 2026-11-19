@@ -57,7 +57,7 @@ fn two_seats() -> Room {
 }
 
 fn from<'a>(channel: &'a str, author: &'a str, text: &'a str) -> Incoming<'a> {
-    Incoming { channel, author, text, consented: true }
+    Incoming { channel, author, text, consented: true, author_gender: None }
 }
 
 #[test]

@@ -76,7 +76,7 @@ fn room() -> Room {
 }
 
 fn from<'a>(channel: &'a str, author: &'a str, text: &'a str) -> Incoming<'a> {
-    Incoming { channel, author, text, consented: true }
+    Incoming { channel, author, text, consented: true, author_gender: None }
 }
 
 /// Ein Haus mit Namen für die KI und den gegebenen Grenzen.
