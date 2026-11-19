@@ -35,7 +35,7 @@ use crate::clock::today;
 use crate::config::Config;
 use crate::mention::mention_as_call;
 use crate::render::{
-    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, hook_name,
+    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, consent_text, hook_name,
     nothing_to_raise, raise_label, raised_notice, render,
 };
 use crate::state::Store;
@@ -64,14 +64,11 @@ const WEBHOOK_NAME: &str = "Rusty Fish";
 /// Der Text, mit dem der Fisch um Zustimmung bittet. Er wird in die Sprache
 /// des Platzes übersetzt; er enthält kein Wort eines Menschen, deshalb darf
 /// er vor der Zustimmung zur KI.
-const CONSENT_TEXT: &str = "Hello! I am Rusty Fish, a translation bot. In this channel everyone \
-    writes in their own language, and an AI translates in between. To do that, the AI reads what \
-    you write here. Nothing you write is sent to the AI before you agree. Press OK to agree. \
-    Until then your messages are passed on untranslated.";
-
 struct Fish<M> {
     model: M,
     config: Config,
+    /// Der Name des KI-Dienstes, wie er in der Bitte um Zustimmung steht.
+    service: String,
     /// Die Benutzer-ID des Bots selbst, bekannt ab dem Ready-Ereignis. Null
     /// heißt: noch nicht bekannt. Gebraucht wird sie, um die echte Erwähnung
     /// des Bots am Anfang einer Nachricht zu erkennen.
@@ -91,7 +88,16 @@ struct Inner {
 }
 
 /// Startet die Tür und läuft, bis die Verbindung endet.
-pub async fn run<M>(token: &str, config: Config, state_path: &Path, model: M) -> Result<(), String>
+///
+/// `service` ist der Name des KI-Dienstes, zu dem `model` spricht. Er kommt
+/// vom Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
+pub async fn run<M>(
+    token: &str,
+    config: Config,
+    state_path: &Path,
+    model: M,
+    service: &str,
+) -> Result<(), String>
 where
     M: Model + Send + Sync + 'static,
 {
@@ -100,6 +106,7 @@ where
     let fish = Fish {
         model,
         config,
+        service: service.to_owned(),
         me: AtomicU64::new(0),
         inner: Mutex::new(Inner { states, store, hooks: HashMap::new(), asked: HashSet::new() }),
     };
@@ -348,9 +355,10 @@ where
     ) {
         let seat = self.config.seat_of(channel);
         let lang = seat.map(|s| s.lang.as_str()).unwrap_or("English");
+        let base = consent_text(&self.service);
         let request = Request {
             speaker: "fish",
-            text: CONSENT_TEXT,
+            text: &base,
             target_lang: lang,
             pass_through: &[],
             context: &[],
@@ -368,7 +376,7 @@ where
         let text = match translated {
             Ok(Outcome::Translated(t)) => t,
             // Lieber auf Englisch fragen als gar nicht.
-            _ => CONSENT_TEXT.to_owned(),
+            _ => base.clone(),
         };
         // „OK" statt eines Satzes: ein Satz wie „Ich stimme zu" hat in manchen
         // Sprachen ein Geschlecht, und der Fisch weiß nicht, wer drückt.

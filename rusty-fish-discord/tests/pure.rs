@@ -457,3 +457,22 @@ fn the_answers_to_the_host_name_the_state_of_the_day() {
     assert!(nothing.contains("40,000"), "got: {nothing}");
     assert!(nothing.contains("100,000"), "got: {nothing}");
 }
+
+#[test]
+fn the_service_is_named_the_way_a_person_recognises_it() {
+    use rusty_fish_discord::render::service_name;
+    assert_eq!(service_name("https://api.openai.com/v1"), "api.openai.com");
+    assert_eq!(service_name(" https://api.openai.com/v1/ "), "api.openai.com");
+    assert_eq!(service_name("http://localhost:11434/v1"), "localhost:11434");
+    assert_eq!(service_name("example.org"), "example.org");
+}
+
+#[test]
+fn the_consent_prompt_says_whose_service_reads_along() {
+    use rusty_fish_discord::render::consent_text;
+    let text = consent_text("api.openai.com");
+    assert!(text.contains("api.openai.com"));
+    assert!(text.contains("chosen by the host"));
+    assert!(text.contains("before you agree"));
+    assert!(text.contains("OK"));
+}

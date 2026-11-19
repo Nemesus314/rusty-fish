@@ -206,7 +206,10 @@ async fn run(command: Command) -> Result<(), String> {
             let fish = OpenAi::new(&base_url, &config.model, key).map_err(|e| e.to_string())?;
             // Der Zustand liegt neben den Einstellungen: rusty-fish.state.json
             let state_path = path.with_extension("state.json");
-            rusty_fish_discord::door::run(token.expose(), config, &state_path, fish).await
+            // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt
+            // wird, damit die Bitte um Zustimmung nichts anderes nennt.
+            let service = rusty_fish_discord::render::service_name(&base_url);
+            rusty_fish_discord::door::run(token.expose(), config, &state_path, fish, &service).await
         }
     }
 }

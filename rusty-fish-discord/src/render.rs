@@ -132,3 +132,30 @@ pub fn hook_name(name: &str) -> String {
     }
     if out.trim().is_empty() { "Guest".to_owned() } else { out }
 }
+
+/// Der Name des KI-Dienstes, so wie ein Mensch ihn wiedererkennt: der
+/// Rechnername aus der Adresse, ohne Protokoll und Pfad.
+pub fn service_name(base_url: &str) -> String {
+    let url = base_url.trim();
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
+    rest.split('/').next().unwrap_or(rest).to_owned()
+}
+
+/// Der Text, mit dem der Fisch um Zustimmung bittet. Er wird in die Sprache
+/// des Platzes übersetzt; er enthält kein Wort eines Menschen, deshalb darf
+/// er vor der Zustimmung zur KI.
+///
+/// Entschieden von Nemesus am 19.11.2026 („Ja, ergänzen"): die Bitte sagt,
+/// dass der Gastgeber den KI-Dienst gewählt hat, und nennt ihn. Wer zustimmt,
+/// soll wissen, wohin seine Sätze gehen.
+pub fn consent_text(service: &str) -> String {
+    // Bis zum 19.11.2026 hieß es nur „an AI translates in between. To do
+    // that, the AI reads what you write here", ohne zu sagen, wessen KI.
+    format!(
+        "Hello! I am Rusty Fish, a translation bot. In this channel everyone writes in their \
+         own language, and an AI translates in between. The AI is an outside service chosen by \
+         the host of this server ({service}). To translate, it reads what you write here. \
+         Nothing you write is sent to it before you agree. Press OK to agree. Until then your \
+         messages are passed on untranslated."
+    )
+}
