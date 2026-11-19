@@ -1,7 +1,7 @@
 //! Einstellungen der Tür, als TOML-Datei. Nichts ist auf einen bestimmten
 //! Betreiber zugeschnitten: andere sollen den Fisch bei sich laufen lassen.
 
-use rusty_fish_room::{Room, Seat};
+use rusty_fish_room::{Limits, Room, Seat};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +12,11 @@ pub struct Config {
     pub base_url: Option<String>,
     /// Discord-Kennung des Gastgebers. Wer den Fisch startet, hat zugestimmt.
     pub host: String,
+    /// Der Name, unter dem die KI ansprechbar ist. Fehlt er, übersetzt sie nur.
+    /// Nemesus am 18.11.2026: „Den können wir frei wählen."
+    pub ai_name: Option<String>,
+    /// Was der Gastgeber pro Tag erlaubt.
+    pub limits: Limits,
     pub rooms: Vec<Room>,
 }
 
@@ -21,8 +26,19 @@ struct RawConfig {
     model: String,
     base_url: Option<String>,
     host: String,
+    ai_name: Option<String>,
+    #[serde(default)]
+    limits: RawLimits,
     #[serde(rename = "room", default)]
     rooms: Vec<RawRoom>,
+}
+
+/// Jede Grenze darf einzeln fehlen; dann gilt die vorsichtige Vorgabe.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RawLimits {
+    translation_tokens_per_day: Option<u64>,
+    questions_per_guest_per_day: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -89,7 +105,20 @@ impl Config {
         }
 
         let base_url = raw.base_url.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
-        Ok(Config { model, base_url, host, rooms })
+        // Ein leerer Name heißt: die KI ist nicht ansprechbar.
+        let ai_name = raw.ai_name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
+        let defaults = Limits::default();
+        let limits = Limits {
+            translation_tokens_per_day: raw
+                .limits
+                .translation_tokens_per_day
+                .unwrap_or(defaults.translation_tokens_per_day),
+            questions_per_guest_per_day: raw
+                .limits
+                .questions_per_guest_per_day
+                .unwrap_or(defaults.questions_per_guest_per_day),
+        };
+        Ok(Config { model, base_url, host, ai_name, limits, rooms })
     }
 
     /// In welchem Raum liegt dieser Kanal?

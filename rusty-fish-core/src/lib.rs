@@ -136,6 +136,29 @@ fn label<'a>(seen: &mut Vec<&'a str>, who: &'a str) -> String {
     }
 }
 
+/// Schreibt den Kontext-Block. `own` ist die KI selbst (Kennung, Name): ihre
+/// früheren Zeilen stehen unter ihrem Namen, alle anderen unter Buchstaben.
+fn context_block<'a>(
+    seen: &mut Vec<&'a str>,
+    context: &'a [Line<'a>],
+    own: Option<(&str, &str)>,
+) -> String {
+    let mut block = String::new();
+    if context.is_empty() {
+        return block;
+    }
+    block.push_str("<context>\n");
+    for line in context {
+        let who = match own {
+            Some((id, name)) if line.speaker == id => name.to_owned(),
+            _ => label(seen, line.speaker),
+        };
+        block.push_str(&format!("{who}: {}\n", line.text));
+    }
+    block.push_str("</context>\n");
+    block
+}
+
 /// Baut den Auftrag an die KI. Rein, ohne Netz.
 pub fn build_prompt(req: &Request<'_>) -> Prompt {
     let to = req.target_lang.trim();
@@ -149,15 +172,7 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
     }
 
     let mut seen = Vec::new();
-    let mut user = String::new();
-    if !req.context.is_empty() {
-        user.push_str("<context>\n");
-        for line in req.context {
-            let who = label(&mut seen, line.speaker);
-            user.push_str(&format!("{who}: {}\n", line.text));
-        }
-        user.push_str("</context>\n");
-    }
+    let mut user = context_block(&mut seen, req.context, None);
     let who = label(&mut seen, req.speaker);
     user.push_str(&format!("<translate speaker=\"{who}\">\n{}\n</translate>", req.text));
 
@@ -211,4 +226,106 @@ pub async fn translate<M: Model + Sync>(
     }
     let reply = model.complete(&build_prompt(req)).await.map_err(FishError::Model)?;
     read_answer(&reply.text)
+}
+
+// ---------------------------------------------------------------------------
+// Die ansprechbare KI
+//
+// Nemesus am 18.11.2026: „Und ansonsten schlage ich vor, dass wir der KI einen
+// Namen geben. Den können wir frei wählen. Und damit können wir sie
+// ansprechen. [...] Da gab es so etwas wie Eggdrop und auf Kommando konnte
+// der antworten. Das sollten wir mit KIs auch machen."
+//
+// Ob die KI übersetzt oder antwortet, entscheidet der Code am Namen, nie die
+// KI selbst. Nur so lässt sich ein Kontingent durchsetzen, und kein Satz im
+// Chat kann den Übersetzer zum Antworten bringen.
+// ---------------------------------------------------------------------------
+
+/// Spricht dieser Text die KI an? Wenn ja, kommt die Frage ohne den Namen
+/// zurück.
+///
+/// Die Regel, wie beim Eggdrop das Kommando: der Text beginnt mit dem Namen
+/// (Groß und Klein egal, wahlweise mit `@` davor), danach folgt ein
+/// Leerzeichen, ein Komma oder ein Doppelpunkt, und danach steht noch etwas.
+/// Der Name mitten im Satz ist keine Ansprache.
+pub fn addressed<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let start = text.trim_start();
+    let start = start.strip_prefix('@').unwrap_or(start);
+
+    // Zeichen für Zeichen vergleichen, ohne Rücksicht auf Groß und Klein. Das
+    // gilt für jede Schrift, nicht nur für lateinische Buchstaben.
+    let mut chars = start.char_indices();
+    let mut end = 0;
+    for wanted in name.chars() {
+        let (at, got) = chars.next()?;
+        if !got.to_lowercase().eq(wanted.to_lowercase()) {
+            return None;
+        }
+        end = at + got.len_utf8();
+    }
+
+    // Nach dem Namen muss er zu Ende sein: „Fischlein" spricht „Fisch" nicht an.
+    let mut after = start[end..].chars();
+    match after.next() {
+        Some(c) if c.is_whitespace() || c == ',' || c == ':' => {}
+        _ => return None,
+    }
+    let question = after.as_str().trim();
+    if question.is_empty() { None } else { Some(question) }
+}
+
+/// Eine Frage an die KI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ask<'a> {
+    /// Der Name, den der Gastgeber der KI gegeben hat.
+    pub name: &'a str,
+    /// Die Kennung, unter der frühere Antworten der KI im Kontext stehen.
+    pub own_speaker: &'a str,
+    /// Kennung des Fragenden. Verlässt den Kern nie.
+    pub speaker: &'a str,
+    /// Die ganze Nachricht, so wie sie geschrieben wurde.
+    pub text: &'a str,
+    /// Sprache der Antwort: die des Platzes, an dem gefragt wurde.
+    pub answer_lang: &'a str,
+    pub context: &'a [Line<'a>],
+}
+
+/// Baut die Frage an die KI. Rein, ohne Netz.
+pub fn build_ask_prompt(req: &Ask<'_>) -> Prompt {
+    let name = req.name.trim();
+    let lang = req.answer_lang.trim();
+
+    let mut seen = Vec::new();
+    let mut user = context_block(&mut seen, req.context, Some((req.own_speaker, name)));
+    let who = label(&mut seen, req.speaker);
+    user.push_str(&format!("<message speaker=\"{who}\">\n{}\n</message>", req.text));
+
+    // Die KI ist Teilnehmerin, nicht Auskunftsschalter: sie hat einen Namen,
+    // steht im Kontext wie alle anderen und erfährt keine Namen von Menschen.
+    let system = format!(
+        "You are {name}, a participant in a group chat between people who write in different \
+         languages. Someone has just addressed you by name. Reply to the message inside \
+         <message>, briefly and helpfully, in {lang}. The lines inside <context> are earlier \
+         messages of the same conversation. People are shown as letters; your own earlier lines \
+         are shown as {name}. Output ONLY your reply, with no name or signature and no notes."
+    );
+
+    Prompt { system, user }
+}
+
+/// Stellt die Frage. Heraus kommt die Antwort oder ein lauter Fehler.
+pub async fn ask<M: Model + Sync>(model: &M, req: &Ask<'_>) -> Result<String, FishError> {
+    if req.answer_lang.trim().is_empty() {
+        return Err(FishError::NoTargetLanguage);
+    }
+    let reply = model.complete(&build_ask_prompt(req)).await.map_err(FishError::Model)?;
+    let answer = reply.text.trim();
+    if answer.is_empty() {
+        return Err(FishError::EmptyAnswer);
+    }
+    Ok(answer.to_owned())
 }

@@ -10,7 +10,7 @@ pub const MESSAGE_LIMIT: usize = 1900;
 /// eine kleine graue Zeile.
 pub fn render(delivery: &Delivery) -> String {
     match &delivery.mark {
-        Mark::Translated | Mark::Original => delivery.text.clone(),
+        Mark::Translated | Mark::Original | Mark::Notice => delivery.text.clone(),
         Mark::Untranslated(Reason::NoConsent) => format!(
             "{}\n-# not translated: the writer has not agreed to AI translation yet",
             delivery.text

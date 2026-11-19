@@ -1,7 +1,7 @@
 //! Tests der Raum-Logik. Keine Tür, kein Netz, die KI ist eine Attrappe.
 
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
-use rusty_fish_room::{Delivery, Incoming, Mark, Reason, Room, RoomState, Seat, relay};
+use rusty_fish_room::{Delivery, Incoming, Mark, Reason, Room, RoomState, Seat, Sender, relay};
 use std::future::Future;
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
@@ -67,7 +67,12 @@ fn a_message_appears_translated_at_the_other_seat() {
     let out = now(relay(&fake, &two_seats(), &mut state, &from("de", "n", "Hallo!")));
     assert_eq!(
         out,
-        [Delivery { channel: "ru".to_owned(), text: "Привет!".to_owned(), mark: Mark::Translated }]
+        [Delivery {
+            channel: "ru".to_owned(),
+            text: "Привет!".to_owned(),
+            mark: Mark::Translated,
+            from: Sender::Writer,
+        }]
     );
     let asked = fake.prompts();
     assert_eq!(asked.len(), 1);
@@ -118,6 +123,7 @@ fn without_consent_no_word_reaches_the_model() {
             channel: "de".to_owned(),
             text: "Привет, это личное".to_owned(),
             mark: Mark::Untranslated(Reason::NoConsent),
+            from: Sender::Writer,
         }]
     );
     assert!(fake.prompts().is_empty());

@@ -10,16 +10,22 @@
 //! - Sticker und Einbettungen ohne Text kommen am anderen Platz nicht an.
 //!   Anhänge kommen als Adresse an.
 //! - Die Zustimmung lässt sich noch nicht im Chat widerrufen.
-//! - Es gibt noch kein Kontingent. Das kommt, bevor die KI ansprechbar wird.
+//! - Die KI hat ein eigenes Bild nur, wenn Discord dem Webhook eines gibt; sie
+//!   erscheint unter ihrem Namen mit dem Standardbild.
+//!
+//! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Die
+//! Tür reicht nur das heutige Datum und den Tageszähler hinein und legt den
+//! Zähler in ihrer Zustandsdatei ab.
 //!
 //! In die Ausgabe des Programms gelangen nur Kanal-Kennungen und Fehlergründe,
 //! nie der Text einer Nachricht.
 
+use crate::clock::today;
 use crate::config::Config;
 use crate::render::{MESSAGE_LIMIT, chunks, hook_name, render};
 use crate::state::Store;
 use rusty_fish_core::{Model, Outcome, Request, translate};
-use rusty_fish_room::{Incoming, RoomState, relay};
+use rusty_fish_room::{House, Incoming, Metered, RoomState, Sender, Tally, converse};
 use serenity::all::{
     ButtonStyle, ChannelId, Client, Context, CreateAllowedMentions, CreateButton,
     CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage, CreateWebhook,
@@ -144,21 +150,44 @@ where
         }
 
         let author = msg.author.id.to_string();
-        let consented = author == self.config.host || inner.store.has_consented(&author);
+        let is_host = author == self.config.host;
+        let consented = is_host || inner.store.has_consented(&author);
         let incoming =
             Incoming { channel: &channel, author: &author, text: &msg.content, consented };
         let room = &self.config.rooms[room_index];
-        let deliveries =
-            relay(&self.model, room, &mut inner.states[room_index], &incoming).await;
+        let today = today();
+        let house = House {
+            limits: &self.config.limits,
+            ai_name: self.config.ai_name.as_deref(),
+            today: &today,
+        };
+        let mut tally = inner.store.tally();
+        let deliveries = converse(
+            &self.model,
+            room,
+            &mut inner.states[room_index],
+            &mut tally,
+            &house,
+            &incoming,
+            is_host,
+        )
+        .await;
 
-        let name = hook_name(&display_name(msg));
-        let avatar = msg.author.face();
+        // Was ein Mensch schrieb, erscheint unter seinem Namen und Bild. Was
+        // die KI sagt, erscheint unter dem Namen, den der Gastgeber ihr gab.
+        let writer = hook_name(&display_name(msg));
+        let face = msg.author.face();
+        let assistant = hook_name(self.config.ai_name.as_deref().unwrap_or(WEBHOOK_NAME));
         let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
         let mut delivered = true;
         for delivery in &deliveries {
-            let body = render(delivery) + &attachments;
-            let posted =
-                post(http, &mut inner.hooks, &delivery.channel, &name, &avatar, &body).await;
+            let (name, avatar, body) = match delivery.from {
+                Sender::Writer => {
+                    (writer.as_str(), Some(face.as_str()), render(delivery) + &attachments)
+                }
+                Sender::Assistant => (assistant.as_str(), None, render(delivery)),
+            };
+            let posted = post(http, &mut inner.hooks, &delivery.channel, name, avatar, &body).await;
             if let Err(why) = posted {
                 delivered = false;
                 eprintln!("rusty-fish: cannot deliver to channel {}: {why}", delivery.channel);
@@ -170,9 +199,10 @@ where
         }
 
         if !consented && inner.asked.insert(msg.author.id) {
-            self.ask_consent(http, msg.channel_id, &channel).await;
+            self.ask_consent(http, msg.channel_id, &channel, &mut tally).await;
         }
 
+        inner.store.set_tally(&tally);
         inner.store.saw(&channel, msg.id.get());
         if let Err(why) = inner.store.save() {
             eprintln!("rusty-fish: {why}");
@@ -180,7 +210,13 @@ where
     }
 
     /// Bittet in der Sprache des Platzes um Zustimmung.
-    async fn ask_consent(&self, http: &Http, channel_id: ChannelId, channel: &str) {
+    async fn ask_consent(
+        &self,
+        http: &Http,
+        channel_id: ChannelId,
+        channel: &str,
+        tally: &mut Tally,
+    ) {
         let lang = self.config.lang_of(channel).unwrap_or("English");
         let request = Request {
             speaker: "fish",
@@ -189,7 +225,12 @@ where
             pass_through: &[],
             context: &[],
         };
-        let text = match translate(&self.model, &request).await {
+        // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist er
+        // leer, fragt der Fisch auf Englisch.
+        let meter = Metered::new(&self.model, tally.tokens_left(&self.config.limits));
+        let translated = translate(&meter, &request).await;
+        tally.spend(meter.used());
+        let text = match translated {
             Ok(Outcome::Translated(t)) => t,
             // Lieber auf Englisch fragen als gar nicht.
             _ => CONSENT_TEXT.to_owned(),
@@ -262,13 +303,14 @@ fn display_name(msg: &Message) -> String {
         .unwrap_or_else(|| msg.author.name.clone())
 }
 
-/// Setzt einen Text unter fremdem Namen in einem Kanal ab.
+/// Setzt einen Text unter fremdem Namen in einem Kanal ab. Ohne Bild gilt das
+/// Standardbild des Webhooks.
 async fn post(
     http: &Http,
     hooks: &mut HashMap<ChannelId, Webhook>,
     channel: &str,
     name: &str,
-    avatar: &str,
+    avatar: Option<&str>,
     body: &str,
 ) -> Result<(), String> {
     let id = channel.parse::<u64>().map_err(|_| "not a channel id".to_owned())?;
@@ -277,12 +319,14 @@ async fn post(
         hooks.insert(channel_id, find_or_create_hook(http, channel_id).await?);
     }
     for part in chunks(body, MESSAGE_LIMIT) {
-        let message = ExecuteWebhook::new()
+        let mut message = ExecuteWebhook::new()
             .content(part)
             .username(name)
-            .avatar_url(avatar)
             // Eine gespiegelte Nachricht darf niemanden ein zweites Mal anpingen.
             .allowed_mentions(CreateAllowedMentions::new());
+        if let Some(url) = avatar {
+            message = message.avatar_url(url);
+        }
         if let Err(why) = hooks[&channel_id].execute(http, false, message).await {
             // Vielleicht wurde der Webhook gelöscht. Beim nächsten Mal neu suchen.
             hooks.remove(&channel_id);

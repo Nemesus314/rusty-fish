@@ -5,6 +5,7 @@
 //! Einstellungen lesen, Nachrichten hereinreichen, Zustellungen unter dem
 //! Namen des Schreibenden absetzen, die Zustimmung einholen, Verpasstes nachholen.
 
+pub mod clock;
 pub mod config;
 pub mod door;
 pub mod render;

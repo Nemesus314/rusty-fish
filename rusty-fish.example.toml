@@ -16,6 +16,22 @@ model = "put-a-model-name-here"
 # In Discord: Settings -> Advanced -> Developer Mode, then right-click yourself -> Copy User ID.
 host = "000000000000000000"
 
+# Optional: a name for the AI. With a name, anyone in the room can talk to it
+# by starting a message with that name, like "Fish, what does that mean?".
+# The name must stand at the start, followed by a space, a comma or a colon.
+# Without a name the AI only translates.
+# ai_name = "Fish"
+
+# What you allow per day (UTC), since it all runs on your key.
+# Leave a line out and the value shown here applies.
+[limits]
+# Tokens for translating what people write, for everyone together. When they
+# are used up, messages are still delivered, untranslated and marked.
+translation_tokens_per_day = 100000
+# Questions to the AI per guest. You as the host have no limit. Questions and
+# the translation of their answers never use up the tokens above.
+questions_per_guest_per_day = 10
+
 # A room is one conversation. Every seat is a channel with a language.
 # What is written at one seat appears at all others in their language.
 [[room]]

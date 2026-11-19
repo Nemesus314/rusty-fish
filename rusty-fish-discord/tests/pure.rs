@@ -1,9 +1,10 @@
 //! Tests der Teile der Tür, die ohne Discord auskommen.
 
+use rusty_fish_discord::clock::utc_date;
 use rusty_fish_discord::config::Config;
 use rusty_fish_discord::render::{chunks, hook_name, render};
 use rusty_fish_discord::state::Store;
-use rusty_fish_room::{Delivery, Mark, Reason};
+use rusty_fish_room::{Delivery, Limits, Mark, Reason, Sender, Tally};
 
 const GOOD: &str = r#"
 model = "some-model"
@@ -73,7 +74,112 @@ fn the_shipped_example_is_refused_until_filled_in_and_valid_after() {
 }
 
 fn delivery(text: &str, mark: Mark) -> Delivery {
-    Delivery { channel: "222".to_owned(), text: text.to_owned(), mark }
+    Delivery { channel: "222".to_owned(), text: text.to_owned(), mark, from: Sender::Writer }
+}
+
+// --- Kontingent und Name der KI in den Einstellungen -------------------------
+
+#[test]
+fn without_a_limits_section_the_cautious_defaults_apply() {
+    let c = Config::parse(GOOD).unwrap();
+    assert_eq!(c.limits, Limits::default());
+    assert_eq!(c.ai_name, None);
+}
+
+#[test]
+fn limits_and_the_ai_name_are_read() {
+    let text = GOOD.replace(
+        "host = \"100\"",
+        "host = \"100\"\nai_name = \"  Fisch \"\n\n[limits]\ntranslation_tokens_per_day = 5000\nquestions_per_guest_per_day = 3",
+    );
+    let c = Config::parse(&text).unwrap();
+    assert_eq!(c.ai_name.as_deref(), Some("Fisch"));
+    assert_eq!(
+        c.limits,
+        Limits { translation_tokens_per_day: 5000, questions_per_guest_per_day: 3 }
+    );
+    assert_eq!(c.rooms.len(), 1, "the room after the limits section must still be read");
+}
+
+#[test]
+fn a_single_limit_may_be_set_and_the_other_keeps_its_default() {
+    let text =
+        GOOD.replace("host = \"100\"", "host = \"100\"\n\n[limits]\nquestions_per_guest_per_day = 0");
+    let c = Config::parse(&text).unwrap();
+    assert_eq!(c.limits.questions_per_guest_per_day, 0);
+    assert_eq!(
+        c.limits.translation_tokens_per_day,
+        Limits::default().translation_tokens_per_day
+    );
+}
+
+#[test]
+fn an_empty_ai_name_means_off_and_a_misspelt_limit_is_refused() {
+    let off = GOOD.replace("host = \"100\"", "host = \"100\"\nai_name = \"  \"");
+    assert_eq!(Config::parse(&off).unwrap().ai_name, None);
+    refused(
+        &GOOD.replace("host = \"100\"", "host = \"100\"\n\n[limits]\nquestions_per_day = 3"),
+        "questions_per_day",
+    );
+}
+
+#[test]
+fn the_shipped_example_shows_the_defaults_and_leaves_the_ai_name_off() {
+    let example = include_str!("../../rusty-fish.example.toml");
+    assert!(example.contains("[limits]"));
+    assert!(example.contains("ai_name"));
+    let filled = example.replace("host = \"000000000000000000\"", "host = \"42\"");
+    let c = Config::parse(&filled).unwrap();
+    assert_eq!(c.limits, Limits::default(), "the example must show the real defaults");
+    assert_eq!(c.ai_name, None);
+}
+
+// --- das Datum ---------------------------------------------------------------
+
+#[test]
+fn the_utc_date_is_computed_without_a_calendar_library() {
+    assert_eq!(utc_date(0), "1970-01-01");
+    assert_eq!(utc_date(86_399), "1970-01-01");
+    assert_eq!(utc_date(86_400), "1970-01-02");
+    assert_eq!(utc_date(951_782_400), "2000-02-29");
+    assert_eq!(utc_date(1_709_164_800), "2024-02-29");
+    assert_eq!(utc_date(1_709_251_200), "2024-03-01");
+    assert_eq!(utc_date(1_795_046_400), "2026-11-19");
+    assert_eq!(utc_date(1_795_046_400 + 86_399), "2026-11-19");
+    assert_eq!(utc_date(4_102_444_800), "2100-01-01");
+}
+
+// --- der Tageszähler in der Zustandsdatei --------------------------------------
+
+#[test]
+fn the_tally_survives_a_restart() {
+    let path = temp_file("tally");
+    let mut store = Store::open(&path).unwrap();
+    assert_eq!(store.tally(), Tally::default());
+    let mut tally = Tally { day: "2026-11-19".to_owned(), translation_tokens: 1234, ..Tally::default() };
+    tally.questions.insert("7".to_owned(), 2);
+    store.set_tally(&tally);
+    store.save().unwrap();
+
+    let again = Store::open(&path).unwrap();
+    assert_eq!(again.tally(), tally);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_state_file_from_before_the_tally_still_opens() {
+    let path = temp_file("old");
+    std::fs::write(&path, r#"{ "consented": ["7"], "last_seen": { "111": 50 } }"#).unwrap();
+    let store = Store::open(&path).unwrap();
+    assert!(store.has_consented("7"));
+    assert_eq!(store.seen("111"), Some(50));
+    assert_eq!(store.tally(), Tally::default());
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn a_notice_is_shown_as_it_is() {
+    assert_eq!(render(&delivery("No questions left.", Mark::Notice)), "No questions left.");
 }
 
 #[test]

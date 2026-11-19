@@ -3,6 +3,7 @@
 //!
 //! Keine Nachrichtentexte: der Fisch speichert kein Gespräch.
 
+use rusty_fish_room::Tally;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,6 +17,14 @@ pub struct Store {
     consented: BTreeSet<String>,
     #[serde(default)]
     last_seen: BTreeMap<String, u64>,
+    /// Das Kontingent des laufenden Tages: Datum, verbrauchte Tokens, Fragen
+    /// je Gast. Kennungen und Zahlen, kein Text.
+    #[serde(default)]
+    day: String,
+    #[serde(default)]
+    translation_tokens: u64,
+    #[serde(default)]
+    questions: BTreeMap<String, u32>,
 }
 
 impl Store {
@@ -51,6 +60,22 @@ impl Store {
     pub fn saw(&mut self, channel: &str, message: u64) {
         let seen = self.last_seen.entry(channel.to_owned()).or_insert(0);
         *seen = (*seen).max(message);
+    }
+
+    /// Der Tageszähler, so wie er zuletzt gespeichert wurde.
+    pub fn tally(&self) -> Tally {
+        Tally {
+            day: self.day.clone(),
+            translation_tokens: self.translation_tokens,
+            questions: self.questions.clone(),
+        }
+    }
+
+    /// Übernimmt den Tageszähler, damit er einen Neustart überlebt.
+    pub fn set_tally(&mut self, tally: &Tally) {
+        self.day = tally.day.clone();
+        self.translation_tokens = tally.translation_tokens;
+        self.questions = tally.questions.clone();
     }
 
     /// Schreibt die Datei so, dass ein Absturz mittendrin sie nicht zerstört:
