@@ -1,0 +1,3 @@
+# Eine Fassung ist eine Bytefolge: Zeilenenden sind überall LF,
+# egal auf welchem System ausgecheckt wird.
+* text=auto eol=lf

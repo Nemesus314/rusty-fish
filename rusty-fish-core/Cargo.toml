@@ -1,0 +1,10 @@
+[package]
+name = "rusty-fish-core"
+description = "Translation core of Rusty Fish. Knows no network, no Discord, no Matrix."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Bewusst ohne Abhängigkeiten: der Kern soll später über flutter_rust_bridge
+# in die App umziehen können, und was er nicht mitbringt, muss dort niemand prüfen.
+[dependencies]

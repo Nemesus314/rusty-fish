@@ -1,0 +1,11 @@
+[package]
+name = "rusty-fish-openai"
+description = "Rusty Fish provider for OpenAI and every service that speaks the same chat format."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rusty-fish-core = { path = "../rusty-fish-core" }
+serde_json = "1.0.154"
