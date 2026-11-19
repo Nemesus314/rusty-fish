@@ -340,6 +340,26 @@ pub fn addressed<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     if question.is_empty() { None } else { Some(question) }
 }
 
+/// Spricht dieser Text die KI unter einem ihrer Rufnamen an? Wenn ja, kommt
+/// die Frage ohne den Namen zurück.
+///
+/// Entschieden von Nemesus am 19.11.2026: der Bot heißt „Rusty Fish",
+/// angesprochen wird er mit „Fish". Wer mit kyrillischer Tastatur schreibt,
+/// müsste dafür jedes Mal umschalten; deshalb darf die KI mehrere Rufnamen
+/// haben, auch in anderer Schrift.
+///
+/// Für jeden Rufnamen gilt die Regel von [`addressed`]. Der längste passende
+/// Name gewinnt: bei „Fish" und „Fish Bot" ist „Fish Bot, hallo" die Frage
+/// „hallo" und nicht „Bot, hallo". Leere Einträge zählen nicht.
+pub fn addressed_any<'a>(text: &'a str, names: &[&str]) -> Option<&'a str> {
+    let mut by_length: Vec<&str> =
+        names.iter().map(|name| name.trim()).filter(|name| !name.is_empty()).collect();
+    // Längster zuerst, gezählt in Zeichen, nicht in Bytes: sonst wäre ein
+    // kyrillischer Name „länger" als ein gleich langer lateinischer.
+    by_length.sort_by_key(|name| std::cmp::Reverse(name.chars().count()));
+    by_length.into_iter().find_map(|name| addressed(text, name))
+}
+
 /// Eine Frage an die KI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ask<'a> {

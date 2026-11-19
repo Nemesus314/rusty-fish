@@ -12,9 +12,13 @@ pub struct Config {
     pub base_url: Option<String>,
     /// Discord-Kennung des Gastgebers. Wer den Fisch startet, hat zugestimmt.
     pub host: String,
-    /// Der Name, unter dem die KI ansprechbar ist. Fehlt er, übersetzt sie nur.
+    /// Die Rufnamen der KI. Der erste ist der Name, unter dem sie erscheint;
+    /// jeder gilt als Ansprache. Ist die Liste leer, übersetzt sie nur.
     /// Nemesus am 18.11.2026: „Den können wir frei wählen."
-    pub ai_name: Option<String>,
+    ///
+    /// Mehrere, weil ein Gast mit kyrillischer Tastatur für einen lateinischen
+    /// Namen jedes Mal umschalten müsste (entschieden am 19.11.2026).
+    pub ai_names: Vec<String>,
     /// Was der Gastgeber pro Tag erlaubt.
     pub limits: Limits,
     pub rooms: Vec<Room>,
@@ -26,11 +30,19 @@ struct RawConfig {
     model: String,
     base_url: Option<String>,
     host: String,
-    ai_name: Option<String>,
+    ai_name: Option<RawNames>,
     #[serde(default)]
     limits: RawLimits,
     #[serde(rename = "room", default)]
     rooms: Vec<RawRoom>,
+}
+
+/// `ai_name` darf ein einzelner Text sein, wie von Anfang an, oder eine Liste.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawNames {
+    One(String),
+    Many(Vec<String>),
 }
 
 /// Jede Grenze darf einzeln fehlen; dann gilt die vorsichtige Vorgabe.
@@ -107,8 +119,7 @@ impl Config {
         }
 
         let base_url = raw.base_url.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
-        // Ein leerer Name heißt: die KI ist nicht ansprechbar.
-        let ai_name = raw.ai_name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty());
+        let ai_names = read_names(raw.ai_name)?;
         let defaults = Limits::default();
         let limits = Limits {
             translation_tokens_per_day: raw
@@ -120,7 +131,12 @@ impl Config {
                 .questions_per_guest_per_day
                 .unwrap_or(defaults.questions_per_guest_per_day),
         };
-        Ok(Config { model, base_url, host, ai_name, limits, rooms })
+        Ok(Config { model, base_url, host, ai_names, limits, rooms })
+    }
+
+    /// Der Name, unter dem die KI erscheint: ihr erster Rufname.
+    pub fn ai_name(&self) -> Option<&str> {
+        self.ai_names.first().map(String::as_str)
     }
 
     /// In welchem Raum liegt dieser Kanal?
@@ -136,6 +152,33 @@ impl Config {
     /// Welche Sprache hat der Platz an diesem Kanal?
     pub fn lang_of(&self, channel: &str) -> Option<&str> {
         self.seat_of(channel).map(|s| s.lang.as_str())
+    }
+}
+
+/// Liest die Rufnamen der KI.
+///
+/// - Fehlt der Wert, ist die Liste leer oder steht dort ein einzelner leerer
+///   Text, dann ist die KI nicht ansprechbar. So war es von Anfang an.
+/// - Ein leerer Eintrag in einer Liste wird laut abgelehnt: wer eine Liste
+///   schreibt, meint jeden Eintrag, und ein leerer ist ein Versehen.
+fn read_names(raw: Option<RawNames>) -> Result<Vec<String>, String> {
+    match raw {
+        None => Ok(Vec::new()),
+        Some(RawNames::One(name)) => {
+            let name = name.trim();
+            Ok(if name.is_empty() { Vec::new() } else { vec![name.to_owned()] })
+        }
+        Some(RawNames::Many(names)) => {
+            let mut out = Vec::new();
+            for (n, name) in names.iter().enumerate() {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err(format!("configuration: entry {} of `ai_name` is empty", n + 1));
+                }
+                out.push(name.to_owned());
+            }
+            Ok(out)
+        }
     }
 }
 

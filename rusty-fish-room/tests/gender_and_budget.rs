@@ -141,7 +141,7 @@ fn one_translation_is_shared_only_by_seats_of_the_same_language_and_gender() {
 }
 
 fn house<'a>(limits: &'a Limits, today: &'a str) -> House<'a> {
-    House { limits, ai_name: Some("Fisch"), today }
+    House { limits, ai_names: &["Fisch"], today }
 }
 
 #[test]

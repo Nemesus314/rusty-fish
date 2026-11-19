@@ -110,7 +110,19 @@ impl Setup {
         msg: &Incoming<'_>,
         is_host: bool,
     ) -> Vec<Delivery> {
-        let house = House { limits: &self.limits, ai_name, today: day };
+        let names: Vec<&str> = ai_name.into_iter().collect();
+        self.say_names(fake, day, &names, msg, is_host)
+    }
+
+    fn say_names(
+        &mut self,
+        fake: &Fake,
+        day: &str,
+        ai_names: &[&str],
+        msg: &Incoming<'_>,
+        is_host: bool,
+    ) -> Vec<Delivery> {
+        let house = House { limits: &self.limits, ai_names, today: day };
         now(converse(fake, &room(), &mut self.state, &mut self.tally, &house, msg, is_host))
     }
 }
@@ -189,6 +201,34 @@ fn without_a_name_the_ai_cannot_be_addressed() {
     let fake = Fake::new();
     let mut s = Setup::new(1000, 3);
     let out = s.say_with(&fake, DAY, None, &from("de", "guest", "Fisch, hallo?"), false);
+    assert_eq!(out.len(), 1);
+    assert!(fake.questions().is_empty());
+}
+
+#[test]
+fn every_call_name_addresses_the_ai_and_the_first_is_who_she_is() {
+    let fake = Fake::new();
+    let mut s = Setup::new(1000, 3);
+    // Am russischen Platz mit dem kyrillischen Rufnamen gefragt.
+    let msg = from("ru", "guest", "Фиш, который час?");
+    let out = s.say_names(&fake, DAY, &["Fish", "Фиш"], &msg, false);
+    assert_eq!(out.len(), 3, "the question, the answer, and the answer at the other seat");
+    let questions = fake.questions();
+    assert_eq!(questions.len(), 1, "the second call name must address the AI too");
+    assert!(questions[0].system.contains("You are Fish,"), "got: {}", questions[0].system);
+    assert!(questions[0].system.contains("Russian"), "the answer is in the asker's language");
+
+    // Der erste Rufname gilt genauso.
+    let out = s.say_names(&fake, DAY, &["Fish", "Фиш"], &from("de", "guest", "Fish, danke"), false);
+    assert_eq!(out.len(), 3);
+    assert_eq!(fake.questions().len(), 2);
+}
+
+#[test]
+fn an_empty_list_of_call_names_means_off() {
+    let fake = Fake::new();
+    let mut s = Setup::new(1000, 3);
+    let out = s.say_names(&fake, DAY, &[], &from("de", "guest", "Fish, hallo?"), false);
     assert_eq!(out.len(), 1);
     assert!(fake.questions().is_empty());
 }
@@ -421,7 +461,7 @@ fn conversing_can_cross_threads() {
     let fake = Fake::new();
     let room = room();
     let limits = Limits::default();
-    let house = House { limits: &limits, ai_name: Some("Fisch"), today: DAY };
+    let house = House { limits: &limits, ai_names: &["Fisch"], today: DAY };
     let mut state = RoomState::default();
     let mut tally = Tally::default();
     let msg = from("de", "guest", "Hallo");

@@ -19,6 +19,11 @@
 //!   Erhöhung oder dem nächsten Tag. Der Hinweis ist englisch und wird nicht
 //!   übersetzt.
 //!
+//! - Als Ansprache zählt nur die Erwähnung des Bots selbst am Anfang der
+//!   Nachricht (`<@ID>`). Discord legt für einen Bot meist auch eine Rolle
+//!   gleichen Namens an; wer in der `@`-Liste die Rolle statt des Bots wählt,
+//!   schreibt `<@&ID>` und spricht ihn damit nicht an.
+//!
 //! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Die
 //! Tür reicht nur das heutige Datum und den Tageszähler hinein und legt den
 //! Zähler in ihrer Zustandsdatei ab.
@@ -28,6 +33,7 @@
 
 use crate::clock::today;
 use crate::config::Config;
+use crate::mention::mention_as_call;
 use crate::render::{
     KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, hook_name,
     nothing_to_raise, raise_label, raised_notice, render,
@@ -46,6 +52,7 @@ use serenity::all::{
 use serenity::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
 const CONSENT_BUTTON: &str = "rusty-fish-consent";
@@ -65,6 +72,10 @@ const CONSENT_TEXT: &str = "Hello! I am Rusty Fish, a translation bot. In this c
 struct Fish<M> {
     model: M,
     config: Config,
+    /// Die Benutzer-ID des Bots selbst, bekannt ab dem Ready-Ereignis. Null
+    /// heißt: noch nicht bekannt. Gebraucht wird sie, um die echte Erwähnung
+    /// des Bots am Anfang einer Nachricht zu erkennen.
+    me: AtomicU64,
     /// Ein einziges Schloss für alles Veränderliche. Es hält die Nachrichten
     /// eines Raums in der Reihenfolge, in der sie geschrieben wurden: Discord
     /// meldet sie gleichzeitig, das Schloss lässt sie einzeln durch.
@@ -89,6 +100,7 @@ where
     let fish = Fish {
         model,
         config,
+        me: AtomicU64::new(0),
         inner: Mutex::new(Inner { states, store, hooks: HashMap::new(), asked: HashSet::new() }),
     };
 
@@ -109,6 +121,8 @@ where
 {
     async fn ready(&self, ctx: Context, ready: Ready) {
         eprintln!("rusty-fish: connected to Discord as {}", ready.user.name);
+        // Vor dem Nachholen merken, damit auch verpasste Erwähnungen zählen.
+        self.me.store(ready.user.id.get(), Ordering::Relaxed);
         self.catch_up(&ctx.http).await;
     }
 
@@ -244,15 +258,19 @@ where
         let author = msg.author.id.to_string();
         let is_host = author == self.config.host;
         let consented = is_host || inner.store.has_consented(&author);
-        let incoming =
-            Incoming { channel: &channel, author: &author, text: &msg.content, consented };
+        let names: Vec<&str> = self.config.ai_names.iter().map(String::as_str).collect();
+        // Die echte Erwähnung des Bots am Anfang zählt wie sein Rufname. Die
+        // Raum-Logik bekommt dafür den Rufnamen statt des Discord-Kürzels; so
+        // sehen weder die KI noch die anderen Plätze das Kürzel. Ohne Rufnamen
+        // ist die Funktion aus, und die Nachricht bleibt, wie sie ist.
+        let called = names
+            .first()
+            .and_then(|name| mention_as_call(&msg.content, self.me.load(Ordering::Relaxed), name));
+        let text = called.as_deref().unwrap_or(&msg.content);
+        let incoming = Incoming { channel: &channel, author: &author, text, consented };
         let room = &self.config.rooms[room_index];
         let today = today();
-        let house = House {
-            limits: &self.config.limits,
-            ai_name: self.config.ai_name.as_deref(),
-            today: &today,
-        };
+        let house = House { limits: &self.config.limits, ai_names: &names, today: &today };
         let mut tally = inner.store.tally();
         let deliveries = converse(
             &self.model,
@@ -269,7 +287,7 @@ where
         // die KI sagt, erscheint unter dem Namen, den der Gastgeber ihr gab.
         let writer = hook_name(&display_name(msg));
         let face = msg.author.face();
-        let assistant = hook_name(self.config.ai_name.as_deref().unwrap_or(WEBHOOK_NAME));
+        let assistant = hook_name(self.config.ai_name().unwrap_or(WEBHOOK_NAME));
         let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
         let mut delivered = true;
         for delivery in &deliveries {

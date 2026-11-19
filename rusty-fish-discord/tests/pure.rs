@@ -2,6 +2,7 @@
 
 use rusty_fish_discord::clock::utc_date;
 use rusty_fish_discord::config::Config;
+use rusty_fish_discord::mention::{mention_as_call, mention_question};
 use rusty_fish_discord::render::{
     KEEP_LABEL, budget_notice, chunks, grouped, hook_name, nothing_to_raise, raise_label,
     raised_notice, render,
@@ -86,7 +87,8 @@ fn delivery(text: &str, mark: Mark) -> Delivery {
 fn without_a_limits_section_the_cautious_defaults_apply() {
     let c = Config::parse(GOOD).unwrap();
     assert_eq!(c.limits, Limits::default());
-    assert_eq!(c.ai_name, None);
+    assert!(c.ai_names.is_empty());
+    assert_eq!(c.ai_name(), None);
 }
 
 #[test]
@@ -96,7 +98,8 @@ fn limits_and_the_ai_name_are_read() {
         "host = \"100\"\nai_name = \"  Fisch \"\n\n[limits]\ntranslation_tokens_per_day = 5000\nquestions_per_guest_per_day = 3",
     );
     let c = Config::parse(&text).unwrap();
-    assert_eq!(c.ai_name.as_deref(), Some("Fisch"));
+    assert_eq!(c.ai_names, ["Fisch"]);
+    assert_eq!(c.ai_name(), Some("Fisch"));
     assert_eq!(
         c.limits,
         Limits { translation_tokens_per_day: 5000, questions_per_guest_per_day: 3 }
@@ -119,7 +122,7 @@ fn a_single_limit_may_be_set_and_the_other_keeps_its_default() {
 #[test]
 fn an_empty_ai_name_means_off_and_a_misspelt_limit_is_refused() {
     let off = GOOD.replace("host = \"100\"", "host = \"100\"\nai_name = \"  \"");
-    assert_eq!(Config::parse(&off).unwrap().ai_name, None);
+    assert!(Config::parse(&off).unwrap().ai_names.is_empty());
     refused(
         &GOOD.replace("host = \"100\"", "host = \"100\"\n\n[limits]\nquestions_per_day = 3"),
         "questions_per_day",
@@ -134,7 +137,84 @@ fn the_shipped_example_shows_the_defaults_and_leaves_the_ai_name_off() {
     let filled = example.replace("host = \"000000000000000000\"", "host = \"42\"");
     let c = Config::parse(&filled).unwrap();
     assert_eq!(c.limits, Limits::default(), "the example must show the real defaults");
-    assert_eq!(c.ai_name, None);
+    assert!(c.ai_names.is_empty());
+}
+
+// --- mehrere Rufnamen und die echte Erwähnung --------------------------------
+
+fn with_names(value: &str) -> String {
+    GOOD.replace("host = \"100\"", &format!("host = \"100\"\nai_name = {value}"))
+}
+
+#[test]
+fn the_ai_may_have_several_call_names_and_the_first_is_her_name() {
+    let c = Config::parse(&with_names("[\"Fish\", \"  Фиш \"]")).unwrap();
+    assert_eq!(c.ai_names, ["Fish", "Фиш"]);
+    assert_eq!(c.ai_name(), Some("Fish"));
+    assert_eq!(c.rooms.len(), 1, "the room after the list must still be read");
+}
+
+#[test]
+fn an_empty_list_means_off_but_an_empty_entry_is_refused() {
+    assert!(Config::parse(&with_names("[]")).unwrap().ai_names.is_empty());
+    refused(&with_names("[\"Fish\", \"  \"]"), "ai_name");
+    refused(&with_names("[\"\"]"), "ai_name");
+    // Weder Zahl noch Tabelle: nur Text oder Liste von Texten.
+    refused(&with_names("7"), "ai_name");
+}
+
+#[test]
+fn the_shipped_example_shows_the_list_form() {
+    let example = include_str!("../../rusty-fish.example.toml");
+    assert!(example.contains("# ai_name = [\"Fish\", \"Фиш\"]"), "the list form must be shown");
+    // Einkommentiert muss sie auch gelesen werden können.
+    let filled = example
+        .replace("host = \"000000000000000000\"", "host = \"42\"")
+        .replace("# ai_name = [\"Fish\", \"Фиш\"]", "ai_name = [\"Fish\", \"Фиш\"]");
+    assert_eq!(Config::parse(&filled).unwrap().ai_names, ["Fish", "Фиш"]);
+}
+
+#[test]
+fn a_mention_of_the_bot_at_the_start_is_a_question() {
+    assert_eq!(mention_question("<@42> wie spät ist es?", 42), Some("wie spät ist es?"));
+    // Die alte Schreibweise mit Ausrufezeichen.
+    assert_eq!(mention_question("<@!42> как дела?", 42), Some("как дела?"));
+    assert_eq!(mention_question("   <@42>   hallo  ", 42), Some("hallo"));
+    assert_eq!(mention_question("<@42>, hallo", 42), Some("hallo"));
+    assert_eq!(mention_question("<@42>: hallo", 42), Some("hallo"));
+    // Das Kürzel endet von selbst; ein Leerzeichen danach ist nicht nötig.
+    assert_eq!(mention_question("<@42>hallo", 42), Some("hallo"));
+}
+
+#[test]
+fn other_mentions_are_no_question() {
+    assert_eq!(mention_question("hallo <@42>, wie geht es?", 42), None, "middle of a sentence");
+    assert_eq!(mention_question("<@43> hallo", 42), None, "another user");
+    assert_eq!(mention_question("<@420> hallo", 42), None, "an id that only starts the same");
+    assert_eq!(mention_question("<@4> hallo", 42), None);
+    assert_eq!(mention_question("<@&42> hallo", 42), None, "a role");
+    assert_eq!(mention_question("<#42> hallo", 42), None, "a channel");
+    assert_eq!(mention_question("<@42>", 42), None, "nothing asked");
+    assert_eq!(mention_question("<@42> , : ", 42), None, "nothing asked");
+    assert_eq!(mention_question("<@42 hallo", 42), None, "not closed");
+    assert_eq!(mention_question("hallo", 42), None);
+    assert_eq!(mention_question("", 42), None);
+    // Solange der Bot seine eigene ID nicht kennt, spricht ihn nichts an.
+    assert_eq!(mention_question("<@0> hallo", 0), None);
+}
+
+#[test]
+fn the_room_gets_the_call_name_instead_of_the_discord_code() {
+    assert_eq!(
+        mention_as_call("<@42> wie spät ist es?", 42, "Fish").as_deref(),
+        Some("Fish, wie spät ist es?")
+    );
+    assert_eq!(mention_as_call("<@!42>: как дела?", 42, "Fish").as_deref(), Some("Fish, как дела?"));
+    assert_eq!(mention_as_call("hallo <@42>", 42, "Fish"), None);
+    assert_eq!(mention_as_call("<@43> hallo", 42, "Fish"), None);
+    // Was dabei herauskommt, versteht die Ansprechregel des Kerns.
+    let handed = mention_as_call("<@42> hallo?", 42, "Fish").unwrap();
+    assert_eq!(rusty_fish_core::addressed_any(&handed, &["Fish", "Фиш"]), Some("hallo?"));
 }
 
 // --- das Datum ---------------------------------------------------------------

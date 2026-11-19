@@ -19,8 +19,13 @@ host = "000000000000000000"
 # Optional: a name for the AI. With a name, anyone in the room can talk to it
 # by starting a message with that name, like "Fish, what does that mean?".
 # The name must stand at the start, followed by a space, a comma or a colon.
+# Mentioning the bot with @ at the start of a message counts the same.
 # Without a name the AI only translates.
 # ai_name = "Fish"
+#
+# A list gives the AI several call names, for guests who type in another
+# script. The first one is the name she appears under; all of them address her.
+# ai_name = ["Fish", "Фиш"]
 
 # What you allow per day (UTC), since it all runs on your key.
 # Leave a line out and the value shown here applies.

@@ -21,7 +21,7 @@
 //! Dazu kommen das Kontingent und die ansprechbare KI, siehe [`converse`].
 
 use rusty_fish_core::{
-    Ask, Line, Model, ModelError, Outcome, Prompt, Reply, Request, addressed, ask, translate,
+    Ask, Line, Model, ModelError, Outcome, Prompt, Reply, Request, addressed_any, ask, translate,
 };
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -427,8 +427,10 @@ pub const NO_ANSWER: &str = "I could not answer";
 #[derive(Debug, Clone)]
 pub struct House<'a> {
     pub limits: &'a Limits,
-    /// Der Name der KI. Fehlt er, ist sie nicht ansprechbar.
-    pub ai_name: Option<&'a str>,
+    /// Die Rufnamen der KI. Der erste ist der Name, unter dem sie erscheint
+    /// und den sie im Auftrag trägt; jeder gilt als Ansprache. Ohne Rufnamen
+    /// ist sie nicht ansprechbar.
+    pub ai_names: &'a [&'a str],
     /// UTC-Datum, etwa "2026-11-19".
     pub today: &'a str,
 }
@@ -457,8 +459,13 @@ pub async fn converse<M: Model + Sync>(
         return Vec::new();
     };
 
-    // Ob die KI angesprochen ist, entscheidet der Name am Anfang, nicht die KI.
-    let name = house.ai_name.filter(|name| addressed(msg.text, name).is_some());
+    // Ob die KI angesprochen ist, entscheidet ein Rufname am Anfang, nicht die
+    // KI. Jeder Rufname gilt; wer sie ist, sagt der erste.
+    let name = house
+        .ai_names
+        .first()
+        .copied()
+        .filter(|_| addressed_any(msg.text, house.ai_names).is_some());
     // Ohne Zustimmung des Fragenden geht auch keine Frage an die KI.
     let name = name.filter(|_| msg.consented);
 
