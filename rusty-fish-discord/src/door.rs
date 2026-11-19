@@ -132,6 +132,10 @@ where
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         let Interaction::Component(click) = interaction else { return };
+        // Nur die Kennung des Knopfs, kein Text. Gemessen am 19.11.2026: ein
+        // Klick auf die Zustimmung kam nicht an, und ohne diese Zeile war
+        // nicht zu sehen, ob Discord ihn überhaupt gemeldet hatte.
+        eprintln!("rusty-fish: click received on {}", click.data.custom_id);
         match click.data.custom_id.as_str() {
             CONSENT_BUTTON => self.consent_clicked(&ctx.http, &click).await,
             RAISE_BUTTON | KEEP_BUTTON => self.budget_clicked(&ctx.http, &click).await,
@@ -146,6 +150,14 @@ where
 {
     /// Jemand hat den Knopf unter der Bitte um Zustimmung gedrückt.
     async fn consent_clicked(&self, http: &Http, click: &ComponentInteraction) {
+        // Discord will binnen drei Sekunden eine Antwort, sonst meldet es dem
+        // Menschen „Interaktion fehlgeschlagen". Das Schloss kann länger
+        // besetzt sein, solange eine Nachricht übersetzt wird. Deshalb erst
+        // quittieren (nur für den Klickenden sichtbar), dann speichern.
+        if let Err(why) = click.defer_ephemeral(http).await {
+            eprintln!("rusty-fish: cannot acknowledge the consent click: {why}");
+        }
+
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
         let saved = {
             let mut inner = self.inner.lock().await;
@@ -153,16 +165,17 @@ where
             inner.store.save()
         };
         let reply = match saved {
-            Ok(()) => "✓",
+            Ok(()) => {
+                eprintln!("rusty-fish: consent stored");
+                "✓"
+            }
             Err(why) => {
                 eprintln!("rusty-fish: {why}");
                 "⚠"
             }
         };
-        let response = CreateInteractionResponse::Message(
-            CreateInteractionResponseMessage::new().content(reply).ephemeral(true),
-        );
-        if let Err(why) = click.create_response(http, response).await {
+        let edit = EditInteractionResponse::new().content(reply);
+        if let Err(why) = click.edit_response(http, edit).await {
             eprintln!("rusty-fish: cannot confirm the consent: {why}");
         }
     }
