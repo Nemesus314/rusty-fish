@@ -1,0 +1,9 @@
+[package]
+name = "rusty-fish-room"
+description = "Room logic of Rusty Fish: who receives what, in which language. Knows no Discord and no Matrix."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusty-fish-core = { path = "../rusty-fish-core" }

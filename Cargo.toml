@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["rusty-fish-core", "rusty-fish-openai", "rusty-fish"]
+members = ["rusty-fish-core", "rusty-fish-room", "rusty-fish-openai", "rusty-fish"]
 
 [workspace.package]
 version = "0.1.0"
