@@ -200,6 +200,10 @@ void main() {
       '8:Korean',
     ]);
     expect(doc.rooms.single.seats.every((s) => s.gender == null), isTrue);
+    // Entschieden von Nemesus am 20.11.2026 („Ja, vorbelegen"): ein neues
+    // Profil bringt Englisch als neutrale Sprache mit. Es bleibt ein Feld,
+    // das man leeren kann.
+    expect(doc.rooms.single.passThrough, ['English']);
   });
 
   testWidgets('a name the program would refuse is flagged while typing', (

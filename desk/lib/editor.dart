@@ -570,7 +570,8 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
               () => _rooms.add(
                 _RoomDraft(
                   const Room(
-                    passThrough: [],
+                    // Wie beim neuen Profil: Englisch ist vorbelegt.
+                    passThrough: ['English'],
                     contextLines: 10,
                     seats: [
                       Seat(channel: '', lang: ''),

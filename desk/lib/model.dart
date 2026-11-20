@@ -152,7 +152,10 @@ class ProfileDoc {
     ),
     rooms: [
       Room(
-        passThrough: [],
+        // Entschieden von Nemesus am 20.11.2026: Englisch ist als neutrale
+        // Sprache vorbelegt. Vorausgesetzt wird es nicht; wer es nicht will,
+        // leert das Feld.
+        passThrough: ['English'],
         contextLines: 10,
         seats: [
           Seat(channel: '', lang: ''),
