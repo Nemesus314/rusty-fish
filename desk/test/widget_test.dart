@@ -84,6 +84,9 @@ void main() {
     expect(inCard('tea', find.textContaining('222')), findsOneWidget);
     expect(inCard('tea', find.text('2 people listed')), findsOneWidget);
     expect(inCard('tea', find.text('AI answers to Fish, Фиш')), findsOneWidget);
+    // Nemesus am 20.11.2026: in der Übersicht war nicht zu sehen, welche
+    // Sprache unübersetzt bleibt.
+    expect(inCard('tea', find.text('English stays untranslated')), findsOneWidget);
     expect(
       inCard('tea', find.text('3,231 of 100,000 tokens today')),
       findsOneWidget,

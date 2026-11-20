@@ -682,8 +682,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
                   key: ValueKey('room-$r-pass'),
                   controller: room.passThrough,
                   decoration: const InputDecoration(
-                    labelText: 'Languages that stay untranslated',
-                    helperText: 'A fallback you both speak. Separate several with commas.',
+                    // Bis zum 20.11.2026 hieß das Feld „Languages that stay
+                    // untranslated". Nemesus suchte nach der „Neutral-Sprache"
+                    // und fand es nicht.
+                    labelText: 'Neutral language (stays untranslated)',
+                    helperText:
+                        'For example English: a fallback everyone reads. Separate several with commas.',
                   ),
                 ),
               ),

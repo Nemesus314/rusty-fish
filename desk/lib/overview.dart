@@ -400,6 +400,9 @@ class _ProfileCard extends StatelessWidget {
                         : 'AI answers to ${doc.aiNames.join(', ')}',
                   ),
                   Text(_usage(entry.usage, today)),
+                  // Nemesus am 20.11.2026: in der Übersicht war nicht zu
+                  // sehen, welche Sprache unübersetzt bleibt.
+                  Text(_neutral(doc.rooms)),
                 ],
               ),
             ],
@@ -464,6 +467,21 @@ class _ProfileCard extends StatelessWidget {
     1 => '1 person listed',
     _ => '$count people listed',
   };
+
+  /// Welche Sprachen unübersetzt durchgehen, über alle Räume des Profils.
+  static String _neutral(List<Room> rooms) {
+    final langs = <String>[];
+    for (final room in rooms) {
+      for (final lang in room.passThrough) {
+        if (!langs.contains(lang)) langs.add(lang);
+      }
+    }
+    return switch (langs.length) {
+      0 => 'no neutral language',
+      1 => '${langs.first} stays untranslated',
+      _ => '${langs.join(', ')} stay untranslated',
+    };
+  }
 
   static String _usage(Usage? usage, String today) {
     // Ein gespeicherter Verbrauch von einem früheren Tag zählt heute nicht.
