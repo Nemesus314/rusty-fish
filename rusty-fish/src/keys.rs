@@ -6,7 +6,7 @@
 //! Datenbank des Dienstes, und der Dienst sieht ihn nur im Moment des Aufrufs.
 
 use keyring::v1::{Entry, Error};
-use rusty_fish_openai::Secret;
+use rusty_fish_core::Secret;
 
 const SERVICE: &str = "rusty-fish";
 

@@ -9,12 +9,13 @@
 mod keys;
 mod lock;
 mod profiles;
+mod secrets;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
-use rusty_fish_core::{Gender, Outcome, Request, translate};
+use rusty_fish_core::{Gender, Outcome, Request, Secret, translate};
 use rusty_fish_discord::config::Config;
-use rusty_fish_openai::{OPENAI_BASE_URL, OpenAi, Secret};
+use rusty_fish_providers::{AnyModel, Provider, catalog, connect};
 use serde_json::json;
 use std::io::Read;
 use std::path::PathBuf;
@@ -35,11 +36,20 @@ enum Command {
         #[command(subcommand)]
         action: KeyAction,
     },
+    /// List the AI services the fish can talk to
+    Providers {
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// List the models your key can use
     Models {
-        /// Address of a service that speaks the OpenAI chat format
-        #[arg(long, default_value = OPENAI_BASE_URL)]
-        base_url: String,
+        /// The AI service; see `rusty-fish providers`
+        #[arg(long, default_value = "openai")]
+        provider: String,
+        /// An address of your own, in place of the address of the service
+        #[arg(long)]
+        base_url: Option<String>,
         /// Print the list as JSON
         #[arg(long)]
         json: bool,
@@ -55,9 +65,12 @@ enum Command {
         /// Model that translates; see `rusty-fish models`
         #[arg(long)]
         model: String,
-        /// Address of a service that speaks the OpenAI chat format
-        #[arg(long, default_value = OPENAI_BASE_URL)]
-        base_url: String,
+        /// The AI service; see `rusty-fish providers`
+        #[arg(long, default_value = "openai")]
+        provider: String,
+        /// An address of your own, in place of the address of the service
+        #[arg(long)]
+        base_url: Option<String>,
         /// Grammatical gender of the writer, for languages that mark it
         #[arg(long, value_enum)]
         writer: Option<Who>,
@@ -159,11 +172,21 @@ impl Who {
     }
 }
 
-/// Die Geheimnisse, die der Fisch kennt. Jedes liegt für sich in der Ablage.
+/// Die Geheimnisse, die der Fisch kennt. Jedes liegt für sich in der Ablage:
+/// eines je KI-Dienst und der Token des Bots. Welche es gibt, sagt
+/// [`secrets::entries`]; ein Test hält diese Liste und die Befehlszeile gleich.
 #[derive(Clone, Copy, ValueEnum)]
 enum Which {
-    /// API key of the translating AI
+    /// API key for ChatGPT (OpenAI)
     Openai,
+    /// API key for Grok (xAI)
+    Xai,
+    /// API key for Gemini (Google)
+    Google,
+    /// API key for Claude (Anthropic)
+    Anthropic,
+    /// API key for your own model, if it asks for one
+    Custom,
     /// Token of your Discord bot
     Discord,
 }
@@ -172,16 +195,17 @@ impl Which {
     /// Name des Eintrags in der Ablage.
     fn entry(self) -> &'static str {
         match self {
-            Which::Openai => "openai",
+            Which::Openai => Provider::OpenAi.id(),
+            Which::Xai => Provider::Xai.id(),
+            Which::Google => Provider::Google.id(),
+            Which::Anthropic => Provider::Anthropic.id(),
+            Which::Custom => Provider::Custom.id(),
             Which::Discord => profiles::BOT,
         }
     }
 
-    fn label(self) -> &'static str {
-        match self {
-            Which::Openai => "API key",
-            Which::Discord => "Discord bot token",
-        }
+    fn label(self) -> String {
+        secrets::label(self.entry())
     }
 }
 
@@ -224,10 +248,7 @@ async fn run(command: Command) -> Result<(), String> {
         }
         Command::Key { action: KeyAction::Status { which, json } } => {
             if json {
-                let status = json!({
-                    "openai": keys::load(Which::Openai.entry())?.is_some(),
-                    "discord": keys::load(Which::Discord.entry())?.is_some(),
-                });
+                let status = secrets::status(&|entry| keys::load(entry).map(|s| s.is_some()))?;
                 println!("{status}");
                 return Ok(());
             }
@@ -245,8 +266,22 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Models { base_url, json } => {
-            let fish = OpenAi::new(&base_url, "", stored(Which::Openai)?).map_err(|e| e.to_string())?;
+        Command::Providers { json } => {
+            let list = catalog();
+            if json {
+                println!("{}", pretty(&list));
+                return Ok(());
+            }
+            for entry in list.as_array().into_iter().flatten() {
+                let id = entry["id"].as_str().unwrap_or("?");
+                let label = entry["label"].as_str().unwrap_or("?");
+                let address = entry["base_url"].as_str().unwrap_or("(the address in the profile)");
+                println!("{id:<10}  {label:<28}  {address}");
+            }
+            Ok(())
+        }
+        Command::Models { provider, base_url, json } => {
+            let fish = service(&provider, base_url.as_deref(), "")?;
             let models = fish.models().await.map_err(|e| e.to_string())?;
             if json {
                 println!("{}", json!(models));
@@ -257,9 +292,18 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Translate { to, keep, model, base_url, writer, reader, informal, text } => {
-            let fish =
-                OpenAi::new(&base_url, &model, stored(Which::Openai)?).map_err(|e| e.to_string())?;
+        Command::Translate {
+            to,
+            keep,
+            model,
+            provider,
+            base_url,
+            writer,
+            reader,
+            informal,
+            text,
+        } => {
+            let fish = service(&provider, base_url.as_deref(), &model)?;
             let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
             let request = Request {
                 speaker: "me",
@@ -302,11 +346,18 @@ async fn run(command: Command) -> Result<(), String> {
             };
             let config = Config::parse(&text)?;
             // Erst alles prüfen, dann verbinden: fehlt etwas, scheitert der
-            // Fisch, bevor er sich bei Discord zeigt.
-            let key = stored(Which::Openai)?;
-            let token = stored(Which::Discord)?;
-            let base_url = config.base_url.clone().unwrap_or_else(|| OPENAI_BASE_URL.to_owned());
-            let fish = OpenAi::new(&base_url, &config.model, key).map_err(|e| e.to_string())?;
+            // Fisch, bevor er sich bei Discord zeigt. Dienst, Adresse und
+            // Schlüssel kommen aus dem Profil.
+            let key = key_for(config.provider)?;
+            let token = keys::load(profiles::BOT)?.ok_or_else(|| {
+                format!(
+                    "{} not stored; run `rusty-fish key set {}` first",
+                    secrets::label(profiles::BOT),
+                    profiles::BOT
+                )
+            })?;
+            let base_url = config.service_address();
+            let fish = connect(config.provider, Some(&base_url), &config.model, key)?;
 
             // Ein Bot, ein Fisch: die Sperre gilt bis zum Ende dieses Laufs,
             // auch für einen Start mit --config, denn der Bot ist derselbe.
@@ -410,12 +461,42 @@ fn pretty(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
-fn stored(which: Which) -> Result<Secret, String> {
-    keys::load(which.entry())?.ok_or_else(|| {
-        format!(
-            "{} not stored; run `rusty-fish key set {}` first",
-            which.label(),
-            which.entry()
-        )
-    })
+/// Der Schlüssel für einen Dienst aus der Ablage. Fehlt er, obwohl der Dienst
+/// einen braucht, sagt die Meldung, wie man ihn ablegt. Ein eigenes Modell
+/// darf ohne Schlüssel laufen.
+fn key_for(provider: Provider) -> Result<Option<Secret>, String> {
+    match keys::load(provider.id())? {
+        Some(key) => Ok(Some(key)),
+        None if provider.needs_key() => Err(secrets::missing(provider)),
+        None => Ok(None),
+    }
+}
+
+/// Der Anschluss für die Befehle `models` und `translate`.
+fn service(provider: &str, base_url: Option<&str>, model: &str) -> Result<AnyModel, String> {
+    let provider = Provider::parse(provider)?;
+    // Auf der Befehlszeile heißt die Adresse `--base-url`; die Meldung aus den
+    // Einstellungen würde hier ein Feld nennen, das es an dieser Stelle nicht gibt.
+    let own = base_url.map(str::trim).filter(|url| !url.is_empty());
+    if own.is_none() && provider.base_url().is_none() {
+        return Err(format!(
+            "{} needs `--base-url`, the address of the service",
+            provider.label()
+        ));
+    }
+    connect(provider, own, model, key_for(provider)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_command_line_knows_exactly_the_entries_of_the_store() {
+        let mut from_cli: Vec<&str> = Which::value_variants().iter().map(|w| w.entry()).collect();
+        let mut from_list = secrets::entries();
+        from_cli.sort();
+        from_list.sort();
+        assert_eq!(from_cli, from_list);
+    }
 }

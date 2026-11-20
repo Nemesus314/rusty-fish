@@ -551,3 +551,90 @@ fn the_consent_prompt_says_whose_service_reads_along() {
     assert!(text.contains("before you agree"));
     assert!(text.contains("OK"));
 }
+
+// --- Der KI-Dienst im Profil, seit dem 20.11.2026 ---
+
+#[test]
+fn without_a_service_the_settings_mean_openai() {
+    use rusty_fish_providers::Provider;
+    let c = Config::parse(GOOD).unwrap();
+    assert_eq!(c.provider, Provider::OpenAi);
+    assert_eq!(c.service_address(), "https://api.openai.com/v1");
+    // Ein leerer Wert zählt wie ein fehlender, so wie bei der Adresse.
+    let empty = format!("provider = \"\"\n{GOOD}");
+    assert_eq!(Config::parse(&empty).unwrap().provider, Provider::OpenAi);
+}
+
+#[test]
+fn the_service_named_in_the_settings_is_the_one_used() {
+    use rusty_fish_providers::Provider;
+    let cases = [
+        ("xai", Provider::Xai, "https://api.x.ai/v1"),
+        ("google", Provider::Google, "https://generativelanguage.googleapis.com/v1beta/openai"),
+        ("anthropic", Provider::Anthropic, "https://api.anthropic.com/v1"),
+        (" OpenAI ", Provider::OpenAi, "https://api.openai.com/v1"),
+    ];
+    for (written, provider, address) in cases {
+        let text = format!("provider = \"{written}\"\n{GOOD}");
+        let c = Config::parse(&text).unwrap_or_else(|e| panic!("{written}: {e}"));
+        assert_eq!(c.provider, provider);
+        assert_eq!(c.service_address(), address);
+    }
+}
+
+#[test]
+fn an_own_address_goes_before_the_one_of_the_service() {
+    let text = format!("provider = \"anthropic\"\nbase_url = \"https://proxy.example/v1\"\n{GOOD}");
+    assert_eq!(Config::parse(&text).unwrap().service_address(), "https://proxy.example/v1");
+}
+
+#[test]
+fn an_own_model_needs_its_address() {
+    use rusty_fish_providers::Provider;
+    refused(&format!("provider = \"custom\"\n{GOOD}"), "base_url");
+    let text = format!("provider = \"custom\"\nbase_url = \"http://localhost:11434/v1\"\n{GOOD}");
+    let c = Config::parse(&text).unwrap();
+    assert_eq!(c.provider, Provider::Custom);
+    assert_eq!(c.service_address(), "http://localhost:11434/v1");
+}
+
+#[test]
+fn an_unknown_service_is_refused_by_name() {
+    refused(&format!("provider = \"mistral\"\n{GOOD}"), "mistral");
+    refused(&format!("provider = \"mistral\"\n{GOOD}"), "anthropic");
+}
+
+#[test]
+fn the_shipped_example_shows_the_service() {
+    use rusty_fish_providers::Provider;
+    let example = include_str!("../../rusty-fish.example.toml");
+    assert!(example.contains("provider = \"openai\""), "the example must show the setting");
+    for id in ["xai", "google", "anthropic", "custom"] {
+        assert!(example.contains(id), "the example must name {id}");
+    }
+    let filled = example.replace("host = \"000000000000000000\"", "host = \"42\"");
+    assert_eq!(Config::parse(&filled).unwrap().provider, Provider::OpenAi);
+}
+
+#[test]
+fn the_consent_prompt_names_the_service_really_used_for_every_provider() {
+    // Die Bitte um Zustimmung soll sagen, wohin die Sätze gehen. Der Name kommt
+    // deshalb aus der Adresse, die wirklich benutzt wird, nicht aus der Kennung:
+    // wer bei „anthropic" eine eigene Adresse einträgt, schickt dorthin.
+    use rusty_fish_discord::render::{consent_text, service_name};
+    let cases = [
+        ("", "api.openai.com"),
+        ("provider = \"openai\"\n", "api.openai.com"),
+        ("provider = \"xai\"\n", "api.x.ai"),
+        ("provider = \"google\"\n", "generativelanguage.googleapis.com"),
+        ("provider = \"anthropic\"\n", "api.anthropic.com"),
+        ("provider = \"custom\"\nbase_url = \"http://localhost:11434/v1\"\n", "localhost:11434"),
+        ("provider = \"anthropic\"\nbase_url = \"https://proxy.example/v1\"\n", "proxy.example"),
+    ];
+    for (head, host) in cases {
+        let c = Config::parse(&format!("{head}{GOOD}")).unwrap_or_else(|e| panic!("{head}: {e}"));
+        let service = service_name(&c.service_address());
+        assert_eq!(service, host, "{head}");
+        assert!(consent_text(&service).contains(host), "{head}");
+    }
+}

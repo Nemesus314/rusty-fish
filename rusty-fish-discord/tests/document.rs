@@ -10,6 +10,7 @@ fn seat(channel: &str, lang: &str, gender: Option<&str>) -> DocSeat {
 fn full() -> Document {
     Document {
         name: None,
+        provider: "custom".to_owned(),
         model: "some-model".to_owned(),
         base_url: Some("http://localhost:11434/v1".to_owned()),
         host: "100".to_owned(),
@@ -37,6 +38,7 @@ fn full() -> Document {
 fn minimal() -> Document {
     Document {
         name: None,
+        provider: "openai".to_owned(),
         model: "m".to_owned(),
         base_url: None,
         host: "1".to_owned(),
@@ -184,6 +186,48 @@ fn the_document_goes_out_as_json_in_the_agreed_shape() {
     assert!(v["rooms"][1]["seats"][0]["gender"].is_null());
     assert_eq!(v["people"][1]["id"], "777");
     assert_eq!(v["base_url"], "http://localhost:11434/v1");
+    assert_eq!(v["provider"], "custom");
+}
+
+// --- Der KI-Dienst im Profil, seit dem 20.11.2026 ---
+
+#[test]
+fn every_service_survives_the_trip_through_the_file_format() {
+    for id in ["openai", "xai", "google", "anthropic"] {
+        let mut doc = minimal();
+        doc.provider = id.to_owned();
+        let (toml, config) = doc.check().unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert_eq!(config.provider.id(), id);
+        assert_eq!(Document::from(&config), doc, "the trip changed the document:\n{toml}");
+    }
+}
+
+#[test]
+fn a_document_without_a_service_means_openai() {
+    let json = r#"{"model": "m", "host": "1", "rooms": [{"seats": [
+        {"channel": "111", "lang": "German"}, {"channel": "222", "lang": "Russian"}]}]}"#;
+    let doc = Document::from_json(json).unwrap();
+    assert_eq!(doc.provider, "openai");
+    let (_, config) = doc.check().unwrap();
+    assert_eq!(config.provider.id(), "openai");
+}
+
+#[test]
+fn the_service_is_always_part_of_what_goes_out() {
+    let (_, config) = minimal().check().unwrap();
+    let v: serde_json::Value = serde_json::to_value(Document::from(&config)).unwrap();
+    assert_eq!(v["provider"], "openai");
+}
+
+#[test]
+fn an_unknown_service_and_an_own_model_without_address_are_refused() {
+    let mut d = minimal();
+    d.provider = "mistral".to_owned();
+    refused(&d, "mistral");
+
+    let mut d = minimal();
+    d.provider = "custom".to_owned();
+    refused(&d, "base_url");
 }
 
 /// Das mitgelieferte Beispiel muss sich als Dokument zeigen und wieder

@@ -139,6 +139,33 @@ impl fmt::Display for ModelError {
 
 impl std::error::Error for ModelError {}
 
+/// Ein Schlüssel. Er lässt sich nicht versehentlich ausgeben: `Debug` zeigt
+/// ihn nie, `Display` gibt es nicht.
+///
+/// Bis zum 20.11.2026 lag dieser Typ im Anschluss für OpenAI. Seit es mehrere
+/// Anschlüsse gibt, brauchen ihn alle, deshalb liegt er hier. Der Kern selbst
+/// kennt weiter keinen Anbieter und benutzt keinen Schlüssel.
+#[derive(Clone)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: impl Into<String>) -> Self {
+        Secret(value.into())
+    }
+
+    /// Der einzige Weg an den Wert. Wer ihn ruft, übergibt ihn sofort an den
+    /// Dienst, für den er gedacht ist, und gibt ihn nirgends aus.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Secret(***)")
+    }
+}
+
 impl fmt::Display for FishError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -1,15 +1,23 @@
 //! Einstellungen der Tür, als TOML-Datei. Nichts ist auf einen bestimmten
 //! Betreiber zugeschnitten: andere sollen den Fisch bei sich laufen lassen.
 
+use rusty_fish_providers::Provider;
 use rusty_fish_room::{Gender, Limits, Room, Seat};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
+    /// Der KI-Dienst, der übersetzt. Fehlt die Angabe, gilt OpenAI, damit
+    /// Profile von vor dem 20.11.2026 unverändert laufen.
+    ///
+    /// Entschieden von Nemesus am 20.11.2026: „Die Möglichkeit, die KIs im
+    /// Profil zu wechseln sollte jedoch erhalten bleiben."
+    pub provider: Provider,
     /// Modell, das übersetzt. Siehe `rusty-fish models`.
     pub model: String,
-    /// Adresse eines Dienstes im OpenAI-Format. Fehlt sie, gilt OpenAI selbst.
+    /// Eine eigene Adresse statt der des Dienstes. Bei einem selbst gehosteten
+    /// Modell („custom") ist sie Pflicht, sonst eine Überschreibung.
     pub base_url: Option<String>,
     /// Discord-Kennung des Gastgebers. Wer den Fisch startet, hat zugestimmt.
     pub host: String,
@@ -36,6 +44,7 @@ pub struct Config {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
+    provider: Option<String>,
     model: String,
     base_url: Option<String>,
     host: String,
@@ -162,7 +171,28 @@ impl Config {
                 return Err(format!("configuration: person {id} is listed twice"));
             }
         }
-        Ok(Config { model, base_url, host, ai_names, limits, rooms, people })
+        // Fehlt der Dienst oder ist er leer, gilt OpenAI: so liefen alle
+        // Profile, bevor es die Wahl gab. Ein unbekannter wird laut abgelehnt.
+        let provider = match raw.provider.as_deref().map(str::trim) {
+            None | Some("") => Provider::OpenAi,
+            Some(id) => {
+                Provider::parse(id).map_err(|why| format!("configuration: `provider`: {why}"))?
+            }
+        };
+        // Die eine Stelle, die über die Adresse entscheidet, prüft auch, ob es
+        // eine gibt. Bei einem eigenen Modell muss sie im Profil stehen.
+        rusty_fish_providers::address(provider, base_url.as_deref())
+            .map_err(|why| format!("configuration: {why}"))?;
+        Ok(Config { provider, model, base_url, host, ai_names, limits, rooms, people })
+    }
+
+    /// Die Adresse des Dienstes, die wirklich benutzt wird: die eigene aus dem
+    /// Profil, sonst die des Dienstes. Die Bitte um Zustimmung nennt den Dienst
+    /// nach dieser Adresse.
+    pub fn service_address(&self) -> String {
+        // Dass es eine gibt, hat `parse` geprüft.
+        rusty_fish_providers::address(self.provider, self.base_url.as_deref())
+            .unwrap_or_default()
     }
 
     /// Das grammatische Geschlecht, das der Gastgeber für diese Person

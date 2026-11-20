@@ -1920,9 +1920,18 @@ dependencies = [
  "rpassword",
  "rusty-fish-core",
  "rusty-fish-discord",
- "rusty-fish-openai",
+ "rusty-fish-providers",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "rusty-fish-anthropic"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.13.5",
+ "rusty-fish-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -1934,6 +1943,7 @@ name = "rusty-fish-discord"
 version = "0.1.0"
 dependencies = [
  "rusty-fish-core",
+ "rusty-fish-providers",
  "rusty-fish-room",
  "serde",
  "serde_json",
@@ -1948,6 +1958,16 @@ version = "0.1.0"
 dependencies = [
  "reqwest 0.13.5",
  "rusty-fish-core",
+ "serde_json",
+]
+
+[[package]]
+name = "rusty-fish-providers"
+version = "0.1.0"
+dependencies = [
+ "rusty-fish-anthropic",
+ "rusty-fish-core",
+ "rusty-fish-openai",
  "serde_json",
 ]
 

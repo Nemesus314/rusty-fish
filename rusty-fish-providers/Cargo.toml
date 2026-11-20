@@ -1,0 +1,12 @@
+[package]
+name = "rusty-fish-providers"
+description = "The AI services Rusty Fish can talk to: one list, and the way to connect to each."
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusty-fish-anthropic = { path = "../rusty-fish-anthropic" }
+rusty-fish-core = { path = "../rusty-fish-core" }
+rusty-fish-openai = { path = "../rusty-fish-openai" }
+serde_json = "1.0.154"

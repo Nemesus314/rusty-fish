@@ -2,14 +2,23 @@
 # Copy this file to rusty-fish.toml, fill it in, then: rusty-fish run
 #
 # Secrets do not belong here. Store them once with:
-#   rusty-fish key set openai
+#   rusty-fish key set openai      (or xai, google, anthropic, custom)
 #   rusty-fish key set discord
 
-# The model that translates. `rusty-fish models` lists what your key can use.
+# The AI service that translates: "openai" (ChatGPT), "xai" (Grok), "google"
+# (Gemini), "anthropic" (Claude) or "custom" (your own model). Each service
+# has its own key in the store, so switching back and forth loses nothing.
+# `rusty-fish providers` lists them. Leave the line out and "openai" applies.
+provider = "openai"
+
+# The model that translates. `rusty-fish models --provider openai` lists what
+# your key can use at that service.
 model = "put-a-model-name-here"
 
-# Optional: another service that speaks the OpenAI chat format.
-# base_url = "https://api.openai.com/v1"
+# Optional: an address of your own in place of the service's. With "custom" it
+# is required: the address of your model, for example a local server that
+# speaks the OpenAI chat format. A key is optional there.
+# base_url = "http://localhost:11434/v1"
 
 # Your own Discord user id. Whoever runs the fish has agreed to the AI reading
 # along; everyone else is asked once in their channel.

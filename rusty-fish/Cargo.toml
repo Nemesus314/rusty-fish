@@ -11,6 +11,6 @@ keyring = "4.2.0"
 rpassword = "7.5.5"
 rusty-fish-core = { path = "../rusty-fish-core" }
 rusty-fish-discord = { version = "0.1.0", path = "../rusty-fish-discord" }
-rusty-fish-openai = { path = "../rusty-fish-openai" }
+rusty-fish-providers = { path = "../rusty-fish-providers" }
 serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros"] }

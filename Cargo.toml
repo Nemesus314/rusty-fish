@@ -4,6 +4,8 @@ members = [
     "rusty-fish-core",
     "rusty-fish-room",
     "rusty-fish-openai",
+    "rusty-fish-anthropic",
+    "rusty-fish-providers",
     "rusty-fish-discord",
     "rusty-fish",
 ]

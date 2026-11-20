@@ -24,6 +24,10 @@ pub struct Document {
     /// Dateiname; beim Speichern gilt der Name aus dem Befehl, nicht dieser.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Die Kennung des KI-Dienstes, etwa "openai" oder "anthropic". Fehlt sie
+    /// in einem Dokument, gilt "openai", wie in einer Datei.
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub model: String,
     #[serde(default)]
     pub base_url: Option<String>,
@@ -86,6 +90,10 @@ fn default_context_lines() -> usize {
     10
 }
 
+fn default_provider() -> String {
+    "openai".to_owned()
+}
+
 /// Wie ein Geschlecht im Dokument und in der TOML-Datei heißt.
 fn gender_word(gender: Gender) -> &'static str {
     match gender {
@@ -99,6 +107,7 @@ impl From<&Config> for Document {
     fn from(config: &Config) -> Self {
         Document {
             name: None,
+            provider: config.provider.id().to_owned(),
             model: config.model.clone(),
             base_url: config.base_url.clone(),
             host: config.host.clone(),
@@ -151,6 +160,9 @@ impl Document {
         let mut out = String::from(
             "# Rusty Fish profile. Saved by the program; change it there or by hand.\n",
         );
+        // Der Dienst steht immer da, auch wenn es der Vorgabe-Dienst ist: wer
+        // die Datei liest, soll nicht wissen müssen, was ohne Angabe gilt.
+        out.push_str(&format!("provider = {}\n", quote(&self.provider)));
         out.push_str(&format!("model = {}\n", quote(&self.model)));
         // Eine leere Adresse heißt wie beim Lesen: keine, also der Vorgabe-Dienst.
         if let Some(url) = self.base_url.as_deref().filter(|u| !u.trim().is_empty()) {
