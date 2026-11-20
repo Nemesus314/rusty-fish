@@ -141,8 +141,6 @@ void main() {
       return;
     }
     expect(text, startsWith('# Rusty Fish'));
-    // Kyrillisch und Umlaute müssen heil durch die Leitung kommen.
-    expect(text, contains('rusty-fish'));
     expect(text.trimRight(), matches(RegExp(r'rusty-fish \d+\.\d+\.\d+\.$')));
   }, skip: skip);
 
