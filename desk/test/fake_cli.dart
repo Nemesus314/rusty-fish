@@ -170,6 +170,18 @@ class FakeCli implements FishCli {
     started.add(name);
     return lastRun = FakeRun();
   }
+
+  /// Gesetzt: das Programm kennt den Aufruf `guide` nicht (älterer Stand).
+  String? guideError;
+
+  @override
+  Future<String> guide() async {
+    final error = guideError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return '# Rusty Fish: what it is\n';
+  }
 }
 
 /// Ein gültiges Profil mit zwei Plätzen.

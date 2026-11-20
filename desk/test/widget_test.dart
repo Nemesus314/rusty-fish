@@ -1,6 +1,7 @@
 // Tests der Maske gegen die Attrappe. Zuerst geschrieben, gegen ein leeres
 // Gerüst gescheitert, dann die Maske dazu gebaut.
 
+import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:rusty_fish_desk/cli.dart';
@@ -126,6 +127,55 @@ void main() {
     // Modell zählt nicht mit, weil es keinen braucht.
     expect(find.text('AI keys: 1 of 4 stored'), findsOneWidget);
     expect(find.text('Bot token: not stored'), findsOneWidget);
+  });
+
+  group('the guide for an AI', () {
+    /// Fängt ab, was die Maske in die Zwischenablage legt.
+    List<String> clipboardOf(WidgetTester tester) {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add('${(call.arguments as Map)['text']}');
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      return copied;
+    }
+
+    testWidgets('one click puts the program\'s own description on the clipboard', (
+      tester,
+    ) async {
+      final copied = clipboardOf(tester);
+      await open(tester, threeProfiles());
+      await tester.tap(find.byKey(const ValueKey('copy-guide')));
+      await tester.pumpAndSettle();
+      expect(copied, ['# Rusty Fish: what it is\n']);
+      expect(find.textContaining('Guide copied.'), findsOneWidget);
+    });
+
+    testWidgets('a program without a guide says so and copies nothing', (
+      tester,
+    ) async {
+      final copied = clipboardOf(tester);
+      final fake = threeProfiles()..guideError = 'unrecognized subcommand \'guide\'';
+      await open(tester, fake);
+      await tester.tap(find.byKey(const ValueKey('copy-guide')));
+      await tester.pumpAndSettle();
+      expect(copied, isEmpty);
+      expect(
+        find.text('Cannot copy the guide: unrecognized subcommand \'guide\''),
+        findsOneWidget,
+      );
+    });
   });
 
   testWidgets('a refused save shows the reason and keeps what was typed', (

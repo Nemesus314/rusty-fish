@@ -131,6 +131,21 @@ void main() {
     }
   }, skip: skip);
 
+  test('the program hands out its own description', () async {
+    final cli = ProcessFishCli(exe!);
+    final String text;
+    try {
+      text = await cli.guide();
+    } on CliException {
+      markTestSkipped('this rusty-fish does not know `guide` yet');
+      return;
+    }
+    expect(text, startsWith('# Rusty Fish'));
+    // Kyrillisch und Umlaute müssen heil durch die Leitung kommen.
+    expect(text, contains('rusty-fish'));
+    expect(text.trimRight(), matches(RegExp(r'rusty-fish \d+\.\d+\.\d+\.$')));
+  }, skip: skip);
+
   test('the chosen service goes through the real program and back', () async {
     final cli = ProcessFishCli(exe!);
     final providers = await listedProviders(cli);

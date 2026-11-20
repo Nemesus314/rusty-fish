@@ -62,6 +62,11 @@ abstract class FishCli {
   Future<List<String>> models({String? provider, String? baseUrl});
 
   Future<FishRun> run(String name);
+
+  /// Die Beschreibung des Programms, die man einer KI zum Erklären gibt. Sie
+  /// kommt aus dem Programm selbst, damit sie zu dessen Stand gehört. Ein
+  /// älteres Programm kennt den Aufruf nicht und lehnt ihn ab.
+  Future<String> guide();
 }
 
 /// Die echte Umsetzung: ruft das Programm auf.
@@ -156,6 +161,9 @@ class ProcessFishCli implements FishCli {
     }
     return _ProcessRun(process);
   }
+
+  @override
+  Future<String> guide() => _call(['guide']);
 
   Future<String> _call(List<String> args, {String? input}) async {
     final Process process;

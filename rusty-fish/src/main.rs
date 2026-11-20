@@ -97,6 +97,20 @@ enum Command {
         #[arg(long)]
         profile: Option<String>,
     },
+    /// Print a description of this program for an AI assistant to explain the setup
+    Guide,
+}
+
+/// Die Beschreibung des Programms, wie sie im Repository steht.
+///
+/// Nemesus am 20.11.2026: „Wir sollten noch einen Text mit einer genauen
+/// Beschreibung der Anwendung hinterlegen. [...] Auf Wunsch kann dann [ein
+/// Gast] ihre KI ihres Vertrauens damit füttern". Der Text ist ins Programm
+/// eingebaut, damit er zu genau diesem Stand gehört und nicht zu einem anderen.
+const GUIDE: &str = include_str!("../../GUIDE.md");
+
+fn guide() -> String {
+    format!("{}\n\nThis text describes rusty-fish {}.\n", GUIDE.trim_end(), env!("CARGO_PKG_VERSION"))
 }
 
 #[derive(Subcommand)]
@@ -322,6 +336,10 @@ async fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Profile { action } => profile(action),
+        Command::Guide => {
+            print!("{}", guide());
+            Ok(())
+        }
         Command::Run { config, profile } => {
             // Wo die Einstellungen und ihr Zustand liegen: im Profilordner oder,
             // wie von Anfang an, in einer frei gewählten Datei mit dem Zustand
@@ -498,5 +516,32 @@ mod tests {
         from_cli.sort();
         from_list.sort();
         assert_eq!(from_cli, from_list);
+    }
+
+    #[test]
+    fn the_guide_names_every_ai_service_the_fish_knows() {
+        let text = guide();
+        for entry in catalog().as_array().into_iter().flatten() {
+            let label = entry["label"].as_str().expect("a service has a label");
+            assert!(text.contains(label), "the guide does not name {label}");
+        }
+    }
+
+    /// Kennungen von Discord sind lange Ziffernfolgen. Die Beschreibung geht an
+    /// fremde KIs; eine echte Kennung hat darin nichts verloren.
+    #[test]
+    fn the_guide_contains_no_discord_id() {
+        let longest = guide()
+            .split(|c: char| !c.is_ascii_digit())
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        assert!(longest < 10, "the guide contains a number of {longest} digits");
+    }
+
+    #[test]
+    fn the_guide_ends_with_the_version_it_describes() {
+        let text = guide();
+        assert!(text.trim_end().ends_with(&format!("rusty-fish {}.", env!("CARGO_PKG_VERSION"))));
     }
 }

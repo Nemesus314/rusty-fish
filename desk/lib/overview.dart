@@ -4,6 +4,7 @@
 import 'dart:async';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
@@ -167,6 +168,18 @@ class _OverviewPageState extends State<OverviewPage> {
     await _state.refresh();
   }
 
+  /// Legt die Beschreibung des Programms in die Zwischenablage. Wer sie einer
+  /// KI seines Vertrauens gibt, kann sich die Einrichtung erklären lassen.
+  Future<void> _copyGuide() async {
+    try {
+      final text = await widget.cli.guide();
+      await Clipboard.setData(ClipboardData(text: text));
+      _say('Guide copied. Paste it into a chat with an AI assistant you trust.');
+    } on CliException catch (e) {
+      _say('Cannot copy the guide: ${e.message}');
+    }
+  }
+
   Future<void> _secrets() async {
     await showDialog<void>(
       context: context,
@@ -228,6 +241,20 @@ class _OverviewPageState extends State<OverviewPage> {
           appBar: AppBar(
             title: const Text('Rusty Fish'),
             actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Tooltip(
+                  message:
+                      'Copies a description of Rusty Fish. An AI assistant can '
+                      'use it to explain the setup in any language.',
+                  child: TextButton.icon(
+                    key: const ValueKey('copy-guide'),
+                    onPressed: _copyGuide,
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copy guide for an AI'),
+                  ),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: _SecretIndicator(
