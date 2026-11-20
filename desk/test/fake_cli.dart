@@ -179,6 +179,7 @@ ProfileDoc docOf(
   String? baseUrl,
   List<String> aiNames = const [],
   List<Person> people = const [],
+  List<Seat>? seats,
 }) {
   return ProfileDoc(
     name: name,
@@ -191,17 +192,49 @@ ProfileDoc docOf(
       translationTokensPerDay: 100000,
       questionsPerGuestPerDay: 10,
     ),
-    rooms: const [
+    rooms: [
       Room(
-        passThrough: ['English'],
+        passThrough: const ['English'],
         contextLines: 10,
-        seats: [
-          Seat(channel: '111', lang: 'German', gender: Gender.male),
-          Seat(channel: '222', lang: 'Russian', gender: Gender.female),
-        ],
+        // Ohne Angabe: zwei Plätze ohne Besitzer, wie ein Profil aus der Zeit,
+        // bevor die Sprache an die Person gebunden wurde.
+        seats:
+            seats ??
+            const [
+              Seat(channel: '111', lang: 'German', gender: Gender.male),
+              Seat(channel: '222', lang: 'Russian', gender: Gender.female),
+            ],
       ),
     ],
     people: people,
+  );
+}
+
+/// Gastgeber 100 (Deutsch) und Gast 200 (Russisch), jeder mit eigenem Tisch.
+/// [guestInvited] und [guestServed] gehören zusammen: das Programm bedient den
+/// Tisch eines Gastes nur, wenn er eingeladen ist.
+ProfileDoc tablesDoc(String name, {bool guestInvited = true, bool? guestServed}) {
+  return docOf(
+    name,
+    people: [
+      const Person(id: '100', gender: Gender.male, lang: 'German'),
+      Person(
+        id: '200',
+        gender: Gender.female,
+        lang: 'Russian',
+        neutral: const ['English'],
+        invited: guestInvited,
+      ),
+    ],
+    seats: [
+      const Seat(channel: '111', lang: 'German', owner: '100'),
+      Seat(
+        channel: '222',
+        lang: 'Russian',
+        owner: '200',
+        served: guestServed ?? guestInvited,
+      ),
+    ],
   );
 }
 

@@ -73,7 +73,7 @@ class _OverviewPageState extends State<OverviewPage> {
     }
     final profile = request.profile;
     if (profile != null) {
-      await _edit(profile);
+      await _edit(profile, scrollTo: request.section);
     } else if (request.newProfile) {
       await _openEditor(ProfileDoc.blank(), isNew: true);
     } else if (request.secrets) {
@@ -92,7 +92,7 @@ class _OverviewPageState extends State<OverviewPage> {
     for (final entry in _state.list?.profiles ?? const <ProfileEntry>[]) entry.name,
   };
 
-  Future<void> _openEditor(ProfileDoc doc, {required bool isNew}) async {
+  Future<void> _openEditor(ProfileDoc doc, {required bool isNew, String? scrollTo}) async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => ProfileEditorPage(
@@ -102,6 +102,7 @@ class _OverviewPageState extends State<OverviewPage> {
           existingNames: _names,
           providers: _state.providers,
           providersListed: _state.providersListed,
+          scrollTo: scrollTo,
         ),
       ),
     );
@@ -110,10 +111,10 @@ class _OverviewPageState extends State<OverviewPage> {
     }
   }
 
-  Future<void> _edit(String name) async {
+  Future<void> _edit(String name, {String? scrollTo}) async {
     try {
       final doc = await widget.cli.showProfile(name);
-      await _openEditor(doc, isNew: false);
+      await _openEditor(doc, isNew: false, scrollTo: scrollTo);
     } on CliException catch (e) {
       _say(e.message);
     }
@@ -457,13 +458,28 @@ class _ProfileCard extends StatelessWidget {
             ] else ...[
               for (final room in doc.rooms)
                 Text(
-                  room.seats.map((seat) => seat.lang).join(' ⇄ '),
+                  // Die Sprache eines Tisches ist die Muttersprache seines
+                  // Besitzers, sonst die des Platzes.
+                  room.seats.map(doc.languageAt).join(' ⇄ '),
                   style: theme.textTheme.titleMedium,
                 ),
               const SizedBox(height: 4),
               // Welcher Dienst mit welchem Modell übersetzt. Das ist seit dem
               // 20.11.2026 je Profil wählbar und gehört deshalb auf die Karte.
               Text('${provider!.label} · ${doc.model}'),
+              const SizedBox(height: 4),
+              // Für wen dieser Fisch übersetzt. Seit dem 20.11.2026 schreibt
+              // ein Fisch nur noch an die Tische, die er bedient: den seines
+              // Gastgebers und die der Eingeladenen. An den anderen liest er
+              // nur mit; das soll man sehen, ohne das Profil zu öffnen.
+              Wrap(
+                spacing: 24,
+                runSpacing: 4,
+                children: [
+                  Text(servesText(doc)),
+                  if (readOnlyText(doc) case final readOnly?) Text(readOnly),
+                ],
+              ),
               const SizedBox(height: 4),
               Text(
                 'Channels ${[for (final room in doc.rooms) for (final seat in room.seats) seat.channel].join(', ')}',

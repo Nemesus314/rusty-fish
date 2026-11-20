@@ -513,6 +513,189 @@ void main() {
     expect(fake.saved.single.provider, 'openai');
   });
 
+  // Nemesus am 20.11.2026: „pro Discord-Nummer die Muttersprache und die
+  // Neutralsprache festzulegen", und: „Es sollte auch die Funktion ‚Einladen'
+  // geben. Und dann ein Haken, wer eingeladen wird."
+  group('tables, mother tongues and invitations', () {
+    // Gastgeber 100 und zwei weitere Menschen, die Plätze gehören noch niemandem.
+    FakeCli withPeople() => FakeCli(
+      entries: [
+        entryOf(
+          docOf(
+            'study',
+            people: const [
+              Person(id: '100', gender: Gender.male, lang: 'German'),
+              Person(id: '200', lang: 'Russian'),
+              Person(id: '300', gender: Gender.female),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    Future<void> edit(WidgetTester tester, FakeCli fake, String profile) async {
+      await open(tester, fake);
+      await tester.tap(inCard(profile, find.text('Edit')));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> choose(WidgetTester tester, String key, String option) async {
+      await tester.ensureVisible(find.byKey(ValueKey(key)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey(key)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(option).last);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('whose table and the invitation are saved with the profile', (
+      tester,
+    ) async {
+      final fake = withPeople();
+      await edit(tester, fake, 'study');
+
+      await choose(tester, 'seat-0-0-owner', 'You (host) · 100 · German');
+      await choose(tester, 'seat-0-1-owner', '200 · Russian');
+      await tester.ensureVisible(find.byKey(const ValueKey('person-1-invited')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('person-1-invited')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final doc = fake.saved.single;
+      expect(doc.rooms.single.seats.map((s) => s.owner), ['100', '200']);
+      expect(doc.people.map((p) => p.invited), [false, true, false]);
+      // Alles andere an den Menschen bleibt, wie es war.
+      expect(doc.people.map((p) => p.lang), ['German', 'Russian', null]);
+      expect(doc.people.map((p) => p.gender), [Gender.male, null, Gender.female]);
+    });
+
+    testWidgets('the language field says when the owner\'s mother tongue applies', (
+      tester,
+    ) async {
+      final fake = withPeople();
+      await edit(tester, fake, 'study');
+      expect(find.textContaining('mother tongue of the owner applies'), findsNothing);
+
+      await choose(tester, 'seat-0-1-owner', '200 · Russian');
+      expect(
+        find.text('The mother tongue of the owner applies: Russian'),
+        findsOneWidget,
+      );
+
+      // Von diesem Menschen ist keine Muttersprache bekannt: dann gilt die
+      // Sprache des Platzes, und es gibt keinen Hinweis.
+      await choose(tester, 'seat-0-1-owner', '300');
+      expect(find.textContaining('mother tongue of the owner applies'), findsNothing);
+
+      await choose(tester, 'seat-0-1-owner', '200 · Russian');
+      await choose(tester, 'seat-0-1-owner', 'nobody in particular');
+      expect(find.textContaining('mother tongue of the owner applies'), findsNothing);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(fake.saved.single.rooms.single.seats.map((s) => s.owner), [null, null]);
+    });
+
+    testWidgets('a person carries mother tongue, neutral languages and form', (
+      tester,
+    ) async {
+      final fake = withPeople();
+      await edit(tester, fake, 'study');
+
+      await tester.ensureVisible(find.byKey(const ValueKey('person-1-lang')));
+      await tester.pumpAndSettle();
+      expect(textOf(tester, const ValueKey('person-1-lang')), 'Russian');
+      await tester.enterText(find.byKey(const ValueKey('person-1-lang')), 'Polish');
+      await tester.enterText(
+        find.byKey(const ValueKey('person-1-neutral')),
+        'English,  French',
+      );
+      await choose(tester, 'person-1-form', 'female');
+
+      await tester.ensureVisible(find.text('Add person'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add person'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('person-3-id')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('person-3-id')), '400');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final people = fake.saved.single.people;
+      expect(people[1].lang, 'Polish');
+      expect(people[1].neutral, ['English', 'French']);
+      expect(people[1].gender, Gender.female);
+      // Ein leeres Feld heißt: es gilt, was im Raum steht.
+      expect(people[0].neutral, isNull);
+      // Ein neuer Mensch braucht nur seine Kennung.
+      expect(people[3].id, '400');
+      expect(people[3].gender, isNull);
+      expect(people[3].lang, isNull);
+      expect(people[3].invited, isFalse);
+    });
+
+    testWidgets('the host needs no invitation: the box is ticked and fixed', (
+      tester,
+    ) async {
+      final fake = withPeople();
+      await edit(tester, fake, 'study');
+      await tester.ensureVisible(find.byKey(const ValueKey('person-0-invited')));
+      await tester.pumpAndSettle();
+
+      Checkbox box(int person) =>
+          tester.widget<Checkbox>(find.byKey(ValueKey('person-$person-invited')));
+      expect(box(0).value, isTrue);
+      expect(box(0).onChanged, isNull);
+      expect(box(1).value, isFalse);
+      expect(box(1).onChanged, isNotNull);
+      // Wen man einlädt, für den zahlt man. Das steht dabei.
+      expect(find.textContaining('on your key'), findsWidgets);
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      // Der Haken beim Gastgeber ist nur gezeigt. Im Profil ändert er nichts.
+      expect(fake.saved.single.people[0].invited, isFalse);
+    });
+
+    testWidgets('a profile with tables goes back out unchanged', (tester) async {
+      final fake = FakeCli(entries: [entryOf(tablesDoc('pair'))]);
+      await edit(tester, fake, 'pair');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(fake.saved.single.toJson(), tablesDoc('pair').toJson());
+    });
+
+    testWidgets('the card says whom this fish translates for', (tester) async {
+      final fake = FakeCli(
+        entries: [
+          // Ein Profil aus der Zeit vor den Tischen.
+          entryOf(docOf('old-style')),
+          // Der Gastgeber hat seinen Gast eingeladen.
+          entryOf(tablesDoc('pair')),
+          // Der Gast ist nicht eingeladen: an seinem Tisch wird nur mitgelesen.
+          entryOf(tablesDoc('watch', guestInvited: false)),
+        ],
+      );
+      await open(tester, fake);
+
+      expect(inCard('old-style', find.text('Translates at every table')), findsOneWidget);
+      expect(inCard('old-style', find.textContaining('read only')), findsNothing);
+
+      expect(
+        inCard('pair', find.text('Translates for you and 1 invited guest')),
+        findsOneWidget,
+      );
+      expect(inCard('pair', find.textContaining('read only')), findsNothing);
+      // Die Sprachen der Tische sind die Muttersprachen ihrer Besitzer.
+      expect(inCard('pair', find.text('German ⇄ Russian')), findsOneWidget);
+
+      expect(inCard('watch', find.text('Translates for you')), findsOneWidget);
+      expect(inCard('watch', find.text('1 table is read only')), findsOneWidget);
+    });
+  });
+
   testWidgets('starting and stopping a profile, with its log', (tester) async {
     final fake = FakeCli(entries: [entryOf(docOf('study')), entryOf(docOf('other'))]);
     await open(tester, fake);
@@ -632,5 +815,10 @@ void startRequests() {
     expect(StartRequest.fromArgs(const ['--edit', 'tea'])!.profile, 'tea');
     expect(StartRequest.fromArgs(const ['--new'])!.newProfile, isTrue);
     expect(StartRequest.fromArgs(const ['--secrets'])!.secrets, isTrue);
+    // Mit `--at` geht das Formular gleich bei einem Abschnitt auf.
+    expect(StartRequest.fromArgs(const ['--edit', 'tea'])!.section, isNull);
+    final at = StartRequest.fromArgs(const ['--edit', 'tea', '--at', 'people'])!;
+    expect(at.profile, 'tea');
+    expect(at.section, 'people');
   });
 }

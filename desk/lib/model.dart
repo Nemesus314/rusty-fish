@@ -14,24 +14,55 @@ Gender? genderFromJson(Object? value) {
 
 String? genderToJson(Gender? gender) => gender?.name;
 
-/// Ein Platz im Raum: ein Kanal, eine Sprache.
+/// Ein Platz im Raum: ein Kanal, eine Sprache. Seit dem 20.11.2026 kann er der
+/// Tisch eines bestimmten Menschen sein.
+///
+/// Nemesus am 20.11.2026: „ob es nicht sinnvoller wäre, pro Discord-Nummer die
+/// Muttersprache und die Neutralsprache festzulegen. [...] Jeder Rusty-Fish
+/// würde für den API-Eigner übersetzen." Jeder Fisch liest an allen Tischen
+/// mit, schreibt aber nur an die, die er bedient.
 class Seat {
-  const Seat({required this.channel, required this.lang, this.gender});
+  const Seat({
+    required this.channel,
+    required this.lang,
+    this.gender,
+    this.owner,
+    this.served = true,
+  });
 
   final String channel;
+
+  /// Die Sprache des Platzes. Sie gilt, solange der Besitzer keine
+  /// Muttersprache nennt.
   final String lang;
   final Gender? gender;
+
+  /// Die Discord-Kennung des Menschen, dessen Tisch das ist. Ohne Angabe
+  /// gehört der Platz niemandem im Besonderen, wie vor dem 20.11.2026.
+  final String? owner;
+
+  /// Ob dieser Fisch an diesem Tisch schreibt. Das entscheidet das Programm
+  /// und nennt es nur in der Liste der Profile; die Maske schickt es nie
+  /// zurück. Ein älteres Programm nennt es nicht: dort bedient der Fisch
+  /// jeden Tisch.
+  final bool served;
 
   factory Seat.fromJson(Map<String, dynamic> json) => Seat(
     channel: '${json['channel'] ?? ''}',
     lang: '${json['lang'] ?? ''}',
     gender: genderFromJson(json['gender']),
+    owner: _text(json['owner']),
+    served: json['served'] != false,
   );
 
+  /// Was nicht gesetzt ist, geht nicht hinaus. Ein älteres Programm lehnt
+  /// Felder ab, die es nicht kennt, und nimmt ein Profil ohne die neuen
+  /// Angaben so weiter an.
   Map<String, dynamic> toJson() => {
     'channel': channel,
     'lang': lang,
     'gender': genderToJson(gender),
+    'owner': ?owner,
   };
 }
 
@@ -61,18 +92,106 @@ class Room {
 }
 
 /// Wer mit welchen Formen schreibt, egal an welchem Platz.
+///
+/// Seit dem 20.11.2026 gehören auch Muttersprache und neutrale Sprachen zum
+/// Menschen und nicht mehr nur zum Kanal, so wie zuvor schon die Form.
 class Person {
-  const Person({required this.id, required this.gender});
+  const Person({
+    required this.id,
+    this.gender,
+    this.lang,
+    this.neutral,
+    this.invited = false,
+  });
 
   final String id;
-  final Gender gender;
 
-  factory Person.fromJson(Map<String, dynamic> json) => Person(
-    id: '${json['id'] ?? ''}',
-    gender: genderFromJson(json['gender']) ?? Gender.female,
-  );
+  /// Die grammatische Form. Bis zum 20.11.2026 Pflicht, seitdem freiwillig:
+  /// wer nur seine Muttersprache nennen will, muss keine Form angeben.
+  final Gender? gender;
 
-  Map<String, dynamic> toJson() => {'id': id, 'gender': gender.name};
+  /// Die Muttersprache. In sie wird an seinem Tisch übersetzt.
+  final String? lang;
+
+  /// Sprachen, die für diesen Menschen unübersetzt bleiben. Ohne Angabe gilt,
+  /// was im Raum steht. Eine leere Liste ist eine andere Angabe: für diesen
+  /// Menschen bleibt dann nichts unübersetzt.
+  final List<String>? neutral;
+
+  /// Nemesus am 20.11.2026: „Es sollte auch die Funktion ‚Einladen' geben. Und
+  /// dann ein Haken, wer eingeladen wird." Wen der Gastgeber einlädt, für den
+  /// übersetzt sein Fisch auf seine Rechnung.
+  final bool invited;
+
+  factory Person.fromJson(Map<String, dynamic> json) {
+    final neutral = json['neutral'];
+    return Person(
+      id: '${json['id'] ?? ''}',
+      // Bis zum 20.11.2026 stand hier „?? Gender.female": eine fehlende Form
+      // wurde still zur weiblichen. Seit die Form freiwillig ist, bleibt eine
+      // fehlende Angabe eine fehlende Angabe.
+      gender: genderFromJson(json['gender']),
+      lang: _text(json['lang']),
+      neutral: neutral is List ? _strings(neutral) : null,
+      invited: json['invited'] == true,
+    );
+  }
+
+  /// Was nicht gesetzt ist, geht nicht hinaus (siehe [Seat.toJson]).
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'gender': genderToJson(gender),
+    'lang': ?lang,
+    'neutral': ?neutral,
+    if (invited) 'invited': true,
+  };
+}
+
+/// Für wen dieser Fisch übersetzt, als eine Zeile für die Karte.
+///
+/// Die Regel wendet das Programm an und nennt sie je Platz als „served". Die
+/// Maske zählt nur zusammen, was es gesagt hat.
+String servesText(ProfileDoc doc) {
+  final seats = [for (final room in doc.rooms) ...room.seats];
+  // Ein Profil aus der Zeit vor den Tischen: kein Platz gehört jemandem, und
+  // der Fisch schreibt überall.
+  if (seats.every((seat) => seat.owner == null)) {
+    return 'Translates at every table';
+  }
+  final served = seats.where((seat) => seat.served);
+  final host = served.any((seat) => seat.owner == doc.host);
+  final guests = {
+    for (final seat in served)
+      if (seat.owner != null && seat.owner != doc.host) seat.owner!,
+  }.length;
+  final open = served.where((seat) => seat.owner == null).length;
+
+  final people = [
+    if (host) 'you',
+    if (guests == 1) '1 invited guest',
+    if (guests > 1) '$guests invited guests',
+  ];
+  final tables = open == 1 ? '1 table' : '$open tables';
+  if (people.isEmpty) {
+    return open == 0 ? 'Translates at no table' : 'Translates at $tables without an owner';
+  }
+  final forWhom = 'Translates for ${people.join(' and ')}';
+  return open == 0 ? forWhom : '$forWhom, and at $tables without an owner';
+}
+
+/// Tische, an denen dieser Fisch nur mitliest. Dort schreibt der Fisch dessen,
+/// dem der Tisch gehört, oder niemand.
+String? readOnlyText(ProfileDoc doc) {
+  final count = [
+    for (final room in doc.rooms)
+      for (final seat in room.seats)
+        if (!seat.served) seat,
+  ].length;
+  return switch (count) {
+    0 => null,
+    1 => '1 table is read only',
+    _ => '$count tables are read only',
+  };
 }
 
 /// Was der Gastgeber pro Tag erlaubt.
@@ -264,6 +383,24 @@ class ProfileDoc {
     'people': [for (final person in people) person.toJson()],
   };
 
+  /// Der Mensch mit dieser Kennung, falls das Profil ihn nennt.
+  Person? person(String? id) {
+    if (id == null) {
+      return null;
+    }
+    for (final person in people) {
+      if (person.id == id) {
+        return person;
+      }
+    }
+    return null;
+  }
+
+  /// In welche Sprache an diesem Tisch übersetzt wird: die Muttersprache des
+  /// Besitzers, sonst die Sprache des Platzes. So wendet es das Programm an;
+  /// die Maske zeigt es nur.
+  String languageAt(Seat seat) => person(seat.owner)?.lang ?? seat.lang;
+
   ProfileDoc renamed(String newName) => ProfileDoc(
     name: newName,
     provider: provider,
@@ -376,6 +513,10 @@ int _int(Object? value) => switch (value) {
   String v => int.tryParse(v) ?? 0,
   _ => 0,
 };
+
+/// Ein Text oder nichts. Ein leerer Text ist keine Angabe.
+String? _text(Object? value) =>
+    value is String && value.trim().isNotEmpty ? value.trim() : null;
 
 List<String> _strings(Object? value) =>
     value is List ? [for (final item in value) '$item'] : const [];

@@ -205,6 +205,57 @@ void main() {
     );
   }, skip: skip);
 
+  // Braucht ein Programm, das Tische, Muttersprachen und Einladungen schon
+  // kennt. Ein älteres lehnt die neuen Felder ab; das wird erkannt und
+  // übersprungen, denn diesen Stand muss die Maske aushalten.
+  test('tables, mother tongues and invitations go through the real program', () async {
+    final cli = ProcessFishCli(exe!);
+    const name = 'desk-probe-tables';
+    const doc = ProfileDoc(
+      name: name,
+      model: 'some-model',
+      baseUrl: null,
+      host: '42',
+      aiNames: [],
+      limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+      rooms: [
+        Room(
+          passThrough: ['English'],
+          contextLines: 2,
+          seats: [
+            Seat(channel: '7', lang: 'German', owner: '42'),
+            Seat(channel: '8', lang: 'Russian', owner: '9'),
+            Seat(channel: '10', lang: 'Korean', owner: '11'),
+          ],
+        ),
+      ],
+      people: [
+        Person(id: '42', gender: Gender.male, lang: 'German'),
+        Person(id: '9', lang: 'Russian', neutral: ['English'], invited: true),
+        Person(id: '11', lang: 'Korean'),
+      ],
+    );
+    try {
+      await cli.saveProfile(doc);
+    } on CliException catch (e) {
+      markTestSkipped('this rusty-fish does not know tables yet: ${e.message}');
+      return;
+    }
+    final shown = await cli.showProfile(name);
+    expect(shown.toJson(), doc.toJson());
+    final listed = (await cli.listProfiles()).profiles.firstWhere(
+      (entry) => entry.name == name,
+    );
+    final seats = listed.doc!.rooms.single.seats;
+    expect(seats.map((s) => s.owner), ['42', '9', '11']);
+    // Bedient werden der Tisch des Gastgebers und der des eingeladenen Gastes.
+    // Am dritten liest der Fisch nur mit.
+    expect(seats.map((s) => s.served), [true, true, false]);
+    expect(servesText(listed.doc!), 'Translates for you and 1 invited guest');
+    expect(readOnlyText(listed.doc!), '1 table is read only');
+    await cli.deleteProfile(name);
+  }, skip: skip);
+
   test('a run that cannot start says why and ends', () async {
     final cli = ProcessFishCli(exe!);
     final run = await cli.run('no-such-profile');

@@ -16,10 +16,15 @@ class ProfileEditorPage extends StatefulWidget {
     required this.existingNames,
     this.providers = fallbackProviders,
     this.providersListed = false,
+    this.scrollTo,
   });
 
   final FishCli cli;
   final ProfileDoc initial;
+
+  /// Der Abschnitt, bei dem das Formular aufgehen soll: „rooms" oder
+  /// „people". Ohne Angabe ganz oben.
+  final String? scrollTo;
 
   /// Die KI-Dienste, die das Programm nennt. Die Auswahl zeigt genau diese.
   final List<Provider> providers;
@@ -58,11 +63,15 @@ class _SeatDraft {
   _SeatDraft(Seat seat)
     : channel = TextEditingController(text: seat.channel),
       lang = TextEditingController(text: seat.lang),
-      form = _formOf(seat.gender);
+      form = _formOf(seat.gender),
+      owner = seat.owner ?? '';
 
   final TextEditingController channel;
   final TextEditingController lang;
   _Form form;
+
+  /// Die Kennung dessen, dem der Tisch gehört. Leer: niemandem im Besonderen.
+  String owner;
 
   void dispose() {
     channel.dispose();
@@ -92,12 +101,44 @@ class _RoomDraft {
 class _PersonDraft {
   _PersonDraft(Person? person)
     : id = TextEditingController(text: person?.id ?? ''),
-      gender = person?.gender ?? Gender.female;
+      lang = TextEditingController(text: person?.lang ?? ''),
+      neutral = TextEditingController(text: person?.neutral?.join(', ') ?? ''),
+      // Bis zum 20.11.2026 begann ein neuer Mensch mit der weiblichen Form,
+      // weil eine Form Pflicht war. Seitdem ist sie freiwillig.
+      form = _formOf(person?.gender),
+      invited = person?.invited ?? false,
+      _nothingNeutral = person?.neutral?.isEmpty ?? false;
 
   final TextEditingController id;
-  Gender gender;
+  final TextEditingController lang;
+  final TextEditingController neutral;
+  _Form form;
+  bool invited;
 
-  void dispose() => id.dispose();
+  /// Das Profil sagte ausdrücklich: für diesen Menschen bleibt nichts
+  /// unübersetzt (eine leere Liste). Im Feld sieht das aus wie „keine Angabe".
+  /// Damit das bloße Öffnen und Speichern daraus nicht „wie im Raum" macht,
+  /// merkt sich der Entwurf den Unterschied.
+  final bool _nothingNeutral;
+
+  /// Die neutralen Sprachen, so wie sie ins Profil gehen. Ein leeres Feld
+  /// heißt: es gilt, was im Raum steht.
+  List<String>? get neutralLangs {
+    final langs = [
+      for (final lang in neutral.text.split(','))
+        if (lang.trim().isNotEmpty) lang.trim(),
+    ];
+    if (langs.isEmpty) {
+      return _nothingNeutral ? const [] : null;
+    }
+    return langs;
+  }
+
+  void dispose() {
+    id.dispose();
+    lang.dispose();
+    neutral.dispose();
+  }
 }
 
 class _ProfileEditorPageState extends State<ProfileEditorPage> {
@@ -148,9 +189,16 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _questions = TextEditingController(text: '${doc.limits.questionsPerGuestPerDay}');
     _aiNames = [for (final name in doc.aiNames) TextEditingController(text: name)];
     _rooms = [for (final room in doc.rooms) _RoomDraft(room)];
-    _people = [for (final person in doc.people) _PersonDraft(person)];
+    _people = [for (final person in doc.people) _watched(_PersonDraft(person))];
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
+    // Die Auswahl „Whose table" nennt den Gastgeber mit seiner Kennung, und
+    // der Haken „Invited" hängt davon ab, wer der Gastgeber ist.
+    _host.addListener(_redraw);
+    final section = widget.scrollTo;
+    if (section != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _show(section));
+    }
     // Wer nach einem Wechsel des Dienstes das Modell anfasst, hat den Hinweis
     // dazu gesehen. Er verschwindet dann.
     _model.addListener(_modelTouched);
@@ -160,6 +208,80 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     if (_modelFromOtherService && mounted) {
       setState(() => _modelFromOtherService = false);
     }
+  }
+
+  final _roomsKey = GlobalKey();
+  final _peopleKey = GlobalKey();
+
+  /// Rollt das Formular zu einem Abschnitt.
+  void _show(String section) {
+    final target = switch (section) {
+      'rooms' => _roomsKey.currentContext,
+      'people' => _peopleKey.currentContext,
+      _ => null,
+    };
+    if (target != null) {
+      Scrollable.ensureVisible(target);
+    }
+  }
+
+  /// Kennung und Muttersprache eines Menschen stehen auch in der Auswahl
+  /// „Whose table". Ändert sich dort etwas, muss die Auswahl es zeigen.
+  _PersonDraft _watched(_PersonDraft person) {
+    person.id.addListener(_redraw);
+    person.lang.addListener(_redraw);
+    return person;
+  }
+
+  String get _hostId => _host.text.trim();
+
+  /// Die Muttersprache eines Menschen, so wie sie gerade im Formular steht.
+  String? _motherTongue(String id) {
+    if (id.isEmpty) {
+      return null;
+    }
+    for (final person in _people) {
+      if (person.id.text.trim() == id && person.lang.text.trim().isNotEmpty) {
+        return person.lang.text.trim();
+      }
+    }
+    return null;
+  }
+
+  /// Wer als Besitzer eines Tisches zur Wahl steht: niemand, der Gastgeber und
+  /// die Menschen aus „People". Gehört der Tisch jemandem, den das Formular
+  /// nicht (mehr) nennt, bleibt er als eigener Eintrag stehen. Sonst würde ein
+  /// Profil beim bloßen Öffnen und Speichern still umgestellt.
+  List<DropdownMenuItem<String>> _owners(String current) {
+    String withTongue(String label, String id) {
+      final tongue = _motherTongue(id);
+      return tongue == null ? label : '$label · $tongue';
+    }
+
+    final host = _hostId;
+    final ids = <String>{
+      for (final person in _people)
+        if (person.id.text.trim().isNotEmpty && person.id.text.trim() != host)
+          person.id.text.trim(),
+    };
+    return [
+      const DropdownMenuItem(value: '', child: Text('nobody in particular')),
+      if (host.isNotEmpty)
+        DropdownMenuItem(
+          value: host,
+          child: Text(withTongue('You (host) · $host', host), overflow: TextOverflow.ellipsis),
+        ),
+      for (final id in ids)
+        DropdownMenuItem(
+          value: id,
+          child: Text(withTongue(id, id), overflow: TextOverflow.ellipsis),
+        ),
+      if (current.isNotEmpty && current != host && !ids.contains(current))
+        DropdownMenuItem(
+          value: current,
+          child: Text('$current (not listed under People)', overflow: TextOverflow.ellipsis),
+        ),
+    ];
   }
 
   void _chooseService(String id) {
@@ -263,6 +385,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
                 channel: seat.channel.text.trim(),
                 lang: seat.lang.text.trim(),
                 gender: _genderOf(seat.form),
+                owner: seat.owner.isEmpty ? null : seat.owner,
               ),
           ],
         ),
@@ -288,7 +411,13 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       people: [
         for (final person in _people)
           if (person.id.text.trim().isNotEmpty)
-            Person(id: person.id.text.trim(), gender: person.gender),
+            Person(
+              id: person.id.text.trim(),
+              gender: _genderOf(person.form),
+              lang: person.lang.text.trim().isEmpty ? null : person.lang.text.trim(),
+              neutral: person.neutralLangs,
+              invited: person.invited,
+            ),
       ],
     );
   }
@@ -674,16 +803,26 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
 
   Widget _roomsSection() {
     return _Section(
+      key: _roomsKey,
       title: 'Rooms',
       children: [
+        // Bis zum 20.11.2026: „Every seat is a channel with a language." Seit
+        // ein Platz der Tisch eines Menschen sein kann, steht das Wort dabei.
         const Text(
-          'A room is one conversation. Every seat is a channel with a language. '
-          'What is written at one seat appears at all others in their language.',
+          'A room is one conversation. Every seat is a table: a channel in one language. '
+          'What is written at one table appears at all others in their language.',
         ),
         const SizedBox(height: 4),
         Text(
           'Channel ID: in Discord, right-click the channel, then Copy Channel ID. '
           'Language as a word, for example German.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Whose table: the person who reads there. Their mother tongue then decides the '
+          'language. Your fish reads at every table, but writes only at yours and at '
+          'those of people you invited.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
@@ -740,54 +879,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             ],
           ),
           const SizedBox(height: 8),
-          for (final (s, seat) in room.seats.indexed)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      key: ValueKey('seat-$r-$s-channel'),
-                      controller: seat.channel,
-                      decoration: const InputDecoration(labelText: 'Channel ID'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      key: ValueKey('seat-$r-$s-lang'),
-                      controller: seat.lang,
-                      decoration: const InputDecoration(labelText: 'Language'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Tooltip(
-                    message:
-                        'Grammatical form of whoever usually sits here. Used only for grammar.',
-                    child: DropdownButton<_Form>(
-                      key: ValueKey('seat-$r-$s-form'),
-                      value: seat.form,
-                      onChanged: (form) => setState(() => seat.form = form ?? _Form.none),
-                      items: const [
-                        DropdownMenuItem(value: _Form.none, child: Text('no form given')),
-                        DropdownMenuItem(value: _Form.female, child: Text('female')),
-                        DropdownMenuItem(value: _Form.male, child: Text('male')),
-                      ],
-                    ),
-                  ),
-                  // Weniger als zwei Plätze ergeben kein Gespräch.
-                  if (room.seats.length > 2)
-                    IconButton(
-                      tooltip: 'Remove this seat',
-                      onPressed: () => setState(() => room.seats.removeAt(s).dispose()),
-                      icon: const Icon(Icons.close),
-                    ),
-                ],
-              ),
-            ),
+          for (final (s, seat) in room.seats.indexed) _seat(r, room, s, seat),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
@@ -837,53 +929,137 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     );
   }
 
-  Widget _peopleSection() {
-    return _Section(
-      title: 'People',
-      children: [
-        const Text(
-          'Whoever is listed here keeps their own grammatical form in every channel. '
-          'Everyone else gets the form of the seat they write at.',
-        ),
-        const SizedBox(height: 8),
-        for (final (index, person) in _people.indexed)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: ValueKey('person-$index-id'),
-                    controller: person.id,
-                    decoration: const InputDecoration(
-                      labelText: 'Discord user ID',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<Gender>(
-                  key: ValueKey('person-$index-form'),
-                  value: person.gender,
-                  onChanged: (gender) =>
-                      setState(() => person.gender = gender ?? person.gender),
-                  items: const [
-                    DropdownMenuItem(value: Gender.female, child: Text('female')),
-                    DropdownMenuItem(value: Gender.male, child: Text('male')),
-                  ],
-                ),
-                IconButton(
-                  tooltip: 'Remove this person',
-                  onPressed: () => setState(() => _people.removeAt(index).dispose()),
-                  icon: const Icon(Icons.close),
-                ),
+  /// Die Auswahl der grammatischen Form, in derselben Gestalt wie die Felder
+  /// daneben, damit eine Zeile aus Feldern und Auswahlen auf einer Linie steht.
+  Widget _formChoice({
+    required Key key,
+    required _Form value,
+    required String tooltip,
+    required ValueChanged<_Form> onChanged,
+  }) {
+    return SizedBox(
+      width: 150,
+      child: Tooltip(
+        message: tooltip,
+        child: InputDecorator(
+          decoration: const InputDecoration(labelText: 'Form'),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<_Form>(
+              key: key,
+              value: value,
+              isDense: true,
+              isExpanded: true,
+              onChanged: (form) => onChanged(form ?? _Form.none),
+              items: const [
+                DropdownMenuItem(value: _Form.none, child: Text('no form given')),
+                DropdownMenuItem(value: _Form.female, child: Text('female')),
+                DropdownMenuItem(value: _Form.male, child: Text('male')),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Ein Platz: Kanal, Sprache, wessen Tisch es ist, und die Form.
+  Widget _seat(int r, _RoomDraft room, int s, _SeatDraft seat) {
+    final tongue = _motherTongue(seat.owner);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        // Oben bündig: unter dem Sprachfeld kann ein Hinweis stehen, und die
+        // Felder daneben sollen dann nicht nach unten rutschen.
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 3,
+            child: TextField(
+              key: ValueKey('seat-$r-$s-channel'),
+              controller: seat.channel,
+              decoration: const InputDecoration(labelText: 'Channel ID'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: TextField(
+              key: ValueKey('seat-$r-$s-lang'),
+              controller: seat.lang,
+              decoration: InputDecoration(
+                labelText: 'Language',
+                // Welche Sprache gilt, entscheidet das Programm: die
+                // Muttersprache des Besitzers, sonst die des Platzes. Die
+                // Maske sagt es nur, damit niemand am falschen Feld dreht.
+                helperText: tongue == null
+                    ? null
+                    : 'The mother tongue of the owner applies: $tongue',
+                helperMaxLines: 2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: 'Whose table'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  key: ValueKey('seat-$r-$s-owner'),
+                  value: seat.owner,
+                  isDense: true,
+                  isExpanded: true,
+                  onChanged: (id) => setState(() => seat.owner = id ?? ''),
+                  items: _owners(seat.owner),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          _formChoice(
+            key: ValueKey('seat-$r-$s-form'),
+            value: seat.form,
+            tooltip: 'Grammatical form of whoever usually sits here. Used only for grammar.',
+            onChanged: (form) => setState(() => seat.form = form),
+          ),
+          // Weniger als zwei Plätze ergeben kein Gespräch.
+          if (room.seats.length > 2)
+            IconButton(
+              tooltip: 'Remove this seat',
+              onPressed: () => setState(() => room.seats.removeAt(s).dispose()),
+              icon: const Icon(Icons.close),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _peopleSection() {
+    final host = _hostId;
+    return _Section(
+      key: _peopleKey,
+      title: 'People',
+      children: [
+        // Bis zum 20.11.2026 stand hier nur die grammatische Form. Nemesus am
+        // selben Tag: „ob es nicht sinnvoller wäre, pro Discord-Nummer die
+        // Muttersprache und die Neutralsprache festzulegen."
+        const Text(
+          'Everyone listed here keeps their own language and grammatical form at every table. '
+          'Everyone else gets what the seat says where they write.',
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Invited: your fish translates for this person, on your key. '
+          'You as the host need no tick.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        for (final (index, person) in _people.indexed)
+          _person(index, person, isHost: host.isNotEmpty && person.id.text.trim() == host),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () => setState(() => _people.add(_PersonDraft(null))),
+            onPressed: () => setState(() => _people.add(_watched(_PersonDraft(null)))),
             icon: const Icon(Icons.add),
             label: const Text('Add person'),
           ),
@@ -891,10 +1067,96 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       ],
     );
   }
+
+  /// Ein Mensch: Kennung, Muttersprache, neutrale Sprachen, Form, Einladung.
+  Widget _person(int index, _PersonDraft person, {required bool isHost}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 3,
+            child: TextField(
+              key: ValueKey('person-$index-id'),
+              controller: person.id,
+              decoration: InputDecoration(
+                labelText: 'Discord user ID',
+                helperText: isHost ? 'This is you, the host.' : null,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: TextField(
+              key: ValueKey('person-$index-lang'),
+              controller: person.lang,
+              decoration: const InputDecoration(
+                labelText: 'Mother tongue',
+                hintText: 'Russian',
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: TextField(
+              key: ValueKey('person-$index-neutral'),
+              controller: person.neutral,
+              decoration: const InputDecoration(
+                labelText: 'Neutral languages',
+                helperText: 'Stay untranslated for this person. Empty: as in the room.',
+                helperMaxLines: 2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          _formChoice(
+            key: ValueKey('person-$index-form'),
+            value: person.form,
+            tooltip: 'Grammatical form of this person. Used only for grammar.',
+            onChanged: (form) => setState(() => person.form = form),
+          ),
+          const SizedBox(width: 4),
+          Tooltip(
+            message: isHost
+                ? 'Your fish always translates for you.'
+                : 'Your fish translates for whoever you invite, on your key.',
+            child: Padding(
+              // Auf die Höhe der Feldzeile gesetzt, nicht auf die des Etiketts.
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Checkbox(
+                    key: ValueKey('person-$index-invited'),
+                    // Der Gastgeber braucht keinen Haken: sein Fisch übersetzt
+                    // ohnehin für ihn. Gezeigt wird er gesetzt und fest; im
+                    // Profil ändert das nichts.
+                    value: isHost || person.invited,
+                    onChanged: isHost
+                        ? null
+                        : (ticked) => setState(() => person.invited = ticked ?? false),
+                  ),
+                  const Text('Invited'),
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Remove this person',
+            onPressed: () => setState(() => _people.removeAt(index).dispose()),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.children});
+  const _Section({super.key, required this.title, required this.children});
 
   final String title;
   final List<Widget> children;

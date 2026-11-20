@@ -237,4 +237,174 @@ void main() {
       expect(old.has('xai'), isFalse);
     });
   });
+
+  // Nemesus am 20.11.2026: „pro Discord-Nummer die Muttersprache und die
+  // Neutralsprache festzulegen", und: „Es sollte auch die Funktion ‚Einladen'
+  // geben. Und dann ein Haken, wer eingeladen wird."
+  group('language at the person, tables and invitations', () {
+    Map<String, dynamic> listed(String people, String seats) =>
+        jsonDecode('''
+        {"dir": "C:\\\\fish", "profiles": [
+          {"name": "tea", "path": "C:\\\\fish\\\\tea.toml", "ok": true, "error": null,
+           "provider": "openai", "model": "m", "base_url": null, "host": "100",
+           "ai_names": [],
+           "limits": {"translation_tokens_per_day": 1, "questions_per_guest_per_day": 1},
+           "rooms": [{"pass_through": ["English"], "context_lines": 10, "seats": $seats}],
+           "people": $people, "usage": null, "running": false}
+        ]}''')
+            as Map<String, dynamic>;
+
+    test('the new fields are read and go back out unchanged', () {
+      final doc = ProfileList.fromJson(
+        listed(
+          '[{"id": "100", "gender": "male", "lang": "German", "neutral": null, "invited": false},'
+              ' {"id": "200", "gender": null, "lang": "Russian", "neutral": ["English", "French"], "invited": true},'
+              ' {"id": "300", "gender": "female", "lang": null, "neutral": [], "invited": false}]',
+          '[{"channel": "111", "lang": "German", "gender": null, "owner": "100", "served": true},'
+              ' {"channel": "222", "lang": "Russian", "gender": null, "owner": "200", "served": true},'
+              ' {"channel": "333", "lang": "Korean", "gender": null, "owner": "300", "served": false}]',
+        ),
+      ).profiles.single.doc!;
+
+      final guest = doc.people[1];
+      expect(guest.gender, isNull, reason: 'a form is optional now');
+      expect(guest.lang, 'Russian');
+      expect(guest.neutral, ['English', 'French']);
+      expect(guest.invited, isTrue);
+      expect(doc.people[0].neutral, isNull);
+      // Eine leere Liste ist eine andere Angabe als keine: für diese Person
+      // bleibt nichts unübersetzt.
+      expect(doc.people[2].neutral, isEmpty);
+      expect(doc.rooms.single.seats.map((s) => s.owner), ['100', '200', '300']);
+      expect(doc.rooms.single.seats.map((s) => s.served), [true, true, false]);
+
+      final json = doc.toJson();
+      final people = json['people'] as List;
+      expect(people[1], {
+        'id': '200',
+        'gender': null,
+        'lang': 'Russian',
+        'neutral': ['English', 'French'],
+        'invited': true,
+      });
+      expect((people[2] as Map)['neutral'], isEmpty);
+      final seats = (json['rooms'] as List).single['seats'] as List;
+      expect((seats[1] as Map)['owner'], '200');
+      // Ob ein Tisch bedient wird, entscheidet das Programm. Die Maske schickt
+      // es nicht zurück.
+      expect((seats[1] as Map).containsKey('served'), isFalse);
+      // Hin und zurück bleibt es dasselbe Profil.
+      final again = ProfileDoc.fromJson(jsonDecode(jsonEncode(json)) as Map<String, dynamic>);
+      expect(again.toJson(), json);
+    });
+
+    test('a document without the new fields reads as before', () {
+      final doc = ProfileList.fromJson(
+        listed(
+          '[{"id": "200", "gender": "female"}]',
+          '[{"channel": "111", "lang": "German", "gender": "male"},'
+              ' {"channel": "222", "lang": "Russian", "gender": null}]',
+        ),
+      ).profiles.single.doc!;
+
+      final person = doc.people.single;
+      expect(person.gender, Gender.female);
+      expect(person.lang, isNull);
+      expect(person.neutral, isNull);
+      expect(person.invited, isFalse);
+      for (final seat in doc.rooms.single.seats) {
+        expect(seat.owner, isNull);
+        expect(seat.served, isTrue, reason: 'an older program serves every table');
+      }
+      // Was nicht gesetzt ist, geht auch nicht hinaus. Ein älteres Programm
+      // lehnt Felder ab, die es nicht kennt.
+      final json = doc.toJson();
+      expect((json['people'] as List).single, {'id': '200', 'gender': 'female'});
+      expect(((json['rooms'] as List).single['seats'] as List).first, {
+        'channel': '111',
+        'lang': 'German',
+        'gender': 'male',
+      });
+    });
+
+    ProfileDoc tables(List<Person> people, List<Seat> seats) => ProfileDoc(
+      name: 'p',
+      model: 'm',
+      baseUrl: null,
+      host: '100',
+      aiNames: const [],
+      limits: const Limits(translationTokensPerDay: 1, questionsPerGuestPerDay: 1),
+      rooms: [Room(passThrough: const [], contextLines: 1, seats: seats)],
+      people: people,
+    );
+
+    test('the language of a table is the mother tongue of its owner', () {
+      final doc = tables(
+        const [Person(id: '200', lang: 'Russian'), Person(id: '300')],
+        const [
+          Seat(channel: '1', lang: 'German'),
+          Seat(channel: '2', lang: 'Polish', owner: '200'),
+          Seat(channel: '3', lang: 'Korean', owner: '300'),
+          Seat(channel: '4', lang: 'Greek', owner: '999'),
+        ],
+      );
+      final seats = doc.rooms.single.seats;
+      expect(doc.languageAt(seats[0]), 'German');
+      expect(doc.languageAt(seats[1]), 'Russian');
+      // Kein Eintrag zur Muttersprache: dann gilt die Sprache des Platzes.
+      expect(doc.languageAt(seats[2]), 'Korean');
+      expect(doc.languageAt(seats[3]), 'Greek');
+    });
+
+    test('the card line says whom this fish translates for', () {
+      // Ein Profil aus der Zeit vor den Tischen: niemand besitzt einen Platz.
+      final old = tables(const [], const [
+        Seat(channel: '1', lang: 'German'),
+        Seat(channel: '2', lang: 'Russian'),
+      ]);
+      expect(servesText(old), 'Translates at every table');
+      expect(readOnlyText(old), isNull);
+
+      final hostAndGuest = tables(const [], const [
+        Seat(channel: '1', lang: 'German', owner: '100'),
+        Seat(channel: '2', lang: 'Russian', owner: '200'),
+      ]);
+      expect(servesText(hostAndGuest), 'Translates for you and 1 invited guest');
+      expect(readOnlyText(hostAndGuest), isNull);
+
+      final oneReadOnly = tables(const [], const [
+        Seat(channel: '1', lang: 'German', owner: '100'),
+        Seat(channel: '2', lang: 'Russian', owner: '200', served: false),
+      ]);
+      expect(servesText(oneReadOnly), 'Translates for you');
+      expect(readOnlyText(oneReadOnly), '1 table is read only');
+
+      final many = tables(const [], const [
+        Seat(channel: '1', lang: 'German', owner: '100'),
+        Seat(channel: '2', lang: 'Russian', owner: '200'),
+        Seat(channel: '3', lang: 'Korean', owner: '300'),
+        Seat(channel: '4', lang: 'Greek', owner: '400', served: false),
+        Seat(channel: '5', lang: 'Polish', owner: '500', served: false),
+        Seat(channel: '6', lang: 'French'),
+      ]);
+      expect(
+        servesText(many),
+        'Translates for you and 2 invited guests, and at 1 table without an owner',
+      );
+      expect(readOnlyText(many), '2 tables are read only');
+
+      final guestsOnly = tables(const [], const [
+        Seat(channel: '1', lang: 'German', owner: '200'),
+        Seat(channel: '2', lang: 'Russian', owner: '300', served: false),
+      ]);
+      expect(servesText(guestsOnly), 'Translates for 1 invited guest');
+
+      final nobody = tables(const [], const [
+        Seat(channel: '1', lang: 'German', owner: '200', served: false),
+        Seat(channel: '2', lang: 'Russian', owner: '300', served: false),
+      ]);
+      expect(servesText(nobody), 'Translates at no table');
+      expect(readOnlyText(nobody), '2 tables are read only');
+    });
+  });
 }
