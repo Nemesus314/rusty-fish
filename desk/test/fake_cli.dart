@@ -32,10 +32,44 @@ class FakeRun implements FishRun {
   }
 }
 
+/// Die Dienste, so wie das Programm sie nennt.
+const fakeProviders = [
+  Provider(
+    id: 'openai',
+    label: 'ChatGPT (OpenAI)',
+    baseUrl: 'https://api.openai.com/v1',
+    needsKey: true,
+  ),
+  Provider(
+    id: 'xai',
+    label: 'Grok (xAI)',
+    baseUrl: 'https://api.x.ai/v1',
+    needsKey: true,
+  ),
+  Provider(
+    id: 'google',
+    label: 'Gemini (Google)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    needsKey: true,
+  ),
+  Provider(
+    id: 'anthropic',
+    label: 'Claude (Anthropic)',
+    baseUrl: 'https://api.anthropic.com/v1',
+    needsKey: true,
+  ),
+  Provider(
+    id: 'custom',
+    label: 'Own model or other service',
+    baseUrl: null,
+    needsKey: false,
+  ),
+];
+
 class FakeCli implements FishCli {
   FakeCli({
     required this.entries,
-    this.keys = const KeyStatus(openai: true, discord: false),
+    this.keys = const KeyStatus({'openai': true, 'discord': false}),
   });
 
   List<ProfileEntry> entries;
@@ -43,13 +77,20 @@ class FakeCli implements FishCli {
 
   String? saveError;
   String? runError;
+
+  /// Gesetzt: das Programm kennt den Aufruf `providers` nicht (älterer Stand).
+  String? providersError;
+  List<Provider> providerList = fakeProviders;
   List<String> modelList = ['alpha-model', 'beta-model'];
 
   final saved = <ProfileDoc>[];
   final deleted = <String>[];
-  final secrets = <SecretKind, String>{};
-  final forgotten = <SecretKind>[];
+  final secrets = <String, String>{};
+  final forgotten = <String>[];
   final started = <String>[];
+
+  /// Mit welchem Dienst und welcher Adresse nach Modellen gefragt wurde.
+  final modelRequests = <({String? provider, String? baseUrl})>[];
   FakeRun? lastRun;
 
   @override
@@ -93,26 +134,32 @@ class FakeCli implements FishCli {
   Future<KeyStatus> keyStatus() async => keys;
 
   @override
-  Future<void> setKey(SecretKind kind, String value) async {
-    secrets[kind] = value;
-    keys = KeyStatus(
-      openai: kind == SecretKind.openai ? true : keys.openai,
-      discord: kind == SecretKind.discord ? true : keys.discord,
-    );
+  Future<List<Provider>> providers() async {
+    final error = providersError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return providerList;
   }
 
   @override
-  Future<void> forgetKey(SecretKind kind) async {
-    forgotten.add(kind);
-    secrets.remove(kind);
-    keys = KeyStatus(
-      openai: kind == SecretKind.openai ? false : keys.openai,
-      discord: kind == SecretKind.discord ? false : keys.discord,
-    );
+  Future<void> setKey(String entry, String value) async {
+    secrets[entry] = value;
+    keys = KeyStatus({...keys.stored, entry: true});
   }
 
   @override
-  Future<List<String>> models({String? baseUrl}) async => modelList;
+  Future<void> forgetKey(String entry) async {
+    forgotten.add(entry);
+    secrets.remove(entry);
+    keys = KeyStatus({...keys.stored, entry: false});
+  }
+
+  @override
+  Future<List<String>> models({String? provider, String? baseUrl}) async {
+    modelRequests.add((provider: provider, baseUrl: baseUrl));
+    return modelList;
+  }
 
   @override
   Future<FishRun> run(String name) async {
@@ -128,13 +175,16 @@ class FakeCli implements FishCli {
 /// Ein gültiges Profil mit zwei Plätzen.
 ProfileDoc docOf(
   String name, {
+  String provider = 'openai',
+  String? baseUrl,
   List<String> aiNames = const [],
   List<Person> people = const [],
 }) {
   return ProfileDoc(
     name: name,
+    provider: provider,
     model: 'some-model',
-    baseUrl: null,
+    baseUrl: baseUrl,
     host: '100',
     aiNames: aiNames,
     limits: const Limits(

@@ -100,6 +100,8 @@ class _OverviewPageState extends State<OverviewPage> {
           initial: doc,
           isNew: isNew,
           existingNames: _names,
+          providers: _state.providers,
+          providersListed: _state.providersListed,
         ),
       ),
     );
@@ -167,9 +169,48 @@ class _OverviewPageState extends State<OverviewPage> {
   Future<void> _secrets() async {
     await showDialog<void>(
       context: context,
-      builder: (_) => SecretsDialog(cli: widget.cli, onChanged: _state.refresh),
+      builder: (_) => SecretsDialog(
+        cli: widget.cli,
+        providers: _state.providers,
+        onChanged: _state.refresh,
+      ),
     );
     await _state.refresh();
+  }
+
+  /// Die Dienste, die ohne Schlüssel nicht antworten. Ein eigenes Modell
+  /// zählt nicht mit, sonst stünde dort dauerhaft „einer fehlt".
+  List<Provider> get _needingKey => [
+    for (final provider in _state.providers)
+      if (provider.needsKey) provider,
+  ];
+
+  /// „AI keys: 1 of 4 stored". Seit jeder Dienst seinen eigenen Schlüssel
+  /// hat, passt nicht mehr jeder einzeln in die Titelleiste.
+  String _aiKeysText(KeyStatus? keys) {
+    if (keys == null) {
+      return 'AI keys: checking';
+    }
+    final needing = _needingKey;
+    final stored = needing.where((provider) => keys.has(provider.id)).length;
+    return 'AI keys: $stored of ${needing.length} stored';
+  }
+
+  /// In Ordnung ist es, wenn jedes gültige Profil den Schlüssel hat, den sein
+  /// Dienst braucht. Dass andere Dienste keinen haben, ist kein Mangel.
+  bool? _aiKeysGood(KeyStatus? keys, ProfileList? list) {
+    if (keys == null || list == null) {
+      return null;
+    }
+    final used = [
+      for (final entry in list.profiles)
+        if (entry.doc != null) _state.providerOf(entry.doc!.provider),
+    ];
+    if (used.isEmpty) {
+      // Noch kein Profil: dann zählt, ob überhaupt ein Schlüssel liegt.
+      return _needingKey.any((provider) => keys.has(provider.id));
+    }
+    return used.every((provider) => !provider.needsKey || keys.has(provider.id));
   }
 
   @override
@@ -181,21 +222,29 @@ class _OverviewPageState extends State<OverviewPage> {
         final list = _state.list;
         final keys = _state.keys;
         final loadError = _state.loadError;
+        final providersError = _state.providersError;
         return Scaffold(
           appBar: AppBar(
             title: const Text('Rusty Fish'),
             actions: [
-              for (final kind in SecretKind.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _SecretIndicator(
-                    kind: kind,
-                    stored: keys == null
-                        ? null
-                        : (kind == SecretKind.openai ? keys.openai : keys.discord),
-                    onPressed: _secrets,
-                  ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _SecretIndicator(
+                  key: const ValueKey('chip-ai-keys'),
+                  text: _aiKeysText(keys),
+                  good: _aiKeysGood(keys, list),
+                  onPressed: _secrets,
                 ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _SecretIndicator(
+                  key: const ValueKey('chip-bot-token'),
+                  text: '$botTokenLabel: ${keys == null ? 'checking' : (keys.discord ? 'stored' : 'not stored')}',
+                  good: keys?.discord,
+                  onPressed: _secrets,
+                ),
+              ),
               const SizedBox(width: 8),
             ],
           ),
@@ -228,6 +277,20 @@ class _OverviewPageState extends State<OverviewPage> {
                 ),
                 const SizedBox(height: 12),
                 if (loadError != null) _ErrorBox(text: loadError),
+                // Ein älteres Programm kennt die Auswahl des Dienstes noch
+                // nicht. Die Maske bleibt benutzbar und sagt, was das Programm
+                // dazu gemeldet hat.
+                if (providersError != null)
+                  _ErrorBox(
+                    key: const ValueKey('providers-error'),
+                    // Die Meldung des Programms im Wortlaut, nur ohne seine
+                    // Leerzeilen: im echten Fenster angesehen, nahm sie sonst
+                    // ein Viertel der Übersicht ein.
+                    text:
+                        'This rusty-fish cannot list its AI services, so only '
+                        '${fallbackProviders.first.label} can be chosen. It said:\n'
+                        '${providersError.split('\n').where((line) => line.trim().isNotEmpty).join('\n')}',
+                  ),
                 Expanded(
                   child: list == null
                       ? const SizedBox.shrink()
@@ -243,6 +306,7 @@ class _OverviewPageState extends State<OverviewPage> {
                                 entry: entry,
                                 state: _state,
                                 today: widget.today(),
+                                onSecrets: _secrets,
                                 onEdit: () => _edit(entry.name),
                                 onDuplicate: () => _duplicate(entry.name),
                                 onDelete: () => _delete(entry.name),
@@ -259,37 +323,38 @@ class _OverviewPageState extends State<OverviewPage> {
   }
 }
 
-/// „AI key: stored". Zeigt nur, ob das Geheimnis liegt, nie den Wert.
+/// „Bot token: stored". Zeigt nur, ob ein Geheimnis liegt, nie den Wert.
 class _SecretIndicator extends StatelessWidget {
   const _SecretIndicator({
-    required this.kind,
-    required this.stored,
+    super.key,
+    required this.text,
+    required this.good,
     required this.onPressed,
   });
 
-  final SecretKind kind;
-  final bool? stored;
+  final String text;
+
+  /// Ob alles da ist, was gebraucht wird. Ohne Angabe wird noch nachgesehen.
+  final bool? good;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final stored = this.stored;
-    final word = stored == null ? 'checking' : (stored ? 'stored' : 'not stored');
     return ActionChip(
       avatar: Icon(
-        stored == true ? Icons.check_circle_outline : Icons.error_outline,
+        good == true ? Icons.check_circle_outline : Icons.error_outline,
         size: 18,
-        color: stored == true ? scheme.primary : scheme.error,
+        color: good == true ? scheme.primary : scheme.error,
       ),
-      label: Text('${kind.label}: $word'),
+      label: Text(text),
       onPressed: onPressed,
     );
   }
 }
 
 class _ErrorBox extends StatelessWidget {
-  const _ErrorBox({required this.text, this.mono = false});
+  const _ErrorBox({super.key, required this.text, this.mono = false});
 
   final String text;
 
@@ -327,6 +392,7 @@ class _ProfileCard extends StatelessWidget {
     required this.entry,
     required this.state,
     required this.today,
+    required this.onSecrets,
     required this.onEdit,
     required this.onDuplicate,
     required this.onDelete,
@@ -335,6 +401,10 @@ class _ProfileCard extends StatelessWidget {
   final ProfileEntry entry;
   final DeskState state;
   final String today;
+
+  /// Öffnet die Geheimnisse. Der Hinweis auf einen fehlenden Schlüssel führt
+  /// dorthin, wo man ihn ablegt.
+  final VoidCallback onSecrets;
   final VoidCallback onEdit;
   final VoidCallback onDuplicate;
   final VoidCallback onDelete;
@@ -348,6 +418,13 @@ class _ProfileCard extends StatelessWidget {
     final running = runningHere || runningElsewhere;
     final ownsLog = state.logOwner == entry.name;
     final runError = ownsLog ? state.runError : null;
+    final provider = doc == null ? null : state.providerOf(doc.provider);
+    final keys = state.keys;
+    // Fehlt der Schlüssel des Dienstes, würde der Start sicher scheitern. Das
+    // soll man sehen, bevor man drückt. Solange noch nachgesehen wird, gilt
+    // er nicht als fehlend.
+    final keyMissing =
+        provider != null && keys != null && provider.needsKey && !keys.has(provider.id);
 
     return Card(
       key: ValueKey('profile-${entry.name}'),
@@ -384,6 +461,10 @@ class _ProfileCard extends StatelessWidget {
                   style: theme.textTheme.titleMedium,
                 ),
               const SizedBox(height: 4),
+              // Welcher Dienst mit welchem Modell übersetzt. Das ist seit dem
+              // 20.11.2026 je Profil wählbar und gehört deshalb auf die Karte.
+              Text('${provider!.label} · ${doc.model}'),
+              const SizedBox(height: 4),
               Text(
                 'Channels ${[for (final room in doc.rooms) for (final seat in room.seats) seat.channel].join(', ')}',
                 style: theme.textTheme.bodySmall,
@@ -406,6 +487,21 @@ class _ProfileCard extends StatelessWidget {
                 ],
               ),
             ],
+            if (keyMissing)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: onSecrets,
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                    ),
+                    icon: const Icon(Icons.error_outline, size: 18),
+                    label: Text('No key stored for ${provider.label}'),
+                  ),
+                ),
+              ),
             if (runningElsewhere)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -431,11 +527,13 @@ class _ProfileCard extends StatelessWidget {
                   ),
                 if (doc != null && !running)
                   Tooltip(
-                    message: state.runningName == null
+                    message: keyMissing
+                        ? 'Store the key for ${provider.label} first.'
+                        : state.runningName == null
                         ? 'Start this profile'
                         : 'Stop ${state.runningName} first. One bot can only run once.',
                     child: FilledButton(
-                      onPressed: state.runningName == null
+                      onPressed: state.runningName == null && !keyMissing
                           ? () => state.start(entry.name)
                           : null,
                       child: const Text('Start'),

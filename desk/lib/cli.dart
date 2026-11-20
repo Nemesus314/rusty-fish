@@ -45,12 +45,21 @@ abstract class FishCli {
 
   Future<KeyStatus> keyStatus();
 
-  Future<void> setKey(SecretKind kind, String value);
+  /// Die KI-Dienste, die das Programm kennt. Die Maske zeigt genau diese
+  /// Liste. Ein älteres Programm kennt den Aufruf nicht und lehnt ihn ab.
+  Future<List<Provider>> providers();
 
-  Future<void> forgetKey(SecretKind kind);
+  /// [entry] ist der Name des Eintrags in der Ablage: [botTokenEntry] oder
+  /// die Kennung eines Dienstes.
+  Future<void> setKey(String entry, String value);
 
-  /// Die Modelle, die der abgelegte Schlüssel sieht.
-  Future<List<String>> models({String? baseUrl});
+  Future<void> forgetKey(String entry);
+
+  /// Die Modelle, die der abgelegte Schlüssel bei diesem Dienst sieht.
+  ///
+  /// Ohne [provider] fragt die Maske so, wie sie es vor der Auswahl tat. Das
+  /// braucht sie nur gegenüber einem älteren Programm, das keine Dienste nennt.
+  Future<List<String>> models({String? provider, String? baseUrl});
 
   Future<FishRun> run(String name);
 }
@@ -94,22 +103,41 @@ class ProcessFishCli implements FishCli {
   }
 
   @override
-  Future<void> setKey(SecretKind kind, String value) async {
-    await _call(['key', 'set', kind.cliName, '--stdin'], input: '$value\n');
+  Future<List<Provider>> providers() async {
+    final out = await _call(['providers', '--json']);
+    final decoded = _decode(out);
+    if (decoded is! List) {
+      throw CliException('rusty-fish answered in an unexpected form.');
+    }
+    final list = [
+      for (final item in decoded)
+        if (item is Map)
+          Provider.fromJson(item.map((key, value) => MapEntry('$key', value))),
+    ];
+    if (list.isEmpty) {
+      throw CliException('rusty-fish named no AI service.');
+    }
+    return list;
   }
 
   @override
-  Future<void> forgetKey(SecretKind kind) async {
-    await _call(['key', 'forget', kind.cliName]);
+  Future<void> setKey(String entry, String value) async {
+    await _call(['key', 'set', entry, '--stdin'], input: '$value\n');
   }
 
   @override
-  Future<List<String>> models({String? baseUrl}) async {
+  Future<void> forgetKey(String entry) async {
+    await _call(['key', 'forget', entry]);
+  }
+
+  @override
+  Future<List<String>> models({String? provider, String? baseUrl}) async {
     final url = baseUrl?.trim() ?? '';
     final out = await _call([
       'models',
-      '--json',
+      if (provider != null) ...['--provider', provider],
       if (url.isNotEmpty) ...['--base-url', url],
+      '--json',
     ]);
     final decoded = _decode(out);
     if (decoded is! List) {

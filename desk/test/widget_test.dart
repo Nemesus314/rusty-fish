@@ -80,6 +80,8 @@ void main() {
 
     expect(inCard('tea', find.text('tea')), findsOneWidget);
     expect(inCard('tea', find.text('German ⇄ Russian')), findsOneWidget);
+    // Welcher Dienst mit welchem Modell übersetzt, steht auf der Karte.
+    expect(inCard('tea', find.text('ChatGPT (OpenAI) · some-model')), findsOneWidget);
     expect(inCard('tea', find.textContaining('111')), findsOneWidget);
     expect(inCard('tea', find.textContaining('222')), findsOneWidget);
     expect(inCard('tea', find.text('2 people listed')), findsOneWidget);
@@ -116,11 +118,13 @@ void main() {
     expect(find.textContaining(r'C:\fish\profiles'), findsWidgets);
   });
 
-  testWidgets('the two secrets show only whether they are stored', (
+  testWidgets('the title bar says only whether the secrets are stored', (
     tester,
   ) async {
     await open(tester, threeProfiles());
-    expect(find.text('AI key: stored'), findsOneWidget);
+    // Vier Dienste brauchen einen Schlüssel, einer davon liegt. Das eigene
+    // Modell zählt nicht mit, weil es keinen braucht.
+    expect(find.text('AI keys: 1 of 4 stored'), findsOneWidget);
     expect(find.text('Bot token: not stored'), findsOneWidget);
   });
 
@@ -204,6 +208,8 @@ void main() {
     // Profil bringt Englisch als neutrale Sprache mit. Es bleibt ein Feld,
     // das man leeren kann.
     expect(doc.rooms.single.passThrough, ['English']);
+    // Ein neues Profil beginnt bei dem Dienst, den es vor der Auswahl gab.
+    expect(doc.provider, 'openai');
   });
 
   testWidgets('a name the program would refuse is flagged while typing', (
@@ -275,7 +281,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('store-discord')));
     await tester.pumpAndSettle();
 
-    expect(fake.secrets[SecretKind.discord], secret);
+    expect(fake.secrets['discord'], secret);
     expect(find.textContaining('very-secret'), findsNothing);
     for (final field in tester.widgetList<EditableText>(find.byType(EditableText))) {
       expect(field.controller.text, isNot(contains('very-secret')));
@@ -287,16 +293,224 @@ void main() {
     final fake = threeProfiles();
     await open(tester, fake);
 
-    await tester.tap(find.text('AI key: stored'));
+    await tester.tap(find.text('AI keys: 1 of 4 stored'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('forget-openai')));
     await tester.pumpAndSettle();
     expect(fake.forgotten, isEmpty);
+    expect(find.text('Forget the key for ChatGPT (OpenAI)?'), findsOneWidget);
 
     await tester.tap(find.text('Forget it'));
     await tester.pumpAndSettle();
-    expect(fake.forgotten, [SecretKind.openai]);
-    expect(find.text('AI key: not stored'), findsOneWidget);
+    expect(fake.forgotten, ['openai']);
+    expect(find.text('AI keys: 0 of 4 stored'), findsOneWidget);
+  });
+
+  testWidgets('the secrets list every service and never show a value', (
+    tester,
+  ) async {
+    final fake = threeProfiles();
+    await open(tester, fake);
+    await tester.tap(find.byKey(const ValueKey('chip-ai-keys')));
+    await tester.pumpAndSettle();
+
+    Finder inDialog(Finder what) =>
+        find.descendant(of: find.byType(AlertDialog), matching: what);
+    Finder inRow(String entry, Finder what) => find.descendant(
+      of: find.byKey(ValueKey('secret-row-$entry')),
+      matching: what,
+    );
+
+    for (final title in [
+      'Bot token',
+      'ChatGPT (OpenAI)',
+      'Grok (xAI)',
+      'Gemini (Google)',
+      'Claude (Anthropic)',
+      'Own model or other service',
+    ]) {
+      expect(inDialog(find.text(title)), findsOneWidget, reason: title);
+    }
+    expect(inRow('openai', find.text('stored')), findsOneWidget);
+    expect(inRow('xai', find.text('not stored')), findsOneWidget);
+    expect(inRow('discord', find.text('not stored')), findsOneWidget);
+    // Ein eigenes Modell braucht oft keinen Schlüssel. Das steht dabei.
+    expect(inRow('custom', find.textContaining('optional')), findsOneWidget);
+    expect(inRow('xai', find.textContaining('optional')), findsNothing);
+
+    const secret = 'xai-very-secret-456';
+    await tester.ensureVisible(find.byKey(const ValueKey('store-xai')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('secret-xai')), secret);
+    await tester.tap(find.byKey(const ValueKey('store-xai')));
+    await tester.pumpAndSettle();
+
+    expect(fake.secrets['xai'], secret);
+    expect(find.textContaining('very-secret'), findsNothing);
+    for (final field in tester.widgetList<EditableText>(find.byType(EditableText))) {
+      expect(field.controller.text, isNot(contains('very-secret')));
+    }
+    expect(inRow('xai', find.text('stored')), findsOneWidget);
+    expect(find.text('AI keys: 2 of 4 stored'), findsOneWidget);
+  });
+
+  testWidgets('the chosen AI service is saved with the profile', (tester) async {
+    final fake = threeProfiles();
+    await open(tester, fake);
+
+    await tester.tap(inCard('study', find.text('Edit')));
+    await tester.pumpAndSettle();
+    // Vor einem Wechsel gibt es keinen Hinweis zu den Modellnamen.
+    expect(find.textContaining('Model names differ'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('field-provider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Grok (xAI)').last);
+    await tester.pumpAndSettle();
+    // Das Modell bleibt stehen, bekommt aber einen Hinweis: bei dem neuen
+    // Dienst heißt es anders.
+    expect(textOf(tester, const ValueKey('field-model')), 'some-model');
+    expect(find.textContaining('Model names differ'), findsOneWidget);
+
+    await tester.tap(find.text('Load models'));
+    await tester.pumpAndSettle();
+    expect(fake.modelRequests.single.provider, 'xai');
+    await tester.tap(find.text('beta-model'));
+    await tester.pumpAndSettle();
+    // Ein Modell von der Liste dieses Dienstes braucht den Hinweis nicht mehr.
+    expect(find.textContaining('Model names differ'), findsNothing);
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(fake.saved.single.provider, 'xai');
+    expect(fake.saved.single.model, 'beta-model');
+    expect(fake.saved.single.baseUrl, isNull);
+    expect(inCard('study', find.text('Grok (xAI) · beta-model')), findsOneWidget);
+  });
+
+  testWidgets('an own model asks for its address, the others fold it away', (
+    tester,
+  ) async {
+    final fake = threeProfiles();
+    await open(tester, fake);
+
+    await tester.tap(inCard('study', find.text('Edit')));
+    await tester.pumpAndSettle();
+    // Ein Dienst mit üblicher Adresse: das Feld ist eingeklappt.
+    expect(find.text('Different address (optional)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('field-base-url')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('field-provider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Own model or other service').last);
+    await tester.pumpAndSettle();
+    // Ohne übliche Adresse ist das Feld da, mit einem Beispiel.
+    expect(find.text('Different address (optional)'), findsNothing);
+    expect(find.byKey(const ValueKey('field-base-url')), findsOneWidget);
+    expect(find.textContaining('http://localhost:11434/v1'), findsWidgets);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('field-base-url')),
+      'http://localhost:11434/v1',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(fake.saved.single.provider, 'custom');
+    expect(fake.saved.single.baseUrl, 'http://localhost:11434/v1');
+  });
+
+  testWidgets('the folded address opens and is saved as an override', (
+    tester,
+  ) async {
+    final fake = threeProfiles();
+    await open(tester, fake);
+
+    await tester.tap(inCard('study', find.text('Edit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Different address (optional)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('field-base-url')),
+      'https://proxy.example/v1',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(fake.saved.single.provider, 'openai');
+    expect(fake.saved.single.baseUrl, 'https://proxy.example/v1');
+  });
+
+  testWidgets('a profile whose service has no key cannot be started', (
+    tester,
+  ) async {
+    // Abgelegt ist nur der Schlüssel für OpenAI.
+    final fake = FakeCli(
+      entries: [
+        entryOf(docOf('grok', provider: 'xai')),
+        entryOf(
+          docOf('local', provider: 'custom', baseUrl: 'http://localhost:11434/v1'),
+        ),
+        entryOf(docOf('plain')),
+      ],
+    );
+    await open(tester, fake);
+
+    ButtonStyleButton startOf(String profile) => tester.widget<ButtonStyleButton>(
+      inCard(
+        profile,
+        find.ancestor(
+          of: find.text('Start'),
+          matching: find.bySubtype<ButtonStyleButton>(),
+        ),
+      ),
+    );
+
+    expect(inCard('grok', find.text('Grok (xAI) · some-model')), findsOneWidget);
+    expect(inCard('grok', find.text('No key stored for Grok (xAI)')), findsOneWidget);
+    expect(startOf('grok').onPressed, isNull);
+
+    // Ein eigenes Modell braucht keinen Schlüssel.
+    expect(inCard('local', find.textContaining('No key stored')), findsNothing);
+    expect(startOf('local').onPressed, isNotNull);
+    expect(inCard('plain', find.textContaining('No key stored')), findsNothing);
+    expect(startOf('plain').onPressed, isNotNull);
+
+    // Der Hinweis führt zu den Geheimnissen.
+    await tester.tap(inCard('grok', find.text('No key stored for Grok (xAI)')));
+    await tester.pumpAndSettle();
+    expect(find.text('Secrets'), findsOneWidget);
+  });
+
+  testWidgets('a program that cannot list the services leaves the window usable', (
+    tester,
+  ) async {
+    final fake = threeProfiles()
+      ..providersError = "error: unrecognized subcommand 'providers'";
+    await open(tester, fake);
+
+    // Die Meldung des Programms steht oben, die Profile sind trotzdem da.
+    expect(find.textContaining("unrecognized subcommand 'providers'"), findsOneWidget);
+    expect(inCard('study', find.text('Start')), findsOneWidget);
+    expect(inCard('study', find.text('ChatGPT (OpenAI) · some-model')), findsOneWidget);
+    expect(find.text('AI keys: 1 of 1 stored'), findsOneWidget);
+
+    await tester.tap(inCard('study', find.text('Edit')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('field-provider')));
+    await tester.pumpAndSettle();
+    // Zur Auswahl steht nur der eine Dienst, den es vor der Auswahl gab.
+    expect(find.text('Grok (xAI)'), findsNothing);
+    await tester.tap(find.text('ChatGPT (OpenAI)').last);
+    await tester.pumpAndSettle();
+
+    // Ein älteres Programm kennt die Angabe des Dienstes bei den Modellen nicht.
+    await tester.tap(find.text('Load models'));
+    await tester.pumpAndSettle();
+    expect(fake.modelRequests.single.provider, isNull);
+    await tester.tap(find.text('beta-model'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(fake.saved.single.provider, 'openai');
   });
 
   testWidgets('starting and stopping a profile, with its log', (tester) async {
@@ -363,6 +577,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Load models'));
     await tester.pumpAndSettle();
+    // Gefragt wird nach den Modellen des Dienstes, den das Profil nennt.
+    expect(fake.modelRequests.single.provider, 'openai');
     await tester.tap(find.text('beta-model'));
     await tester.pumpAndSettle();
     expect(textOf(tester, const ValueKey('field-model')), 'beta-model');

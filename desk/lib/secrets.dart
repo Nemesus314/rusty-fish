@@ -1,18 +1,51 @@
-// Die beiden Geheimnisse: der Schlüssel der KI und der Token des Bots.
+// Die Geheimnisse: der Token des Bots und je ein Schlüssel pro KI-Dienst.
 //
 // Die Maske zeigt nur, ob sie liegen. Ein Wert geht vom Eingabefeld über die
 // Standardeingabe an das Programm und von dort in die Ablage des Systems.
 // Zurück kommt er nie: es gibt keinen Aufruf, der ihn ausliest.
+//
+// Bis zum 20.11.2026 gab es genau einen KI-Schlüssel. Nemesus am selben Tag:
+// „Die Möglichkeit, die KIs im Profil zu wechseln sollte jedoch erhalten
+// bleiben." Seitdem hat jeder Dienst seinen eigenen Schlüssel, und der Dialog
+// zeigt eine Zeile je Dienst, den das Programm nennt.
 
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
 import 'model.dart';
 
+/// Eine Zeile des Dialogs.
+class _Entry {
+  const _Entry({
+    required this.entry,
+    required this.title,
+    required this.forgetTitle,
+    required this.forgetBody,
+    this.note,
+  });
+
+  /// Der Name des Eintrags in der Ablage.
+  final String entry;
+  final String title;
+  final String forgetTitle;
+  final String forgetBody;
+
+  /// Ein Satz unter dem Feld, wo er etwas klärt.
+  final String? note;
+}
+
 class SecretsDialog extends StatefulWidget {
-  const SecretsDialog({super.key, required this.cli, required this.onChanged});
+  const SecretsDialog({
+    super.key,
+    required this.cli,
+    required this.providers,
+    required this.onChanged,
+  });
 
   final FishCli cli;
+
+  /// Die Dienste, die das Programm nennt. Jeder bekommt eine Zeile.
+  final List<Provider> providers;
 
   /// Die Übersicht dahinter soll sofort den neuen Stand zeigen.
   final Future<void> Function() onChanged;
@@ -22,8 +55,34 @@ class SecretsDialog extends StatefulWidget {
 }
 
 class _SecretsDialogState extends State<SecretsDialog> {
-  final Map<SecretKind, TextEditingController> _fields = {
-    for (final kind in SecretKind.values) kind: TextEditingController(),
+  late final List<_Entry> _entries = [
+    const _Entry(
+      entry: botTokenEntry,
+      title: botTokenLabel,
+      forgetTitle: 'Forget the bot token?',
+      forgetBody:
+          'Without it the fish cannot connect to Discord. You can store it again any time.',
+      note: 'From the Discord Developer Portal: your application, Bot, Reset Token.',
+    ),
+    for (final provider in widget.providers)
+      _Entry(
+        entry: provider.id,
+        title: provider.label,
+        forgetTitle: 'Forget the key for ${provider.label}?',
+        forgetBody: provider.needsKey
+            ? 'Without it, profiles that use ${provider.label} cannot translate. '
+                  'You can store it again any time.'
+            : 'Profiles that use ${provider.label} then run without a key. '
+                  'You can store it again any time.',
+        // Ein eigenes Modell auf dem eigenen Rechner verlangt oft keinen
+        // Schlüssel. Das muss dastehen, sonst sucht man einen, den es nicht gibt.
+        note: provider.needsKey
+            ? null
+            : 'A key is optional here. Leave it out if your own model asks for none.',
+      ),
+  ];
+  late final Map<String, TextEditingController> _fields = {
+    for (final entry in _entries) entry.entry: TextEditingController(),
   };
   KeyStatus? _status;
   String? _error;
@@ -58,14 +117,6 @@ class _SecretsDialogState extends State<SecretsDialog> {
     }
   }
 
-  bool? _stored(SecretKind kind) {
-    final status = _status;
-    if (status == null) {
-      return null;
-    }
-    return kind == SecretKind.openai ? status.openai : status.discord;
-  }
-
   Future<void> _act(Future<void> Function() action) async {
     setState(() {
       _busy = true;
@@ -83,8 +134,8 @@ class _SecretsDialogState extends State<SecretsDialog> {
     }
   }
 
-  Future<void> _store(SecretKind kind) async {
-    final field = _fields[kind]!;
+  Future<void> _store(_Entry entry) async {
+    final field = _fields[entry.entry]!;
     final value = field.text.trim();
     if (value.isEmpty) {
       setState(() => _error = 'Nothing entered, nothing stored.');
@@ -93,19 +144,15 @@ class _SecretsDialogState extends State<SecretsDialog> {
     // Das Feld wird geleert, bevor irgendetwas anderes geschieht. Danach
     // steht der Wert nirgends mehr im Fenster.
     field.clear();
-    await _act(() => widget.cli.setKey(kind, value));
+    await _act(() => widget.cli.setKey(entry.entry, value));
   }
 
-  Future<void> _forget(SecretKind kind) async {
+  Future<void> _forget(_Entry entry) async {
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Forget the ${kind.label}?'),
-        content: Text(
-          kind == SecretKind.openai
-              ? 'Without it the fish cannot translate. You can store it again any time.'
-              : 'Without it the fish cannot connect to Discord. You can store it again any time.',
-        ),
+        title: Text(entry.forgetTitle),
+        content: Text(entry.forgetBody),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -119,7 +166,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
       ),
     );
     if (sure == true) {
-      await _act(() => widget.cli.forgetKey(kind));
+      await _act(() => widget.cli.forgetKey(entry.entry));
     }
   }
 
@@ -130,7 +177,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
     return AlertDialog(
       title: const Text('Secrets'),
       content: SizedBox(
-        width: 520,
+        width: 620,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -145,7 +192,19 @@ class _SecretsDialogState extends State<SecretsDialog> {
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(error, style: TextStyle(color: theme.colorScheme.error)),
                 ),
-              for (final kind in SecretKind.values) _block(kind, theme),
+              for (final (index, entry) in _entries.indexed) ...[
+                // Der Token des Bots ist etwas anderes als die Schlüssel der
+                // Dienste. Die Überschrift trennt beides.
+                if (index == 1)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: Text(
+                      'AI keys, one per service',
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                _block(entry, theme),
+              ],
             ],
           ),
         ),
@@ -159,58 +218,77 @@ class _SecretsDialogState extends State<SecretsDialog> {
     );
   }
 
-  Widget _block(SecretKind kind, ThemeData theme) {
-    final stored = _stored(kind);
+  Widget _block(_Entry entry, ThemeData theme) {
+    final status = _status;
+    final stored = status?.has(entry.entry);
     return Padding(
-      padding: const EdgeInsets.only(top: 20),
+      key: ValueKey('secret-row-${entry.entry}'),
+      padding: const EdgeInsets.only(top: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(kind.label, style: theme.textTheme.titleMedium),
+              Text(entry.title, style: theme.textTheme.titleMedium),
               const SizedBox(width: 12),
               Text(
                 stored == null ? 'checking' : (stored ? 'stored' : 'not stored'),
                 style: TextStyle(
                   color: stored == true
                       ? theme.colorScheme.primary
-                      : theme.colorScheme.error,
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          TextField(
-            key: ValueKey('secret-${kind.cliName}'),
-            controller: _fields[kind],
-            obscureText: true,
-            enableSuggestions: false,
-            autocorrect: false,
-            decoration: InputDecoration(
-              labelText: stored == true ? 'Replace it with a new one' : 'Paste it here',
-              helperText: kind == SecretKind.openai
-                  ? 'The API key of the service that translates.'
-                  : 'From the Discord Developer Portal: your application, Bot, Reset Token.',
-            ),
-          ),
-          const SizedBox(height: 8),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              Expanded(
+                child: TextField(
+                  key: ValueKey('secret-${entry.entry}'),
+                  controller: _fields[entry.entry],
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    labelText: stored == true
+                        ? 'Replace it with a new one'
+                        : 'Paste it here',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
               FilledButton(
-                key: ValueKey('store-${kind.cliName}'),
-                onPressed: _busy ? null : () => _store(kind),
+                key: ValueKey('store-${entry.entry}'),
+                onPressed: _busy ? null : () => _store(entry),
                 child: const Text('Store'),
               ),
               const SizedBox(width: 8),
-              if (stored == true)
-                OutlinedButton(
-                  key: ValueKey('forget-${kind.cliName}'),
-                  onPressed: _busy ? null : () => _forget(kind),
-                  child: const Text('Forget'),
-                ),
+              // Der Platz bleibt auch ohne Knopf belegt, damit die Felder
+              // aller Zeilen gleich breit untereinander stehen. Im echten
+              // Fenster angesehen am 20.11.2026: bei 84 Punkten Breite brach
+              // „Forget" in zwei Zeilen um.
+              SizedBox(
+                width: 108,
+                child: stored == true
+                    ? OutlinedButton(
+                        key: ValueKey('forget-${entry.entry}'),
+                        onPressed: _busy ? null : () => _forget(entry),
+                        child: const Text('Forget', softWrap: false),
+                      )
+                    : null,
+              ),
             ],
           ),
+          // Der Hinweis steht unter der Zeile und nicht als Hilfetext im Feld.
+          // Als Hilfetext schob er die Knöpfe daneben nach unten, und die
+          // Zeilen mit und ohne Hinweis sahen verschieden aus.
+          if (entry.note != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(entry.note!, style: theme.textTheme.bodySmall),
+            ),
         ],
       ),
     );

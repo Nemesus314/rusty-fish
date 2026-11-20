@@ -139,6 +139,7 @@ void main() {
     final json = doc.toJson();
     expect(json.keys, [
       'name',
+      'provider',
       'model',
       'base_url',
       'host',
@@ -148,11 +149,92 @@ void main() {
       'people',
     ]);
     expect(json['base_url'], isNull);
+    // Ohne Angabe im Profil gilt der Dienst, den es vor der Auswahl gab.
+    expect(json['provider'], 'openai');
     expect((json['rooms'] as List).single['seats'][1]['gender'], isNull);
     // Hin und zurück bleibt es dasselbe Profil.
     final again = ProfileDoc.fromJson(
       jsonDecode(jsonEncode(json)) as Map<String, dynamic>,
     );
     expect(again.toJson(), json);
+  });
+
+  group('AI services', () {
+    test('the list of services is read in the form the program sends', () {
+      final list = [
+        for (final item
+            in jsonDecode('''
+          [{"id": "openai", "label": "ChatGPT (OpenAI)",
+            "base_url": "https://api.openai.com/v1", "needs_key": true},
+           {"id": "custom", "label": "Own model or other service",
+            "base_url": null, "needs_key": false},
+           {"id": "bare"}]''')
+                as List)
+          Provider.fromJson(item as Map<String, dynamic>),
+      ];
+      expect(list[0].id, 'openai');
+      expect(list[0].label, 'ChatGPT (OpenAI)');
+      expect(list[0].baseUrl, 'https://api.openai.com/v1');
+      expect(list[0].needsKey, isTrue);
+      expect(list[0].needsAddress, isFalse);
+
+      expect(list[1].baseUrl, isNull);
+      expect(list[1].needsKey, isFalse);
+      expect(list[1].needsAddress, isTrue);
+
+      // Fehlt eine Angabe, bleibt der Eintrag lesbar: die Kennung dient als
+      // Name, und im Zweifel wird nach einem Schlüssel gefragt.
+      expect(list[2].label, 'bare');
+      expect(list[2].needsKey, isTrue);
+    });
+
+    test('a profile names its service, and none means the first there was', () {
+      Map<String, dynamic> profile(String? provider) => {
+        'name': 'p',
+        'provider': ?provider,
+        'model': 'm',
+        'host': '1',
+        'rooms': <Object>[],
+      };
+      expect(ProfileDoc.fromJson(profile('xai')).provider, 'xai');
+      // Ein älteres Programm nennt den Dienst nicht.
+      expect(ProfileDoc.fromJson(profile(null)).provider, 'openai');
+      expect(ProfileDoc.fromJson(profile(' ')).provider, 'openai');
+      expect(ProfileDoc.blank().provider, 'openai');
+      expect(
+        const ProfileDoc(
+          name: 'a',
+          provider: 'google',
+          model: 'm',
+          baseUrl: null,
+          host: '1',
+          aiNames: [],
+          limits: Limits(translationTokensPerDay: 1, questionsPerGuestPerDay: 1),
+          rooms: [],
+          people: [],
+        ).renamed('b').provider,
+        'google',
+      );
+    });
+
+    test('the key status holds one yes or no per entry of the store', () {
+      final status = KeyStatus.fromJson(
+        jsonDecode(
+              '{"discord": true, "openai": true, "xai": false, "google": false, '
+              '"anthropic": true, "custom": false}',
+            )
+            as Map<String, dynamic>,
+      );
+      expect(status.discord, isTrue);
+      expect(status.has('openai'), isTrue);
+      expect(status.has('xai'), isFalse);
+      expect(status.has('anthropic'), isTrue);
+      // Was das Programm nicht nennt, gilt als nicht abgelegt.
+      expect(status.has('never-heard-of'), isFalse);
+      // Ein älteres Programm nennt nur zwei Einträge.
+      final old = KeyStatus.fromJson(const {'openai': true, 'discord': false});
+      expect(old.has('openai'), isTrue);
+      expect(old.has('xai'), isFalse);
+    });
   });
 }

@@ -14,10 +14,19 @@ class ProfileEditorPage extends StatefulWidget {
     required this.initial,
     required this.isNew,
     required this.existingNames,
+    this.providers = fallbackProviders,
+    this.providersListed = false,
   });
 
   final FishCli cli;
   final ProfileDoc initial;
+
+  /// Die KI-Dienste, die das Programm nennt. Die Auswahl zeigt genau diese.
+  final List<Provider> providers;
+
+  /// Ob die Liste wirklich vom Programm stammt. Ein älteres Programm kennt
+  /// die Angabe des Dienstes bei der Frage nach den Modellen nicht.
+  final bool providersListed;
 
   /// Neu oder Kopie: der Name ist dann noch frei wählbar.
   final bool isNew;
@@ -107,10 +116,30 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   bool _saving = false;
   bool _loadingModels = false;
 
+  /// Die Kennung des gewählten KI-Dienstes.
+  late String _provider;
+
+  /// Der Dienst wurde gewechselt, das Modell stammt aber noch vom alten. Dann
+  /// steht ein Hinweis am Modellfeld, bis dort etwas Neues eingetragen ist.
+  bool _modelFromOtherService = false;
+
+  /// Die Auswahl im Formular: die Dienste des Programms und, falls das Profil
+  /// einen nennt, den das Programm nicht (mehr) aufführt, auch dieser. Sonst
+  /// würde ein Profil beim bloßen Öffnen und Speichern still umgestellt.
+  late final List<Provider> _choices;
+
+  Provider get _service => _choices.firstWhere((p) => p.id == _provider);
+
   @override
   void initState() {
     super.initState();
     final doc = widget.initial;
+    _provider = doc.provider;
+    _choices = [
+      ...widget.providers,
+      if (!widget.providers.any((p) => p.id == doc.provider))
+        Provider(id: doc.provider, label: doc.provider, baseUrl: null, needsKey: true),
+    ];
     _name = TextEditingController(text: doc.name);
     _model = TextEditingController(text: doc.model);
     _baseUrl = TextEditingController(text: doc.baseUrl ?? '');
@@ -122,6 +151,32 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _people = [for (final person in doc.people) _PersonDraft(person)];
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
+    // Wer nach einem Wechsel des Dienstes das Modell anfasst, hat den Hinweis
+    // dazu gesehen. Er verschwindet dann.
+    _model.addListener(_modelTouched);
+  }
+
+  void _modelTouched() {
+    if (_modelFromOtherService && mounted) {
+      setState(() => _modelFromOtherService = false);
+    }
+  }
+
+  void _chooseService(String id) {
+    if (id == _provider) {
+      return;
+    }
+    setState(() {
+      _provider = id;
+      // Das Modell bleibt stehen, damit nichts still verschwindet. Bei dem
+      // neuen Dienst heißt es aber fast sicher anders.
+      _modelFromOtherService = _model.text.trim().isNotEmpty;
+      _modelsError = null;
+      // Eine abweichende Adresse gehörte zum alten Dienst. Bliebe sie stehen,
+      // ginge das Profil mit dem Schlüssel des neuen Dienstes an die Adresse
+      // des alten.
+      _baseUrl.clear();
+    });
   }
 
   void _redraw() {
@@ -216,6 +271,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     final baseUrl = _baseUrl.text.trim();
     return ProfileDoc(
       name: _name.text.trim(),
+      provider: _provider,
       model: _model.text.trim(),
       baseUrl: baseUrl.isEmpty ? null : baseUrl,
       host: _host.text.trim(),
@@ -277,7 +333,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     });
     final List<String> models;
     try {
-      models = await widget.cli.models(baseUrl: _baseUrl.text);
+      models = await widget.cli.models(
+        // Ein älteres Programm kennt diese Angabe nicht; dort fragt die
+        // Maske so, wie sie es vor der Auswahl tat.
+        provider: widget.providersListed ? _provider : null,
+        baseUrl: _baseUrl.text,
+      );
     } on CliException catch (e) {
       if (mounted) {
         setState(() {
@@ -294,7 +355,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     final picked = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Models your key can use (${models.length})'),
+        title: Text('Models at ${_service.label} (${models.length})'),
         content: SizedBox(
           width: 420,
           height: 460,
@@ -396,6 +457,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
 
   Widget _general() {
     final modelsError = _modelsError;
+    final service = _service;
     return _Section(
       title: 'General',
       children: [
@@ -412,6 +474,31 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           ),
         ),
         const SizedBox(height: 16),
+        // Nemesus am 20.11.2026: „Die Möglichkeit, die KIs im Profil zu
+        // wechseln sollte jedoch erhalten bleiben." Bis dahin stand hier nur
+        // ein Adressfeld („Service address (optional)"), in das man die
+        // Adresse eines anderen Dienstes selbst eintippen musste.
+        DropdownButtonFormField<String>(
+          key: const ValueKey('field-provider'),
+          initialValue: _provider,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'AI service',
+            helperText: service.needsKey
+                ? 'Who translates. Its key is kept under Secrets.'
+                : 'Who translates. A key is optional for this one.',
+          ),
+          items: [
+            for (final provider in _choices)
+              DropdownMenuItem(value: provider.id, child: Text(provider.label)),
+          ],
+          onChanged: (id) {
+            if (id != null) {
+              _chooseService(id);
+            }
+          },
+        ),
+        const SizedBox(height: 16),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -421,8 +508,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
                 controller: _model,
                 decoration: InputDecoration(
                   labelText: 'Model',
-                  helperText: 'The AI model that translates.',
+                  helperText: _modelFromOtherService
+                      ? 'Model names differ between services. Check that this one exists at ${service.label}.'
+                      : 'The AI model that translates.',
+                  helperMaxLines: 2,
                   errorText: modelsError,
+                  errorMaxLines: 4,
                 ),
               ),
             ),
@@ -437,15 +528,49 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           ],
         ),
         const SizedBox(height: 16),
-        TextField(
-          key: const ValueKey('field-base-url'),
-          controller: _baseUrl,
-          decoration: const InputDecoration(
-            labelText: 'Service address (optional)',
-            helperText:
-                'Leave empty for OpenAI. Any service that speaks the OpenAI chat format works.',
+        if (service.needsAddress)
+          // Ohne übliche Adresse muss die Person sagen, wo ihr Modell zu
+          // erreichen ist. Ob sie es getan hat, prüft das Programm.
+          TextField(
+            key: const ValueKey('field-base-url'),
+            controller: _baseUrl,
+            decoration: const InputDecoration(
+              labelText: 'Address of your model',
+              hintText: 'http://localhost:11434/v1',
+              helperText:
+                  'Needed. For example http://localhost:11434/v1. '
+                  'The service must speak the OpenAI chat format.',
+              helperMaxLines: 2,
+            ),
+          )
+        else
+          // Die übliche Adresse kennt das Programm. Eine andere braucht nur,
+          // wer den Dienst über einen Umweg erreicht; deshalb eingeklappt.
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              // Je Dienst ein eigener Zustand: nach einem Wechsel ist das
+              // Feld wieder zu, denn die Adresse des alten Dienstes ist fort.
+              key: ValueKey('address-$_provider'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              initiallyExpanded: _baseUrl.text.trim().isNotEmpty,
+              title: const Text('Different address (optional)'),
+              children: [
+                TextField(
+                  key: const ValueKey('field-base-url'),
+                  controller: _baseUrl,
+                  decoration: InputDecoration(
+                    labelText: 'Address',
+                    helperText: service.baseUrl == null
+                        ? 'Leave empty for the usual address of ${service.label}.'
+                        : 'Leave empty for the usual address of ${service.label}: ${service.baseUrl}',
+                    helperMaxLines: 2,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 16),
         TextField(
           key: const ValueKey('field-host'),

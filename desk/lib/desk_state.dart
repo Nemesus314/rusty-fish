@@ -16,8 +16,32 @@ class DeskState extends ChangeNotifier {
   ProfileList? list;
   KeyStatus? keys;
 
+  /// Die KI-Dienste, die das Programm nennt. Solange es das nicht kann, steht
+  /// hier der eine Dienst, den es vor der Auswahl gab.
+  List<Provider> providers = fallbackProviders;
+
+  /// Ob [providers] wirklich vom Programm stammt. Nur dann fragt die Maske
+  /// nach den Modellen eines bestimmten Dienstes; ein älteres Programm kennt
+  /// diese Angabe nicht.
+  bool providersListed = false;
+
+  /// Warum das Programm seine Dienste nicht nennen konnte, in seinem Wortlaut.
+  /// Die Maske bleibt dann benutzbar, nur ohne Auswahl.
+  String? providersError;
+
   /// Warum die Übersicht nicht geladen werden konnte, im Wortlaut des Programms.
   String? loadError;
+
+  /// Der Dienst zu einer Kennung. Eine Kennung, die das Programm nicht (mehr)
+  /// nennt, bleibt sichtbar, statt still zu etwas anderem zu werden.
+  Provider providerOf(String id) {
+    for (final provider in providers) {
+      if (provider.id == id) {
+        return provider;
+      }
+    }
+    return Provider(id: id, label: id, baseUrl: null, needsKey: true);
+  }
 
   /// Das Profil, das dieses Fenster gestartet hat. Höchstens eines: ein Bot
   /// kann nur einmal laufen, sonst käme jede Nachricht doppelt an.
@@ -46,6 +70,18 @@ class DeskState extends ChangeNotifier {
       return;
     }
     _refreshing = true;
+    // Die Dienste ändern sich nicht, während das Fenster offen ist. Gefragt
+    // wird deshalb nur, bis es einmal geklappt hat. Scheitert es (ein älteres
+    // Programm), bleibt der Rest der Maske davon unberührt.
+    if (!providersListed) {
+      try {
+        providers = await cli.providers();
+        providersListed = true;
+        providersError = null;
+      } on CliException catch (e) {
+        providersError = e.message;
+      }
+    }
     try {
       final fresh = await cli.listProfiles();
       final freshKeys = await cli.keyStatus();

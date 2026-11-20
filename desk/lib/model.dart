@@ -115,10 +115,71 @@ class Usage {
   );
 }
 
+/// Ein KI-Dienst, so wie das Programm ihn nennt (`providers --json`).
+///
+/// Nemesus am 20.11.2026: „Die Möglichkeit, die KIs im Profil zu wechseln
+/// sollte jedoch erhalten bleiben." Welche Dienste es gibt und wie sie heißen,
+/// weiß das Programm. Die Maske zeigt seine Liste und erfindet keine eigene.
+class Provider {
+  const Provider({
+    required this.id,
+    required this.label,
+    required this.baseUrl,
+    required this.needsKey,
+  });
+
+  /// Die Kennung im Profil und zugleich der Name des Schlüssels in der Ablage.
+  final String id;
+
+  /// So heißt der Dienst für Menschen, etwa „Grok (xAI)".
+  final String label;
+
+  /// Die übliche Adresse des Dienstes. Fehlt sie, muss das Profil eine nennen.
+  final String? baseUrl;
+
+  /// Ob der Dienst ohne Schlüssel gar nicht antwortet. Ein eigenes Modell auf
+  /// dem eigenen Rechner braucht oft keinen.
+  final bool needsKey;
+
+  /// Ohne übliche Adresse muss die Person selbst eine angeben.
+  bool get needsAddress => baseUrl == null;
+
+  factory Provider.fromJson(Map<String, dynamic> json) {
+    final id = '${json['id'] ?? ''}';
+    final label = json['label'];
+    final baseUrl = json['base_url'];
+    return Provider(
+      id: id,
+      label: label is String && label.trim().isNotEmpty ? label : id,
+      baseUrl: baseUrl is String && baseUrl.trim().isNotEmpty ? baseUrl : null,
+      // Im Zweifel braucht ein Dienst einen Schlüssel: lieber einmal zu viel
+      // danach fragen als einen Start erlauben, der sicher scheitert.
+      needsKey: json['needs_key'] != false,
+    );
+  }
+}
+
+/// Die Kennung, die gilt, wenn ein Profil keinen Dienst nennt. Profile aus der
+/// Zeit vor der Auswahl sprachen alle mit OpenAI.
+const String defaultProviderId = 'openai';
+
+/// Was die Maske zeigt, solange das Programm seine Dienste nicht nennen kann
+/// (ein älteres Programm kennt den Aufruf noch nicht). Genau der eine Dienst,
+/// den es vor der Auswahl gab, damit die Maske benutzbar bleibt.
+const List<Provider> fallbackProviders = [
+  Provider(
+    id: defaultProviderId,
+    label: 'ChatGPT (OpenAI)',
+    baseUrl: 'https://api.openai.com/v1',
+    needsKey: true,
+  ),
+];
+
 /// Ein Profil, so wie es bearbeitet und gespeichert wird.
 class ProfileDoc {
   const ProfileDoc({
     required this.name,
+    this.provider = defaultProviderId,
     required this.model,
     required this.baseUrl,
     required this.host,
@@ -129,7 +190,13 @@ class ProfileDoc {
   });
 
   final String name;
+
+  /// Die Kennung des KI-Dienstes, etwa „openai" oder „xai".
+  final String provider;
   final String model;
+
+  /// Eine abweichende Adresse. Bei einem Dienst ohne übliche Adresse Pflicht;
+  /// das prüft das Programm.
   final String? baseUrl;
   final String host;
   final List<String> aiNames;
@@ -168,8 +235,13 @@ class ProfileDoc {
 
   factory ProfileDoc.fromJson(Map<String, dynamic> json) {
     final baseUrl = json['base_url'];
+    final provider = json['provider'];
     return ProfileDoc(
       name: '${json['name'] ?? ''}',
+      // Fehlt die Angabe (ein älteres Programm kennt sie nicht), gilt OpenAI.
+      provider: provider is String && provider.trim().isNotEmpty
+          ? provider.trim()
+          : defaultProviderId,
       model: '${json['model'] ?? ''}',
       baseUrl: baseUrl is String && baseUrl.trim().isNotEmpty ? baseUrl : null,
       host: '${json['host'] ?? ''}',
@@ -182,6 +254,7 @@ class ProfileDoc {
 
   Map<String, dynamic> toJson() => {
     'name': name,
+    'provider': provider,
     'model': model,
     'base_url': baseUrl,
     'host': host,
@@ -193,6 +266,7 @@ class ProfileDoc {
 
   ProfileDoc renamed(String newName) => ProfileDoc(
     name: newName,
+    provider: provider,
     model: model,
     baseUrl: baseUrl,
     host: host,
@@ -252,30 +326,31 @@ class ProfileList {
   );
 }
 
-/// Ob die beiden Geheimnisse in der Ablage des Systems liegen. Die Werte
-/// selbst kommen nie in die Oberfläche zurück.
-class KeyStatus {
-  const KeyStatus({required this.openai, required this.discord});
+/// Der Eintrag der Ablage, unter dem der Token des Bots liegt. Die Schlüssel
+/// der KI-Dienste liegen unter der Kennung ihres Dienstes ([Provider.id]).
+const String botTokenEntry = 'discord';
 
-  final bool openai;
-  final bool discord;
+/// So heißt der Token des Bots in der Oberfläche.
+const String botTokenLabel = 'Bot token';
+
+/// Welche Geheimnisse in der Ablage des Systems liegen. Die Werte selbst
+/// kommen nie in die Oberfläche zurück.
+///
+/// Bis zum 20.11.2026 gab es genau zwei Geheimnisse, den einen KI-Schlüssel
+/// und den Token. Seit jedes Profil seinen Dienst wählen kann, hat jeder
+/// Dienst seinen eigenen Schlüssel. Ein Eintrag, den das Programm nicht
+/// nennt, gilt als nicht abgelegt.
+class KeyStatus {
+  const KeyStatus(this.stored);
+
+  final Map<String, bool> stored;
+
+  bool has(String entry) => stored[entry] == true;
+
+  bool get discord => has(botTokenEntry);
 
   factory KeyStatus.fromJson(Map<String, dynamic> json) =>
-      KeyStatus(openai: json['openai'] == true, discord: json['discord'] == true);
-}
-
-/// Die Geheimnisse, die der Fisch kennt.
-enum SecretKind {
-  openai('openai', 'AI key'),
-  discord('discord', 'Bot token');
-
-  const SecretKind(this.cliName, this.label);
-
-  /// So heißt das Geheimnis beim Aufruf des Programms.
-  final String cliName;
-
-  /// So heißt es in der Oberfläche.
-  final String label;
+      KeyStatus({for (final item in json.entries) item.key: item.value == true});
 }
 
 /// Profilnamen, wie das Programm sie annimmt. Die Oberfläche prüft das nur,
