@@ -69,11 +69,24 @@ context_lines = 10
   # passed to the AI as a grammar hint only. Leave it out if several people of
   # different gender share the seat.
   # gender = "female"
+  # Optional: the Discord user id of the person whose table this seat is. The
+  # fish writes only at tables without an owner, at your own (owner = host) and
+  # at those of people you invited below; at all others it only reads along.
+  # owner = "000000000000000003"
 
-# Optional, as often as you like: the same grammar hint for one person, by
-# Discord user id (right-click the person -> Copy User ID). A person's own
-# entry goes before the gender of the seat, so people keep their own forms
-# when they write at someone else's seat.
+# Optional, as often as you like: what you know about one person, by Discord
+# user id (right-click the person -> Copy User ID). Only the id is required.
 # [[person]]
 # id = "000000000000000003"
+# The same grammar hint as at a seat. A person's own entry goes before the
+# gender of the seat, so people keep their own forms at someone else's seat.
 # gender = "male"
+# The person's mother tongue: at a table this person owns, the fish translates
+# into it instead of the seat's language.
+# lang = "Russian"
+# Languages that stay untranslated for this person, in place of the room's
+# pass_through; an empty list means: translate everything.
+# neutral = ["English"]
+# Invite this person: your fish then also writes at their table, on your key
+# and at your cost, and tells them so there once.
+# invited = true

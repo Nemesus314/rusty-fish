@@ -59,7 +59,7 @@ fn now<F: Future>(f: F) -> F::Output {
 }
 
 fn seat(channel: &str, lang: &str, gender: Option<Gender>) -> Seat {
-    Seat { channel: channel.to_owned(), lang: lang.to_owned(), gender }
+    Seat { gender, ..Seat::new(channel, lang) }
 }
 
 fn room(seats: Vec<Seat>) -> Room {

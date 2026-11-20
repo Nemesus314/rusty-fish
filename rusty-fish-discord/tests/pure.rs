@@ -455,8 +455,10 @@ fn a_wrong_person_entry_is_refused_loudly() {
         ),
         "777",
     );
-    // Ein Eintrag ohne Angabe sagt nichts und ist deshalb ein Versehen.
-    refused(&with_people("[[person]]\nid = \"777\"\n"), "gender");
+    // Bis zum 20.11.2026 wurde hier auch ein Eintrag ohne `gender` abgelehnt,
+    // weil er nichts aussagte. Seit ein Mensch auch Muttersprache und
+    // Einladung trägt, ist die Form freiwillig (siehe tests/tables.rs).
+    assert!(Config::parse(&with_people("[[person]]\nid = \"777\"\n")).is_ok());
     refused(&with_people("[[person]]\nid = \"777\"\ngender = \"female\"\nnick = \"x\"\n"), "nick");
 }
 

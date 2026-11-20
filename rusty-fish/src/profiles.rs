@@ -188,8 +188,10 @@ impl Folder {
         };
 
         // Dieselben Felder wie im bearbeitbaren Dokument, nicht noch einmal
-        // von Hand aufgezählt.
-        if let Ok(Value::Object(fields)) = serde_json::to_value(Document::from(&config)) {
+        // von Hand aufgezählt. Dazu je Platz, ob dieser Fisch ihn bedient:
+        // das ist berechnet und steht deshalb nur hier, nicht im Dokument.
+        let document = Document::from(&config).with_served(&config);
+        if let Ok(Value::Object(fields)) = serde_json::to_value(document) {
             for (key, value) in fields {
                 entry[key.as_str()] = value;
             }
@@ -619,6 +621,123 @@ mod tests {
         assert_eq!(v["profiles"][1]["running"], true);
         drop(held);
         assert_eq!(f.list().unwrap()["profiles"][1]["running"], false);
+        clean(&f);
+    }
+
+    // --- Tische, Muttersprachen, Einladungen (seit dem 20.11.2026) ---------
+
+    /// Gastgeber 42 mit eigenem Tisch, 9 eingeladen, 11 mit eigenem Fisch.
+    const TABLES: &str = r#"{
+        "model": "some-model",
+        "host": "42",
+        "rooms": [{"pass_through": ["English"], "context_lines": 2, "seats": [
+            {"channel": "7", "lang": "German", "owner": "42"},
+            {"channel": "8", "lang": "Russian", "owner": "9"},
+            {"channel": "10", "lang": "Korean", "owner": "11"}
+        ]}],
+        "people": [
+            {"id": "42", "gender": "male", "lang": "German"},
+            {"id": "9", "lang": "Русский", "neutral": ["English"], "invited": true},
+            {"id": "11", "lang": "Korean"}
+        ]
+    }"#;
+
+    #[test]
+    fn the_list_says_for_every_table_whether_the_fish_serves_it() {
+        let f = temp("served");
+        f.save("tea", TABLES).unwrap();
+        let v = f.list().unwrap();
+        let tea = &v["profiles"][0];
+        assert_eq!(tea["ok"], true, "got {tea}");
+        let seats = tea["rooms"][0]["seats"].as_array().unwrap();
+        let served: Vec<&Value> = seats.iter().map(|s| &s["served"]).collect();
+        assert_eq!(served, [&json!(true), &json!(true), &json!(false)]);
+        let owners: Vec<&Value> = seats.iter().map(|s| &s["owner"]).collect();
+        assert_eq!(owners, [&json!("42"), &json!("9"), &json!("11")]);
+        // Die Menschen stehen da, wie sie eingetragen wurden, mit allen Feldern.
+        assert_eq!(
+            tea["people"],
+            json!([
+                {"id": "42", "gender": "male", "lang": "German", "neutral": null, "invited": false},
+                {"id": "9", "gender": null, "lang": "Русский", "neutral": ["English"], "invited": true},
+                {"id": "11", "gender": null, "lang": "Korean", "neutral": null, "invited": false},
+            ])
+        );
+        clean(&f);
+    }
+
+    #[test]
+    fn showing_a_profile_gives_the_new_fields_but_nothing_computed() {
+        let f = temp("showtables");
+        f.save("tea", TABLES).unwrap();
+        let v = serde_json::to_value(f.show("tea").unwrap()).unwrap();
+        let seat = &v["rooms"][0]["seats"][1];
+        assert_eq!(seat["owner"], "9");
+        // Am Platz steht, was eingetragen wurde, nicht die Muttersprache des Besitzers.
+        assert_eq!(seat["lang"], "Russian");
+        assert!(!seat.as_object().unwrap().contains_key("served"), "only the list says so");
+        assert_eq!(v["people"][1]["invited"], true);
+        assert_eq!(v["people"][1]["neutral"], json!(["English"]));
+        // Was `show` ausgibt, nimmt `save` unverändert wieder an.
+        let before = std::fs::read(f.config_path("tea")).unwrap();
+        f.save("tea", &v.to_string()).unwrap();
+        assert_eq!(std::fs::read(f.config_path("tea")).unwrap(), before);
+        clean(&f);
+    }
+
+    #[test]
+    fn an_entry_of_the_list_can_be_saved_again_without_its_computed_part() {
+        // `served` ist berechnet. Kommt es zurück, wird es überlesen. Die
+        // übrigen Felder der Liste (Pfad, Verbrauch, ...) gehören nicht zum
+        // Dokument und werden weiter laut abgelehnt.
+        let f = temp("listback");
+        f.save("tea", TABLES).unwrap();
+        let before = std::fs::read(f.config_path("tea")).unwrap();
+        let entry = f.list().unwrap()["profiles"][0].clone();
+        let doc = json!({
+            "model": entry["model"], "host": entry["host"],
+            "rooms": entry["rooms"], "people": entry["people"],
+        });
+        assert_eq!(doc["rooms"][0]["seats"][2]["served"], false);
+        f.save("tea", &doc.to_string()).unwrap();
+        assert_eq!(std::fs::read(f.config_path("tea")).unwrap(), before);
+        assert!(f.save("tea", &entry.to_string()).is_err());
+        clean(&f);
+    }
+
+    #[test]
+    fn a_profile_from_before_the_tables_reads_as_it_always_did() {
+        let f = temp("oldprofile");
+        std::fs::create_dir_all(f.dir()).unwrap();
+        // So schrieb das Programm ein Profil vor dem 20.11.2026.
+        let old = "provider = \"openai\"\nmodel = \"some-model\"\nhost = \"100\"\n\n[limits]\n\
+                   translation_tokens_per_day = 5000\nquestions_per_guest_per_day = 2\n\n[[room]]\n\
+                   pass_through = [\"English\"]\ncontext_lines = 6\n\n  [[room.seat]]\n  \
+                   channel = \"111\"\n  lang = \"German\"\n  gender = \"male\"\n\n  [[room.seat]]\n  \
+                   channel = \"222\"\n  lang = \"Russian\"\n  gender = \"female\"\n\n[[person]]\n\
+                   id = \"100\"\ngender = \"male\"\n";
+        std::fs::write(f.config_path("tea"), old).unwrap();
+
+        let v = f.list().unwrap();
+        let tea = &v["profiles"][0];
+        assert_eq!(tea["ok"], true, "got {tea}");
+        for seat in tea["rooms"][0]["seats"].as_array().unwrap() {
+            assert!(seat["owner"].is_null());
+            assert_eq!(seat["served"], true, "every table is served, as before");
+        }
+        assert_eq!(
+            tea["people"],
+            json!([{"id": "100", "gender": "male", "lang": null, "neutral": null, "invited": false}])
+        );
+
+        let doc = f.show("tea").unwrap();
+        assert_eq!(doc.rooms[0].seats[1].gender.as_deref(), Some("female"));
+        assert_eq!(doc.rooms[0].seats[1].owner, None);
+        // Wird es unverändert gespeichert, bedeutet es dasselbe wie zuvor.
+        let before = Config::parse(old).unwrap();
+        f.save("tea", &serde_json::to_string(&doc).unwrap()).unwrap();
+        let after = Config::parse(&std::fs::read_to_string(f.config_path("tea")).unwrap()).unwrap();
+        assert_eq!(after, before);
         clean(&f);
     }
 

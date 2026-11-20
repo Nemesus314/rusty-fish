@@ -24,6 +24,20 @@
 //!   gleichen Namens an; wer in der `@`-Liste die Rolle statt des Bots wählt,
 //!   schreibt `<@&ID>` und spricht ihn damit nicht an.
 //!
+//! Seit dem 20.11.2026 liest der Fisch an allen Tischen eines Raums mit,
+//! schreibt aber nur an die, die er bedient (siehe `config::at_the_table`).
+//! So kann jeder seinen eigenen Fisch mitbringen. Benannte Grenzen dabei:
+//! - Die Fische kennen einander nicht. Was ein Fisch absetzt, überliest jeder
+//!   andere wie alles, was von einem Bot oder Webhook kommt. Die Antwort der
+//!   ansprechbaren KI erscheint deshalb nur an den Tischen des Fischs, der sie
+//!   gab, und fehlt den anderen Fischen als Kontext.
+//! - Jeder Fisch bittet für sich um Zustimmung, denn jeder gibt die Sätze an
+//!   seinen eigenen KI-Dienst. Wer in einem Raum mit zwei Fischen schreibt,
+//!   wird zweimal gefragt.
+//! - Die Mitteilung an Eingeladene geht beim Verbinden hinaus, nicht erst mit
+//!   der ersten Übersetzung. Scheitert sie, steht der Grund in der
+//!   Programmausgabe, und der nächste Start versucht es wieder.
+//!
 //! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Die
 //! Tür reicht nur das heutige Datum und den Tageszähler hinein und legt den
 //! Zähler in ihrer Zustandsdatei ab.
@@ -33,18 +47,20 @@
 
 use crate::clock::today;
 use crate::config::Config;
+use crate::invite::due;
 use crate::mention::mention_as_call;
 use crate::render::{
-    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, consent_text, hook_name,
-    nothing_to_raise, raise_label, raised_notice, render,
+    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, consent_text,
+    consent_text_in, hook_name, invitation, nothing_to_raise, raise_label, raised_notice, render_in,
 };
 use crate::state::Store;
 use rusty_fish_core::{Model, Outcome, Request, translate};
+use rusty_fish_room::tongue::{Tongue, known_tongue, tongue_of};
 use rusty_fish_room::{
     House, Incoming, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
 };
 use serenity::all::{
-    ButtonStyle, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
+    ButtonStyle, Channel, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
     CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
     CreateWebhook, EditInteractionResponse, EventHandler, ExecuteWebhook, GatewayIntents,
     GetMessages, Http, Interaction, Message, MessageId, Ready, UserId, Webhook,
@@ -62,9 +78,8 @@ const RAISE_BUTTON: &str = "rusty-fish-raise";
 const KEEP_BUTTON: &str = "rusty-fish-keep";
 const WEBHOOK_NAME: &str = "Rusty Fish";
 
-/// Der Text, mit dem der Fisch um Zustimmung bittet. Er wird in die Sprache
-/// des Platzes übersetzt; er enthält kein Wort eines Menschen, deshalb darf
-/// er vor der Zustimmung zur KI.
+/// Der Fisch an der Discord-Tür: die KI, die Einstellungen und alles, was
+/// sich im Lauf ändert.
 struct Fish<M> {
     model: M,
     config: Config,
@@ -188,6 +203,9 @@ where
         eprintln!("rusty-fish: connected to Discord as {}", ready.user.name);
         // Vor dem Nachholen merken, damit auch verpasste Erwähnungen zählen.
         self.me.store(ready.user.id.get(), Ordering::Relaxed);
+        // Erst die Mitteilung, dann das Nachholen: wer eingeladen ist, soll
+        // lesen, was der Fisch hier tut, bevor die ersten Übersetzungen kommen.
+        self.tell_the_invited(&ctx.http).await;
         self.catch_up(&ctx.http).await;
     }
 
@@ -377,11 +395,12 @@ where
         let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
         let mut delivered = true;
         for delivery in &deliveries {
+            // Die graue Zeile steht in der Sprache des Tisches, an dem sie
+            // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
+            let rendered = render_in(delivery, self.tongue_at(&delivery.channel));
             let (name, avatar, body) = match delivery.from {
-                Sender::Writer => {
-                    (writer.as_str(), Some(face.as_str()), render(delivery) + &attachments)
-                }
-                Sender::Assistant => (assistant.as_str(), None, render(delivery)),
+                Sender::Writer => (writer.as_str(), Some(face.as_str()), rendered + &attachments),
+                Sender::Assistant => (assistant.as_str(), None, rendered),
             };
             let posted = post(http, &mut inner.hooks, &delivery.channel, name, avatar, &body).await;
             if let Err(why) = posted {
@@ -394,7 +413,11 @@ where
             let _ = msg.react(http, '⚠').await;
         }
 
-        if !consented && inner.asked.insert(msg.author.id) {
+        // Die Bitte geht an den Tisch des Schreibenden, auch wenn der Fisch
+        // dort sonst nichts schreibt: er übersetzt die Sätze ja für andere
+        // Tische. Sie unterbleibt nur, wo er von diesem Menschen ohnehin nie
+        // etwas an die KI gäbe (siehe `Config::sends_to_ai`).
+        if !consented && self.config.sends_to_ai(&channel) && inner.asked.insert(msg.author.id) {
             self.ask_consent(http, msg.channel_id, &channel, &author, &mut tally).await;
         }
 
@@ -411,7 +434,76 @@ where
         }
     }
 
-    /// Bittet in der Sprache des Platzes um Zustimmung.
+    /// Die Sprache der festen Texte an diesem Tisch: Deutsch, Englisch oder
+    /// Russisch, je nach Sprache des Tisches; für jede andere Englisch.
+    fn tongue_at(&self, channel: &str) -> Tongue {
+        tongue_of(self.config.lang_of(channel).unwrap_or(""))
+    }
+
+    /// Teilt Eingeladenen an ihrem Tisch mit, dass dieser Fisch sie jetzt
+    /// bedient: einmal je Mensch, gemerkt in der Zustandsdatei.
+    ///
+    /// Nemesus am 20.11.2026: „Es sollte auch die Funktion ‚Einladen' geben.
+    /// Und dann ein Haken, wer eingeladen wird. Das könnte dann per
+    /// Systemnachricht mitgeteilt werden."
+    async fn tell_the_invited(&self, http: &Http) {
+        let mut guard = self.inner.lock().await;
+        let inner = &mut *guard;
+        let (now, mut told) = due(&self.config, inner.store.told());
+        // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
+        if now.is_empty() && told == *inner.store.told() {
+            return;
+        }
+
+        for invite in &now {
+            let Ok(id) = invite.channel.parse::<u64>() else { continue };
+            let channel = ChannelId::new(id);
+            let host = self.host_name(http, channel).await;
+            let text = invitation(self.tongue_at(&invite.channel), host.as_deref());
+            // Als der Bot selbst, nicht unter fremdem Namen: es ist seine
+            // Mitteilung. Der Anzeigename des Gastgebers ist frei gewählt und
+            // darf niemanden anpingen.
+            let message =
+                CreateMessage::new().content(text).allowed_mentions(CreateAllowedMentions::new());
+            match channel.send_message(http, message).await {
+                Ok(_) => {
+                    told.insert(invite.person.clone());
+                    eprintln!("rusty-fish: invitation announced in channel {}", invite.channel);
+                }
+                // Nicht gemerkt: der nächste Start versucht es wieder.
+                Err(why) => eprintln!(
+                    "rusty-fish: cannot announce the invitation in channel {}: {why}",
+                    invite.channel
+                ),
+            }
+        }
+
+        inner.store.set_told(told);
+        if let Err(why) = inner.store.save() {
+            eprintln!("rusty-fish: {why}");
+        }
+    }
+
+    /// Der Name, unter dem der Gastgeber auf dem Server dieses Kanals
+    /// erscheint, soweit Discord ihn hergibt. Sonst sein allgemeiner
+    /// Anzeigename, sonst nichts: dann nennt die Mitteilung niemanden.
+    async fn host_name(&self, http: &Http, channel: ChannelId) -> Option<String> {
+        let host = UserId::new(self.config.host.parse::<u64>().ok()?);
+        if let Ok(Channel::Guild(place)) = channel.to_channel(http).await
+            && let Ok(member) = place.guild_id.member(http, host).await
+        {
+            return Some(member.display_name().to_owned());
+        }
+        let user = host.to_user(http).await.ok()?;
+        Some(user.global_name.unwrap_or(user.name))
+    }
+
+    /// Bittet in der Sprache des Tisches um Zustimmung.
+    ///
+    /// Auf Deutsch, Englisch und Russisch steht die Bitte fest im Programm:
+    /// sie kostet nichts und kommt auch an, wenn die KI ausfällt. Für jede
+    /// andere Sprache übersetzt die KI die englische Fassung, wie bis zum
+    /// 20.11.2026 für alle.
     async fn ask_consent(
         &self,
         http: &Http,
@@ -420,31 +512,35 @@ where
         author: &str,
         tally: &mut Tally,
     ) {
-        let seat = self.config.seat_of(channel);
-        let lang = seat.map(|s| s.lang.as_str()).unwrap_or("English");
-        let base = consent_text(&self.service);
-        let request = Request {
-            speaker: "fish",
-            text: &base,
-            target_lang: lang,
-            pass_through: &[],
-            context: &[],
-            writer_gender: None,
-            // Die Bitte spricht den Menschen an, der eben geschrieben hat:
-            // zuerst die Angabe zu ihm selbst, sonst die des Platzes.
-            reader_gender: self.config.gender_for(author, channel),
-            // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
-            informal: true,
-        };
-        // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist er
-        // leer, fragt der Fisch auf Englisch.
-        let meter = Metered::new(&self.model, tally.tokens_left(&self.config.limits));
-        let translated = translate(&meter, &request).await;
-        tally.spend(meter.used());
-        let text = match translated {
-            Ok(Outcome::Translated(t)) => t,
-            // Lieber auf Englisch fragen als gar nicht.
-            _ => base.clone(),
+        let lang = self.config.lang_of(channel).unwrap_or("English");
+        let text = match known_tongue(lang) {
+            Some(tongue) => consent_text_in(tongue, &self.service),
+            None => {
+                let base = consent_text(&self.service);
+                let request = Request {
+                    speaker: "fish",
+                    text: &base,
+                    target_lang: lang,
+                    pass_through: &[],
+                    context: &[],
+                    writer_gender: None,
+                    // Die Bitte spricht den Menschen an, der eben geschrieben
+                    // hat: zuerst die Angabe zu ihm selbst, sonst die des Platzes.
+                    reader_gender: self.config.gender_for(author, channel),
+                    // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
+                    informal: true,
+                };
+                // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist
+                // er leer, fragt der Fisch auf Englisch.
+                let meter = Metered::new(&self.model, tally.tokens_left(&self.config.limits));
+                let translated = translate(&meter, &request).await;
+                tally.spend(meter.used());
+                match translated {
+                    Ok(Outcome::Translated(t)) => t,
+                    // Lieber auf Englisch fragen als gar nicht.
+                    _ => base,
+                }
+            }
         };
         // „OK" statt eines Satzes: ein Satz wie „Ich stimme zu" hat in manchen
         // Sprachen ein Geschlecht, und der Fisch weiß nicht, wer drückt.

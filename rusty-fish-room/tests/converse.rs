@@ -3,8 +3,9 @@
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_room::{
     ASSISTANT, BUDGET_USED_UP, Delivery, House, Incoming, Limits, Mark, Metered, NO_ANSWER,
-    NO_QUESTIONS_LEFT, Reason, Room, RoomState, Seat, Sender, Tally, converse,
+    Reason, Room, RoomState, Seat, Sender, Tally, converse,
 };
+use rusty_fish_room::tongue::{Tongue, no_answer, no_questions_left};
 use std::future::Future;
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
@@ -67,8 +68,8 @@ fn now<F: Future>(f: F) -> F::Output {
 fn room() -> Room {
     Room {
         seats: vec![
-            Seat { channel: "de".to_owned(), lang: "German".to_owned(), gender: None },
-            Seat { channel: "ru".to_owned(), lang: "Russian".to_owned(), gender: None },
+            Seat::new("de", "German"),
+            Seat::new("ru", "Russian"),
         ],
         pass_through: vec![],
         context_lines: 5,
@@ -266,7 +267,10 @@ fn a_failed_answer_is_said_honestly_at_the_askers_seat_only() {
     assert_eq!(out[1].channel, "de");
     assert_eq!(out[1].mark, Mark::Notice);
     assert_eq!(out[1].from, Sender::Assistant);
-    assert!(out[1].text.starts_with(NO_ANSWER), "got {:?}", out[1].text);
+    // Seit dem 20.11.2026 in der Sprache des Tisches, hier Deutsch. Bis dahin
+    // stand an jedem Tisch der englische Anfang `NO_ANSWER`.
+    assert_ne!(no_answer(Tongue::German), NO_ANSWER);
+    assert!(out[1].text.starts_with(no_answer(Tongue::German)), "got {:?}", out[1].text);
     assert!(out[1].text.contains("provider down"));
     // Der Versuch kann gekostet haben, also zählt er.
     assert_eq!(s.tally.questions.get("guest"), Some(&1));
@@ -291,7 +295,9 @@ fn a_guest_runs_out_of_questions_and_is_told_so() {
         out[1],
         Delivery {
             channel: "ru".to_owned(),
-            text: NO_QUESTIONS_LEFT.to_owned(),
+            // Seit dem 20.11.2026 in der Sprache des Tisches, hier Russisch.
+            // Bis dahin stand an jedem Tisch das englische `NO_QUESTIONS_LEFT`.
+            text: no_questions_left(Tongue::Russian).to_owned(),
             mark: Mark::Notice,
             from: Sender::Assistant,
         }

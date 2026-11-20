@@ -28,7 +28,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use rusty_fish_core::Gender;
 
-/// Ein Platz im Raum: ein Kanal, eine Sprache.
+pub mod tongue;
+
+/// Ein Platz im Raum: ein Kanal, eine Sprache. Seit dem 20.11.2026 auch: der
+/// Tisch eines Menschen.
+///
+/// Nemesus am 20.11.2026: „ob es nicht sinnvoller wäre, pro Discord-Nummer die
+/// Muttersprache und die Neutralsprache festzulegen. Dann wäre die Aufgabe
+/// [...]: Übersetze alles für eine Russin, halte dich von Englisch fern."
+///
+/// Diese Schicht kennt weiter keine Discord-Nummern. Die Tür trägt hier ein,
+/// was am Tisch gilt: hat der Tisch einen Besitzer, sind das dessen
+/// Muttersprache (`lang`), dessen unübersetzte Sprachen (`neutral`) und dessen
+/// Anrede (`reader_gender`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seat {
     /// Kennung des Kanals, so wie die Tür sie kennt.
@@ -47,6 +59,52 @@ pub struct Seat {
     ///   mitliest, weiß der Fisch nicht: schaut jemand am Platz des anderen
     ///   zu, liest er dort Sätze, deren Anrede dem anderen gilt.
     pub gender: Option<Gender>,
+    /// Die Anrede des Menschen, dem dieser Tisch gehört, falls die Tür sie
+    /// kennt. Sie geht für das, was hier gelesen wird, der Angabe des Platzes
+    /// vor, siehe [`Seat::reader`].
+    ///
+    /// Ein eigenes Feld und nicht einfach in `gender` eingetragen, weil die
+    /// Angabe des Platzes weiter für den gilt, der hier schreibt und über den
+    /// die Tür nichts Eigenes weiß. Der Besitzer liest an seinem Tisch; wer
+    /// dort schreibt, kann ein anderer sein.
+    pub reader_gender: Option<Gender>,
+    /// Sprachen, die an diesem Tisch unübersetzt durchgehen. `None` heißt: es
+    /// gilt die Angabe des Raums. Eine leere Liste heißt: hier wird alles
+    /// übersetzt. Nicht jeder in einer großen Runde liest Englisch.
+    pub neutral: Option<Vec<String>>,
+    /// Schreibt dieser Fisch an diesen Tisch?
+    ///
+    /// Nemesus am 20.11.2026: „Stelle dir vor, wir sind im Chat mit 10
+    /// Menschen, die jeweils eine unterschiedliche Sprache sprechen. Jeder
+    /// Rusty-Fish würde für den API-Eigner übersetzen. (Kostenaufteilung,
+    /// ähnlich wie bei Pacioli.)"
+    ///
+    /// Jeder Fisch liest an allen Tischen mit, schreibt aber nur an die, die
+    /// er bedient: den seines Gastgebers und die der Eingeladenen. So
+    /// übersetzt jeder Fisch mit dem Schlüssel seines Besitzers, nichts
+    /// erscheint doppelt, und die Fische müssen einander nicht kennen.
+    pub served: bool,
+}
+
+impl Seat {
+    /// Ein Tisch ohne Besonderheiten: keine Anrede, die unübersetzten Sprachen
+    /// des Raums, und dieser Fisch bedient ihn.
+    pub fn new(channel: &str, lang: &str) -> Seat {
+        Seat {
+            channel: channel.to_owned(),
+            lang: lang.to_owned(),
+            gender: None,
+            reader_gender: None,
+            neutral: None,
+            served: true,
+        }
+    }
+
+    /// Wie der Mensch angesprochen wird, der an diesem Tisch liest: mit der
+    /// Anrede des Besitzers, sonst mit der des Platzes, sonst ohne Hinweis.
+    pub fn reader(&self) -> Option<Gender> {
+        self.reader_gender.or(self.gender)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,7 +201,8 @@ pub async fn relay<M: Model + Sync>(
         return room
             .seats
             .iter()
-            .filter(|s| s.channel != msg.channel)
+            // Auch das Original geht nur an Tische, die dieser Fisch bedient.
+            .filter(|s| s.channel != msg.channel && s.served)
             .map(|s| Delivery {
                 channel: s.channel.clone(),
                 text: msg.text.to_owned(),
@@ -193,18 +252,34 @@ async fn spread<M: Model + Sync>(
     context: &[Line<'_>],
     piece: &Piece<'_>,
 ) -> Vec<Delivery> {
-    let pass_through: Vec<&str> = room.pass_through.iter().map(String::as_str).collect();
     let text = piece.text;
 
     // Eine Sprache, eine bezahlte Übersetzung, auch wenn mehrere Plätze sie
-    // lesen. Das gilt nur für Plätze mit gleicher Sprache und gleichem
-    // Geschlecht: „Hast du geschlafen?" lautet im Russischen an eine Frau
-    // anders als an einen Mann.
-    let mut done: Vec<((String, Option<Gender>), String, Mark)> = Vec::new();
+    // lesen. Das gilt nur für Plätze, an denen dasselbe herauskäme: gleiche
+    // Sprache, gleiche unübersetzte Sprachen und gleiche Anrede. „Hast du
+    // geschlafen?" lautet im Russischen an eine Frau anders als an einen Mann,
+    // und ein englischer Satz bleibt nur dort stehen, wo Englisch gelesen wird.
+    type Kind = (String, Vec<String>, Option<Gender>);
+    let mut done: Vec<(Kind, String, Mark)> = Vec::new();
     let mut out = Vec::new();
-    for seat in room.seats.iter().filter(|s| s.channel != piece.origin) {
+    // Nur an Tische, die dieser Fisch bedient. Für die anderen übersetzt der
+    // Fisch ihres Besitzers, mit dessen Schlüssel.
+    for seat in room.seats.iter().filter(|s| s.channel != piece.origin && s.served) {
         let lang = seat.lang.trim();
-        let key = (lang.to_lowercase(), seat.gender);
+        // Die eigenen unübersetzten Sprachen des Tisches, sonst die des Raums.
+        let untranslated = seat.neutral.as_ref().unwrap_or(&room.pass_through);
+        let pass_through: Vec<&str> = untranslated.iter().map(String::as_str).collect();
+        // Für den Vergleich zählt, welche Sprachen es sind, nicht wie und in
+        // welcher Reihenfolge sie geschrieben stehen.
+        let mut same: Vec<String> = untranslated
+            .iter()
+            .map(|l| l.trim().to_lowercase())
+            .filter(|l| !l.is_empty())
+            .collect();
+        same.sort();
+        same.dedup();
+        let reader = seat.reader();
+        let key: Kind = (lang.to_lowercase(), same, reader);
         let (translated, mark) = match done.iter().find(|(k, _, _)| *k == key) {
             Some((_, translated, mark)) => (translated.clone(), mark.clone()),
             None => {
@@ -215,7 +290,7 @@ async fn spread<M: Model + Sync>(
                     pass_through: &pass_through,
                     context,
                     writer_gender: piece.writer_gender,
-                    reader_gender: seat.gender,
+                    reader_gender: reader,
                     // Was Menschen einander schreiben, behält seine Anrede.
                     informal: false,
                 };
@@ -437,11 +512,14 @@ impl<M: Model + Sync> Model for Metered<'_, M> {
 /// keiner Kennung eines Menschen zusammenfallen.
 pub const ASSISTANT: &str = "rusty-fish:assistant";
 
-/// Die Absage, wenn ein Gast für heute keine Fragen mehr frei hat.
+/// Die Absage, wenn ein Gast für heute keine Fragen mehr frei hat, auf
+/// Englisch. Die deutsche und die russische Fassung stehen in [`tongue`];
+/// gewählt wird nach der Sprache des Tisches, an dem gefragt wurde.
 pub const NO_QUESTIONS_LEFT: &str =
     "I can't answer right now: your questions to me for today are used up.";
 
-/// Der Anfang der Mitteilung, wenn die KI nicht antworten konnte.
+/// Der Anfang der Mitteilung, wenn die KI nicht antworten konnte, auf
+/// Englisch. Die anderen Fassungen stehen in [`tongue`].
 pub const NO_ANSWER: &str = "I could not answer";
 
 /// Was der Gastgeber für den Raum festgelegt hat, plus das heutige Datum.
@@ -489,6 +567,14 @@ pub async fn converse<M: Model + Sync>(
         .filter(|_| addressed_any(msg.text, house.ai_names).is_some());
     // Ohne Zustimmung des Fragenden geht auch keine Frage an die KI.
     let name = name.filter(|_| msg.consented);
+    // Wer an einem Tisch fragt, den dieser Fisch nicht bedient, könnte die
+    // Antwort dort nie lesen: an solche Tische schreibt der Fisch nichts. Dann
+    // gibt es keine Frage, keinen Aufruf und keinen Zähler. Die Nachricht
+    // selbst geht wie jede andere an die bedienten Tische.
+    let name = name.filter(|_| seat.served);
+    // Was der Fisch selbst sagt, steht in der Sprache des Tisches, an dem es
+    // erscheint.
+    let tongue = tongue::tongue_of(&seat.lang);
 
     // Der Kontext der Frage ist das Gespräch davor. Gleich wird die Frage
     // selbst gemerkt; sie soll nicht doppelt im Auftrag stehen.
@@ -513,7 +599,7 @@ pub async fn converse<M: Model + Sync>(
 
     if !is_host {
         if !tally.may_ask(msg.author, house.limits) {
-            out.push(notice(NO_QUESTIONS_LEFT.to_owned()));
+            out.push(notice(tongue::no_questions_left(tongue).to_owned()));
             return out;
         }
         // Gezählt wird vor dem Aufruf: auch ein gescheiterter Versuch kann
@@ -536,7 +622,8 @@ pub async fn converse<M: Model + Sync>(
         Ok(answer) => answer,
         Err(e) => {
             let why: String = e.to_string().chars().take(120).collect();
-            out.push(notice(format!("{NO_ANSWER}: {why}")));
+            // Der Grund bleibt, wie der Dienst ihn meldet.
+            out.push(notice(format!("{}: {why}", tongue::no_answer(tongue))));
             return out;
         }
     };

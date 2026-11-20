@@ -9,6 +9,7 @@ pub mod clock;
 pub mod config;
 pub mod document;
 pub mod door;
+pub mod invite;
 pub mod mention;
 pub mod render;
 pub mod state;

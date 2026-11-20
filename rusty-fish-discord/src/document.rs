@@ -77,13 +77,54 @@ pub struct DocSeat {
     /// `null`, "female" oder "male".
     #[serde(default)]
     pub gender: Option<String>,
+    /// Discord-Kennung des Menschen, dessen Tisch das ist, oder `null`.
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// Schreibt dieser Fisch an diesen Tisch? Berechnet, nicht eingestellt:
+    /// es steht nur in der Liste der Profile. Beim Speichern wird es
+    /// überlesen, damit eine Maske einen Eintrag der Liste zurückschicken kann.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub served: Option<bool>,
 }
 
+/// Was der Gastgeber über einen Menschen einträgt. Nur die Kennung ist Pflicht.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocPerson {
     pub id: String,
-    pub gender: String,
+    /// `null`, "female" oder "male".
+    #[serde(default)]
+    pub gender: Option<String>,
+    /// Die Muttersprache, oder `null`.
+    #[serde(default)]
+    pub lang: Option<String>,
+    /// Sprachen, die für diesen Menschen unübersetzt bleiben. `null` heißt:
+    /// es gilt die Angabe des Raums. Eine leere Liste heißt: alles übersetzen.
+    #[serde(default)]
+    pub neutral: Option<Vec<String>>,
+    /// Vom Gastgeber eingeladen: sein Fisch bedient auch diesen Tisch.
+    #[serde(default)]
+    pub invited: bool,
+}
+
+impl DocPerson {
+    /// Ein Mensch, über den nur die Kennung eingetragen ist.
+    pub fn new(id: &str) -> DocPerson {
+        DocPerson { id: id.to_owned(), gender: None, lang: None, neutral: None, invited: false }
+    }
+}
+
+impl DocSeat {
+    /// Ein Platz ohne Besitzer und ohne Anrede.
+    pub fn new(channel: &str, lang: &str) -> DocSeat {
+        DocSeat {
+            channel: channel.to_owned(),
+            lang: lang.to_owned(),
+            gender: None,
+            owner: None,
+            served: None,
+        }
+    }
 }
 
 fn default_context_lines() -> usize {
@@ -125,20 +166,36 @@ impl From<&Config> for Document {
                     seats: room
                         .seats
                         .iter()
-                        .map(|seat| DocSeat {
-                            channel: seat.channel.clone(),
-                            lang: seat.lang.clone(),
-                            gender: seat.gender.map(|g| gender_word(g).to_owned()),
+                        .map(|seat| {
+                            // Gezeigt wird, was eingetragen wurde, nicht das
+                            // daraus Abgeleitete: wer am Tisch eines Russen
+                            // "German" stehen hat, soll das wiederfinden.
+                            let written = config.written.get(&seat.channel);
+                            DocSeat {
+                                channel: seat.channel.clone(),
+                                lang: written.map_or_else(|| seat.lang.clone(), |w| w.lang.clone()),
+                                gender: written
+                                    .map_or(seat.gender, |w| w.gender)
+                                    .map(|g| gender_word(g).to_owned()),
+                                owner: written.and_then(|w| w.owner.clone()),
+                                served: None,
+                            }
                         })
                         .collect(),
                 })
                 .collect(),
+            // In der Reihenfolge, in der sie eingetragen sind, nicht nach
+            // Kennung sortiert: die Maske soll wiederfinden, was sie schickte.
             people: config
-                .people
+                .people_order
                 .iter()
-                .map(|(id, gender)| DocPerson {
+                .filter_map(|id| config.people.get(id).map(|person| (id, person)))
+                .map(|(id, person)| DocPerson {
                     id: id.clone(),
-                    gender: gender_word(*gender).to_owned(),
+                    gender: person.gender.map(|g| gender_word(g).to_owned()),
+                    lang: person.lang.clone(),
+                    neutral: person.neutral.clone(),
+                    invited: person.invited,
                 })
                 .collect(),
         }
@@ -194,15 +251,46 @@ impl Document {
                 if let Some(gender) = &seat.gender {
                     out.push_str(&format!("  gender = {}\n", quote(gender)));
                 }
+                // Ein leerer Besitzer heißt wie beim Lesen: keiner. `served`
+                // wird nie geschrieben: es ist berechnet, nicht eingestellt.
+                if let Some(owner) = seat.owner.as_deref().filter(|o| !o.trim().is_empty()) {
+                    out.push_str(&format!("  owner = {}\n", quote(owner)));
+                }
             }
         }
 
         for person in &self.people {
             out.push_str("\n[[person]]\n");
             out.push_str(&format!("id = {}\n", quote(&person.id)));
-            out.push_str(&format!("gender = {}\n", quote(&person.gender)));
+            if let Some(gender) = &person.gender {
+                out.push_str(&format!("gender = {}\n", quote(gender)));
+            }
+            if let Some(lang) = person.lang.as_deref().filter(|l| !l.trim().is_empty()) {
+                out.push_str(&format!("lang = {}\n", quote(lang)));
+            }
+            // Eine leere Liste wird geschrieben: sie heißt „alles übersetzen"
+            // und ist etwas anderes als keine Angabe.
+            if let Some(neutral) = &person.neutral {
+                out.push_str(&format!("neutral = {}\n", list(neutral)));
+            }
+            // Nur wenn gesetzt, damit ein Profil ohne Einladungen so in der
+            // Datei steht wie vor dem 20.11.2026.
+            if person.invited {
+                out.push_str("invited = true\n");
+            }
         }
         out
+    }
+
+    /// Dasselbe Dokument, ergänzt um die Angabe je Platz, ob dieser Fisch ihn
+    /// bedient. So steht es in der Liste der Profile.
+    pub fn with_served(mut self, config: &Config) -> Document {
+        // Die Regel steht an einer Stelle, in `Config::parse`. Hier wird nur
+        // abgelesen, was sie ergeben hat.
+        for seat in self.rooms.iter_mut().flat_map(|room| room.seats.iter_mut()) {
+            seat.served = Some(config.serves(&seat.channel));
+        }
+        self
     }
 
     /// Prüft das Dokument mit derselben Prüfung wie jede Einstellungsdatei und

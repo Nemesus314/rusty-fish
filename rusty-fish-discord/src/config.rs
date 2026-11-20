@@ -30,15 +30,56 @@ pub struct Config {
     pub ai_names: Vec<String>,
     /// Was der Gastgeber pro Tag erlaubt.
     pub limits: Limits,
+    /// Die Räume, so wie die Raum-Logik sie braucht: an jedem Tisch steht
+    /// schon, was dort gilt (siehe [`Written`] für das, was eingetragen wurde).
     pub rooms: Vec<Room>,
-    /// Was der Gastgeber über einzelne Menschen eingetragen hat: Discord-
-    /// Kennung und grammatisches Geschlecht. Freiwillig.
+    /// Was der Gastgeber über einzelne Menschen eingetragen hat, nach
+    /// Discord-Kennung. Freiwillig.
     ///
     /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
     /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
     /// reinschalten." Seine Frage, weil das Geschlecht bis dahin am Platz
     /// hing: „Wie können wir das ändern?"
-    pub people: BTreeMap<String, Gender>,
+    pub people: BTreeMap<String, Person>,
+    /// Die Kennungen der Menschen in der Reihenfolge, in der sie eingetragen
+    /// sind. Die Maske zeigt sie so wieder und findet nach dem Speichern vor,
+    /// was sie geschickt hat; nach Kennung sortiert stünde "9" hinter "42".
+    pub people_order: Vec<String>,
+    /// Was zu jedem Platz in der Datei steht, nach Kanal. Die Maske zeigt und
+    /// speichert das Eingetragene, nicht das daraus Abgeleitete.
+    pub written: BTreeMap<String, Written>,
+}
+
+/// Was der Gastgeber über einen Menschen eingetragen hat.
+///
+/// Nemesus am 20.11.2026: „ob es nicht sinnvoller wäre, pro Discord-Nummer die
+/// Muttersprache und die Neutralsprache festzulegen. Dann wäre die Aufgabe
+/// [...]: Übersetze alles für eine Russin, halte dich von Englisch fern."
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Person {
+    /// Grammatisches Geschlecht, als Hinweis für die Grammatik.
+    pub gender: Option<Gender>,
+    /// Die Muttersprache: in sie wird an seinem Tisch übersetzt.
+    pub lang: Option<String>,
+    /// Sprachen, die für diesen Menschen unübersetzt bleiben. `None` heißt: es
+    /// gilt die Angabe des Raums. Eine leere Liste heißt: alles übersetzen.
+    pub neutral: Option<Vec<String>>,
+    /// Hat der Gastgeber diesen Menschen eingeladen? Dann bedient sein Fisch
+    /// auch dessen Tisch, auf seine Rechnung.
+    ///
+    /// Nemesus am 20.11.2026: „Es sollte auch die Funktion ‚Einladen' geben.
+    /// Und dann ein Haken, wer eingeladen wird."
+    pub invited: bool,
+}
+
+/// Was zu einem Platz in der Datei steht.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Written {
+    pub lang: String,
+    pub gender: Option<Gender>,
+    /// Discord-Kennung des Menschen, dessen Tisch das ist. Er muss dafür nicht
+    /// unter `[[person]]` stehen.
+    pub owner: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -61,7 +102,11 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct RawPerson {
     id: String,
-    gender: String,
+    gender: Option<String>,
+    lang: Option<String>,
+    neutral: Option<Vec<String>>,
+    #[serde(default)]
+    invited: bool,
 }
 
 /// `ai_name` darf ein einzelner Text sein, wie von Anfang an, oder eine Liste.
@@ -97,6 +142,7 @@ struct RawSeat {
     channel: String,
     lang: String,
     gender: Option<String>,
+    owner: Option<String>,
 }
 
 fn default_context_lines() -> usize {
@@ -117,7 +163,28 @@ impl Config {
             return Err("configuration: no `[[room]]` is defined".to_owned());
         }
 
-        let mut taken: Vec<String> = Vec::new();
+        // Die Menschen zuerst: was an einem Tisch gilt, hängt an seinem Besitzer.
+        let mut people = BTreeMap::new();
+        let mut people_order = Vec::new();
+        for person in raw.people {
+            let id = discord_id(&person.id, "id")?;
+            let entry = Person {
+                // Bis zum 20.11.2026 war das Geschlecht hier Pflicht, weil ein
+                // Eintrag sonst nichts aussagte. Seit ein Mensch auch Sprache
+                // und Einladung trägt, ist es freiwillig wie die anderen.
+                gender: read_gender(person.gender.as_deref(), &format!("person {id}"))?,
+                lang: person.lang.map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()),
+                neutral: person.neutral.map(clean_langs),
+                invited: person.invited,
+            };
+            // Zwei Einträge zur selben Person wären ein Versehen oder ein Widerspruch.
+            if people.insert(id.clone(), entry).is_some() {
+                return Err(format!("configuration: person {id} is listed twice"));
+            }
+            people_order.push(id);
+        }
+
+        let mut written = BTreeMap::new();
         let mut rooms = Vec::new();
         for (n, room) in raw.rooms.into_iter().enumerate() {
             if room.seats.len() < 2 {
@@ -131,12 +198,17 @@ impl Config {
                     return Err(format!("configuration: `lang` is empty for channel {channel}"));
                 }
                 // Ein Kanal an zwei Plätzen würde Nachrichten im Kreis schicken.
-                if taken.contains(&channel) {
+                if written.contains_key(&channel) {
                     return Err(format!("configuration: channel {channel} is used twice"));
                 }
-                taken.push(channel.clone());
                 let gender = read_gender(seat.gender.as_deref(), &format!("channel {channel}"))?;
-                seats.push(Seat { channel, lang, gender });
+                // Ein leerer Besitzer heißt wie ein fehlender: der Tisch gehört niemandem.
+                let owner = match seat.owner.as_deref().map(str::trim) {
+                    None | Some("") => None,
+                    Some(id) => Some(discord_id(id, "owner")?),
+                };
+                seats.push(at_the_table(&channel, &lang, gender, owner.as_deref(), &host, &people));
+                written.insert(channel, Written { lang, gender, owner });
             }
             rooms.push(Room {
                 seats,
@@ -158,19 +230,6 @@ impl Config {
                 .questions_per_guest_per_day
                 .unwrap_or(defaults.questions_per_guest_per_day),
         };
-        let mut people = BTreeMap::new();
-        for person in raw.people {
-            let id = discord_id(&person.id, "id")?;
-            // Ein Eintrag ohne brauchbare Angabe sagt nichts; deshalb ist das
-            // Geschlecht hier Pflicht und wird wie beim Platz streng geprüft.
-            let Some(gender) = read_gender(Some(&person.gender), &format!("person {id}"))? else {
-                continue;
-            };
-            // Zwei Einträge zur selben Person wären ein Versehen oder ein Widerspruch.
-            if people.insert(id.clone(), gender).is_some() {
-                return Err(format!("configuration: person {id} is listed twice"));
-            }
-        }
         // Fehlt der Dienst oder ist er leer, gilt OpenAI: so liefen alle
         // Profile, bevor es die Wahl gab. Ein unbekannter wird laut abgelehnt.
         let provider = match raw.provider.as_deref().map(str::trim) {
@@ -183,7 +242,18 @@ impl Config {
         // eine gibt. Bei einem eigenen Modell muss sie im Profil stehen.
         rusty_fish_providers::address(provider, base_url.as_deref())
             .map_err(|why| format!("configuration: {why}"))?;
-        Ok(Config { provider, model, base_url, host, ai_names, limits, rooms, people })
+        Ok(Config {
+            provider,
+            model,
+            base_url,
+            host,
+            ai_names,
+            limits,
+            rooms,
+            people,
+            people_order,
+            written,
+        })
     }
 
     /// Die Adresse des Dienstes, die wirklich benutzt wird: die eigene aus dem
@@ -198,12 +268,14 @@ impl Config {
     /// Das grammatische Geschlecht, das der Gastgeber für diese Person
     /// eingetragen hat.
     pub fn gender_of(&self, user: &str) -> Option<Gender> {
-        self.people.get(user).copied()
+        self.people.get(user).and_then(|p| p.gender)
     }
 
     /// Das grammatische Geschlecht für jemanden, der an diesem Kanal schreibt
-    /// oder dort angesprochen wird: zuerst die Angabe zur Person, sonst die
-    /// des Platzes, sonst keine.
+    /// oder dort als Schreibender angesprochen wird: zuerst die Angabe zur
+    /// Person, sonst die des Platzes, sonst keine. Die Anrede des Besitzers
+    /// gilt hier nicht; sie gilt für das, was an seinem Tisch gelesen wird
+    /// (siehe [`Seat::reader`]).
     pub fn gender_for(&self, user: &str, channel: &str) -> Option<Gender> {
         self.gender_of(user).or_else(|| self.seat_of(channel).and_then(|s| s.gender))
     }
@@ -218,15 +290,91 @@ impl Config {
         self.rooms.iter().position(|r| r.seats.iter().any(|s| s.channel == channel))
     }
 
-    /// Der Platz an diesem Kanal.
+    /// Der Platz an diesem Kanal, mit dem, was dort gilt.
     pub fn seat_of(&self, channel: &str) -> Option<&Seat> {
         self.rooms.iter().flat_map(|r| r.seats.iter()).find(|s| s.channel == channel)
     }
 
-    /// Welche Sprache hat der Platz an diesem Kanal?
+    /// In welche Sprache wird an diesem Kanal übersetzt? Die Muttersprache
+    /// des Besitzers, sonst die Sprache des Platzes.
     pub fn lang_of(&self, channel: &str) -> Option<&str> {
         self.seat_of(channel).map(|s| s.lang.as_str())
     }
+
+    /// Schreibt dieser Fisch an diesen Kanal? Ein Kanal außerhalb jedes
+    /// Raums wird nicht bedient.
+    pub fn serves(&self, channel: &str) -> bool {
+        self.seat_of(channel).is_some_and(|s| s.served)
+    }
+
+    /// Wessen Tisch ist dieser Kanal?
+    pub fn owner_of(&self, channel: &str) -> Option<&str> {
+        self.written.get(channel).and_then(|w| w.owner.as_deref())
+    }
+
+    /// Gäbe dieser Fisch an die KI, was an diesem Kanal geschrieben wird?
+    ///
+    /// Nur dann bittet er dort um Zustimmung. Das ist der Fall, wenn er im
+    /// selben Raum einen anderen Tisch bedient (für den übersetzt er es) oder
+    /// wenn er diesen Tisch bedient und die KI ansprechbar ist (dann kann hier
+    /// eine Frage an sie gehen).
+    ///
+    /// Warum nicht einfach an jedem Tisch: bringt jeder seinen eigenen Fisch
+    /// mit, bedient jeder Fisch nur den Tisch seines Gastgebers. Wer dort als
+    /// Gast schreibt, bekäme sonst von diesem Fisch eine Bitte um Zustimmung
+    /// für eine KI, die von ihm nie ein Wort liest.
+    pub fn sends_to_ai(&self, channel: &str) -> bool {
+        let Some(room) = self.room_index(channel).map(|n| &self.rooms[n]) else { return false };
+        room.seats.iter().any(|seat| {
+            seat.served && (seat.channel != channel || !self.ai_names.is_empty())
+        })
+    }
+}
+
+/// Was an einem Tisch gilt. Hat er einen Besitzer, gehen dessen Angaben vor:
+/// seine Muttersprache vor der Sprache des Platzes, seine unübersetzten
+/// Sprachen vor denen des Raums, seine Anrede vor der des Platzes.
+///
+/// Bedient wird ein Tisch,
+/// - wenn er keinen Besitzer hat (so laufen Profile von vor dem 20.11.2026
+///   unverändert weiter),
+/// - wenn er dem Gastgeber gehört,
+/// - oder wenn sein Besitzer eingeladen ist.
+///
+/// Für alle anderen Tische übersetzt der Fisch ihres Besitzers.
+fn at_the_table(
+    channel: &str,
+    lang: &str,
+    gender: Option<Gender>,
+    owner: Option<&str>,
+    host: &str,
+    people: &BTreeMap<String, Person>,
+) -> Seat {
+    // Der Besitzer muss nicht unter `[[person]]` stehen. Dann ist über ihn
+    // nichts bekannt: es bleibt bei Platz und Raum, und eingeladen ist er nicht.
+    let person = owner.and_then(|id| people.get(id));
+    let served = match owner {
+        None => true,
+        Some(id) => id == host || person.is_some_and(|p| p.invited),
+    };
+    Seat {
+        channel: channel.to_owned(),
+        lang: person.and_then(|p| p.lang.clone()).unwrap_or_else(|| lang.to_owned()),
+        // Die Angabe des Platzes bleibt stehen: sie gilt weiter für den, der
+        // hier schreibt und selbst keinen Eintrag hat (Person vor Platz).
+        gender,
+        // Gelesen wird am Tisch vom Besitzer. Kennt die Tür seine Anrede
+        // nicht, fällt die Raum-Logik auf die des Platzes zurück.
+        reader_gender: person.and_then(|p| p.gender),
+        neutral: person.and_then(|p| p.neutral.clone()),
+        served,
+    }
+}
+
+/// Eine Liste von Sprachen, wie ein Mensch sie eintippt: Leerraum weg, leere
+/// Einträge weg. Die Reihenfolge bleibt.
+fn clean_langs(langs: Vec<String>) -> Vec<String> {
+    langs.into_iter().map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()).collect()
 }
 
 /// Liest die Rufnamen der KI.

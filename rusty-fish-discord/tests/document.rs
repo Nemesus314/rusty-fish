@@ -4,7 +4,12 @@ use rusty_fish_discord::config::Config;
 use rusty_fish_discord::document::{DocLimits, DocPerson, DocRoom, DocSeat, Document};
 
 fn seat(channel: &str, lang: &str, gender: Option<&str>) -> DocSeat {
-    DocSeat { channel: channel.to_owned(), lang: lang.to_owned(), gender: gender.map(str::to_owned) }
+    DocSeat { gender: gender.map(str::to_owned), ..DocSeat::new(channel, lang) }
+}
+
+/// Ein Mensch, über den nur die Form eingetragen ist, wie vor dem 20.11.2026.
+fn person(id: &str, gender: &str) -> DocPerson {
+    DocPerson { gender: Some(gender.to_owned()), ..DocPerson::new(id) }
 }
 
 fn full() -> Document {
@@ -28,10 +33,7 @@ fn full() -> Document {
                 seats: vec![seat("333", "Korean", None), seat("444", "German", None)],
             },
         ],
-        people: vec![
-            DocPerson { id: "100".to_owned(), gender: "male".to_owned() },
-            DocPerson { id: "777".to_owned(), gender: "female".to_owned() },
-        ],
+        people: vec![person("100", "male"), person("777", "female")],
     }
 }
 
@@ -127,10 +129,7 @@ fn a_document_is_refused_by_the_same_check_as_a_file() {
     refused(&d, "ai_name");
 
     let mut d = minimal();
-    d.people = vec![
-        DocPerson { id: "9".to_owned(), gender: "male".to_owned() },
-        DocPerson { id: "9".to_owned(), gender: "male".to_owned() },
-    ];
+    d.people = vec![person("9", "male"), person("9", "male")];
     refused(&d, "listed twice");
 }
 

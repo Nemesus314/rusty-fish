@@ -31,6 +31,14 @@ pub struct Store {
     raised_tokens: u64,
     #[serde(default)]
     host_notified: bool,
+    /// Wem der Fisch schon mitgeteilt hat, dass er eingeladen ist. Nur die
+    /// Kennungen, damit die Mitteilung nach einem Neustart nicht erneut kommt.
+    ///
+    /// Leer wird das Feld nicht geschrieben: solange niemand eingeladen
+    /// wurde, sieht die Datei aus wie vor dem 20.11.2026, und ein älteres
+    /// Programm, das unbekannte Felder ablehnt, liest sie weiter.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    invited_told: BTreeSet<String>,
 }
 
 impl Store {
@@ -66,6 +74,16 @@ impl Store {
     pub fn saw(&mut self, channel: &str, message: u64) {
         let seen = self.last_seen.entry(channel.to_owned()).or_insert(0);
         *seen = (*seen).max(message);
+    }
+
+    /// Wem die Einladung schon mitgeteilt wurde.
+    pub fn told(&self) -> &BTreeSet<String> {
+        &self.invited_told
+    }
+
+    /// Ersetzt die Liste derer, denen die Einladung mitgeteilt wurde.
+    pub fn set_told(&mut self, told: BTreeSet<String>) {
+        self.invited_told = told;
     }
 
     /// Der Tageszähler, so wie er zuletzt gespeichert wurde.
