@@ -1,14 +1,25 @@
 //! Rusty Fish, das Programm: Schlüssel verwalten, einen Text zur Probe
-//! übersetzen, die Discord-Tür öffnen. Weitere Türen kommen als Befehle dazu.
+//! übersetzen, Profile verwalten, die Discord-Tür öffnen. Weitere Türen kommen
+//! als Befehle dazu.
+//!
+//! Eine Oberfläche spricht nur über diese Befehle mit dem Programm. Wo sie
+//! etwas weiterverarbeitet, gibt es `--json`; Fehler stehen als Text auf der
+//! Fehlerausgabe, und das Programm endet dann mit Code 1.
 
 mod keys;
+mod lock;
+mod profiles;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use profiles::Folder;
 use rusty_fish_core::{Gender, Outcome, Request, translate};
 use rusty_fish_discord::config::Config;
 use rusty_fish_openai::{OPENAI_BASE_URL, OpenAi, Secret};
+use serde_json::json;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(name = "rusty-fish", version, about)]
@@ -29,6 +40,9 @@ enum Command {
         /// Address of a service that speaks the OpenAI chat format
         #[arg(long, default_value = OPENAI_BASE_URL)]
         base_url: String,
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Translate one text, to try the fish without any chat
     Translate {
@@ -56,30 +70,75 @@ enum Command {
         /// The text to translate
         text: String,
     },
+    /// Manage saved profiles: settings you can keep, change and start
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
+    },
     /// Open the Discord door and translate between the configured channels
     Run {
-        /// Settings file; see rusty-fish.example.toml
-        #[arg(long, default_value = "rusty-fish.toml")]
-        config: PathBuf,
+        /// Settings file; see rusty-fish.example.toml [default: rusty-fish.toml]
+        #[arg(long, conflicts_with = "profile")]
+        config: Option<PathBuf>,
+        /// Name of a saved profile; see `rusty-fish profile list`
+        #[arg(long)]
+        profile: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
 enum KeyAction {
-    /// Ask for the secret (input stays hidden) and store it
+    /// Store a secret; asks for it with hidden input unless --stdin is given
     Set {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
+        /// Read the secret as one line from standard input instead of asking
+        #[arg(long)]
+        stdin: bool,
     },
     /// Tell whether a secret is stored, without showing it
     Status {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
+        /// Print the status of every secret as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Delete the stored secret
     Forget {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileAction {
+    /// Print the folder that holds the profiles
+    Dir,
+    /// List all profiles
+    List {
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one profile
+    Show {
+        name: String,
+        /// Print the profile as an editable JSON document
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check a profile given as a JSON document on standard input, then save it
+    Save { name: String },
+    /// Move a profile and its state to the trash folder; nothing is erased
+    Delete { name: String },
+    /// Take an existing settings file, and the state next to it, as a new profile
+    Import {
+        /// The settings file to copy
+        path: PathBuf,
+        /// Name of the new profile
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -114,7 +173,7 @@ impl Which {
     fn entry(self) -> &'static str {
         match self {
             Which::Openai => "openai",
-            Which::Discord => "discord",
+            Which::Discord => profiles::BOT,
         }
     }
 
@@ -139,11 +198,21 @@ async fn main() -> ExitCode {
 
 async fn run(command: Command) -> Result<(), String> {
     match command {
-        Command::Key { action: KeyAction::Set { which } } => {
-            // Das Geheimnis geht vom Terminal direkt in die Ablage des Systems.
-            // Es steht in keinem Argument, keiner Datei und keiner Ausgabe.
-            let typed = rpassword::prompt_password(format!("{} (input stays hidden): ", which.label()))
-                .map_err(|e| format!("cannot read from the terminal: {e}"))?;
+        Command::Key { action: KeyAction::Set { which, stdin } } => {
+            // Das Geheimnis geht direkt in die Ablage des Systems. Es steht in
+            // keinem Argument, keiner Datei und keiner Ausgabe. Mit --stdin
+            // reicht eine Oberfläche es durch, ohne dass es je auf einer
+            // Befehlszeile erscheint, wo andere Programme es lesen könnten.
+            let typed = if stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| format!("cannot read from standard input: {e}"))?;
+                line
+            } else {
+                rpassword::prompt_password(format!("{} (input stays hidden): ", which.label()))
+                    .map_err(|e| format!("cannot read from the terminal: {e}"))?
+            };
             let typed = typed.trim();
             if typed.is_empty() {
                 return Err("nothing entered, nothing stored".to_owned());
@@ -152,7 +221,15 @@ async fn run(command: Command) -> Result<(), String> {
             println!("{} stored in this system's credential store.", which.label());
             Ok(())
         }
-        Command::Key { action: KeyAction::Status { which } } => {
+        Command::Key { action: KeyAction::Status { which, json } } => {
+            if json {
+                let status = json!({
+                    "openai": keys::load(Which::Openai.entry())?.is_some(),
+                    "discord": keys::load(Which::Discord.entry())?.is_some(),
+                });
+                println!("{status}");
+                return Ok(());
+            }
             match keys::load(which.entry())? {
                 Some(_) => println!("{}: stored.", which.label()),
                 None => println!("{}: not stored.", which.label()),
@@ -167,10 +244,15 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Models { base_url } => {
+        Command::Models { base_url, json } => {
             let fish = OpenAi::new(&base_url, "", stored(Which::Openai)?).map_err(|e| e.to_string())?;
-            for id in fish.models().await.map_err(|e| e.to_string())? {
-                println!("{id}");
+            let models = fish.models().await.map_err(|e| e.to_string())?;
+            if json {
+                println!("{}", json!(models));
+            } else {
+                for id in models {
+                    println!("{id}");
+                }
             }
             Ok(())
         }
@@ -194,9 +276,29 @@ async fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Run { config: path } => {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Command::Profile { action } => profile(action),
+        Command::Run { config, profile } => {
+            // Wo die Einstellungen und ihr Zustand liegen: im Profilordner oder,
+            // wie von Anfang an, in einer frei gewählten Datei mit dem Zustand
+            // daneben.
+            let folder = folder();
+            let (path, state_path) = match &profile {
+                Some(name) => {
+                    profiles::valid_name(name)?;
+                    let folder = folder.clone()?;
+                    (folder.config_path(name), folder.state_path(name))
+                }
+                None => {
+                    let path = config.unwrap_or_else(|| PathBuf::from("rusty-fish.toml"));
+                    let state_path = path.with_extension("state.json");
+                    (path, state_path)
+                }
+            };
+            let text = match &profile {
+                Some(name) => folder.clone()?.read_config(name)?,
+                None => std::fs::read_to_string(&path)
+                    .map_err(|e| format!("cannot read {}: {e}", path.display()))?,
+            };
             let config = Config::parse(&text)?;
             // Erst alles prüfen, dann verbinden: fehlt etwas, scheitert der
             // Fisch, bevor er sich bei Discord zeigt.
@@ -204,14 +306,104 @@ async fn run(command: Command) -> Result<(), String> {
             let token = stored(Which::Discord)?;
             let base_url = config.base_url.clone().unwrap_or_else(|| OPENAI_BASE_URL.to_owned());
             let fish = OpenAi::new(&base_url, &config.model, key).map_err(|e| e.to_string())?;
-            // Der Zustand liegt neben den Einstellungen: rusty-fish.state.json
-            let state_path = path.with_extension("state.json");
+
+            // Ein Bot, ein Fisch: die Sperre gilt bis zum Ende dieses Laufs,
+            // auch für einen Start mit --config, denn der Bot ist derselbe.
+            let who = lock::Running { profile, pid: std::process::id(), started: now() };
+            let _held = match &folder {
+                Ok(folder) => Some(lock::acquire(folder.dir(), profiles::BOT, &who)?),
+                // Nur bei --config erreichbar; mit --profile ist der Ordner oben
+                // schon Pflicht. Lieber ohne Sperre laufen als gar nicht.
+                Err(why) => {
+                    eprintln!("rusty-fish: warning: {why}");
+                    eprintln!("rusty-fish: warning: running without the one-fish-per-bot lock");
+                    None
+                }
+            };
+
             // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt
             // wird, damit die Bitte um Zustimmung nichts anderes nennt.
             let service = rusty_fish_discord::render::service_name(&base_url);
             rusty_fish_discord::door::run(token.expose(), config, &state_path, fish, &service).await
         }
     }
+}
+
+/// Die Befehle rund um gespeicherte Profile. Kein Netz, keine Geheimnisse.
+fn profile(action: ProfileAction) -> Result<(), String> {
+    let folder = folder()?;
+    match action {
+        ProfileAction::Dir => {
+            println!("{}", folder.dir().display());
+            Ok(())
+        }
+        ProfileAction::List { json } => {
+            let list = folder.list()?;
+            if json {
+                println!("{}", pretty(&list));
+                return Ok(());
+            }
+            let profiles = list["profiles"].as_array().cloned().unwrap_or_default();
+            if profiles.is_empty() {
+                println!("No profiles yet in {}", folder.dir().display());
+            }
+            for p in profiles {
+                let name = p["name"].as_str().unwrap_or("?");
+                let status = match (p["ok"].as_bool(), p["running"].as_bool()) {
+                    (Some(false), _) => format!("broken: {}", p["error"].as_str().unwrap_or("?")),
+                    (_, Some(true)) => "running".to_owned(),
+                    _ => "ready".to_owned(),
+                };
+                println!("{name:<40}  {status}");
+            }
+            Ok(())
+        }
+        ProfileAction::Show { name, json } => {
+            if json {
+                let document = folder.show(&name)?;
+                let value = serde_json::to_value(&document)
+                    .map_err(|e| format!("cannot print the profile: {e}"))?;
+                println!("{}", pretty(&value));
+            } else {
+                profiles::valid_name(&name)?;
+                print!("{}", folder.read_config(&name)?);
+            }
+            Ok(())
+        }
+        ProfileAction::Save { name } => {
+            let mut document = String::new();
+            std::io::stdin()
+                .read_to_string(&mut document)
+                .map_err(|e| format!("cannot read the profile from standard input: {e}"))?;
+            folder.save(&name, &document)?;
+            println!("Profile \"{name}\" saved.");
+            Ok(())
+        }
+        ProfileAction::Delete { name } => {
+            let moved = folder.delete(&name, &profiles::stamp(now()))?;
+            println!("Profile \"{name}\" moved to {}", moved.display());
+            Ok(())
+        }
+        ProfileAction::Import { path, name } => {
+            folder.import(&path, &name)?;
+            println!("Profile \"{name}\" created from {}", path.display());
+            Ok(())
+        }
+    }
+}
+
+/// Der Profilordner dieses Rechners.
+fn folder() -> Result<Folder, String> {
+    let home = profiles::home(&|key| std::env::var(key).ok(), profiles::this_os())?;
+    Ok(Folder::at(home.join("profiles")))
+}
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+fn pretty(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 fn stored(which: Which) -> Result<Secret, String> {

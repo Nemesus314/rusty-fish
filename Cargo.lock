@@ -1921,6 +1921,7 @@ dependencies = [
  "rusty-fish-core",
  "rusty-fish-discord",
  "rusty-fish-openai",
+ "serde_json",
  "tokio",
 ]
 
