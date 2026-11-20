@@ -208,7 +208,8 @@ async fn run(command: Command) -> Result<(), String> {
                 std::io::stdin()
                     .read_line(&mut line)
                     .map_err(|e| format!("cannot read from standard input: {e}"))?;
-                line
+                // Ein vorangestelltes BOM gehört nicht zum Geheimnis.
+                line.trim_start_matches('\u{feff}').to_owned()
             } else {
                 rpassword::prompt_password(format!("{} (input stays hidden): ", which.label()))
                     .map_err(|e| format!("cannot read from the terminal: {e}"))?
@@ -375,7 +376,10 @@ fn profile(action: ProfileAction) -> Result<(), String> {
             std::io::stdin()
                 .read_to_string(&mut document)
                 .map_err(|e| format!("cannot read the profile from standard input: {e}"))?;
-            folder.save(&name, &document)?;
+            // Ein vorangestelltes BOM (etwa aus einer PowerShell-Pipe) ist kein
+            // Teil des Dokuments. Gemessen am 20.11.2026: ohne das Abstreifen
+            // lehnte das Programm so eine Eingabe als kein JSON ab.
+            folder.save(&name, document.trim_start_matches('\u{feff}'))?;
             println!("Profile \"{name}\" saved.");
             Ok(())
         }

@@ -50,7 +50,7 @@ class _OverviewPageState extends State<OverviewPage> {
     // Kindprozesse nicht von selbst; ohne das liefe er unsichtbar weiter.
     _lifecycle = AppLifecycleListener(
       onExitRequested: () async {
-        _state.stopNow();
+        await _state.stopAndWait();
         return AppExitResponse.exit;
       },
     );

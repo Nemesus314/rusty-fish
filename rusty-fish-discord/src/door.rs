@@ -52,7 +52,8 @@ use serenity::all::{
 use serenity::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
 const CONSENT_BUTTON: &str = "rusty-fish-consent";
@@ -118,7 +119,64 @@ where
         .event_handler(fish)
         .await
         .map_err(|e| format!("cannot set up the Discord connection: {e}"))?;
-    client.start().await.map_err(|e| format!("the Discord connection ended: {e}"))
+
+    // Sauberes Anhalten. Gemessen von Nemesus am 20.11.2026: wurde der Fisch
+    // hart beendet, stand der Bot in Discord noch eine Weile als online da,
+    // weil Discord erst am ausbleibenden Herzschlag merkt, dass er fort ist.
+    // Meldet er sich ab, ist er sofort grau.
+    let stopping = Arc::new(AtomicBool::new(false));
+    let shards = client.shard_manager.clone();
+    let flag = stopping.clone();
+    tokio::spawn(async move {
+        stop_requested().await;
+        flag.store(true, Ordering::Relaxed);
+        eprintln!("rusty-fish: stopping");
+        shards.shutdown_all().await;
+    });
+
+    match client.start().await {
+        Ok(()) => Ok(()),
+        // Nach einem gewollten Anhalten ist das Ende der Verbindung kein Fehler.
+        Err(_) if stopping.load(Ordering::Relaxed) => Ok(()),
+        Err(e) => Err(format!("the Discord connection ended: {e}")),
+    }
+}
+
+/// Wartet, bis jemand den Fisch anhalten will: die Zeile „stop" auf der
+/// Standardeingabe (so hält ihn die Maske an) oder Strg+C im Terminal.
+///
+/// Das bloße Ende der Standardeingabe hält ihn nicht an. Als Dienst ohne
+/// Terminal hat er gar keine Eingabe, und er soll trotzdem laufen.
+async fn stop_requested() {
+    let (asked, was_asked) = tokio::sync::oneshot::channel::<()>();
+    // Ein eigener Thread, weil das Lesen der Eingabe blockiert. Er darf beim
+    // Beenden des Programms einfach liegen bleiben.
+    std::thread::spawn(move || {
+        let stop = std::io::stdin()
+            .lines()
+            .map_while(Result::ok)
+            // Manche Programme, etwa die PowerShell, setzen ein unsichtbares
+            // Zeichen (BOM) vor das erste, was sie in eine Eingabe schreiben.
+            // Gemessen am 20.11.2026: ohne das Abstreifen blieb „stop" wirkungslos.
+            .any(|line| line.trim().trim_start_matches('\u{feff}').trim().eq_ignore_ascii_case("stop"));
+        if stop {
+            let _ = asked.send(());
+        } else {
+            // Eingabe zu Ende, ohne dass jemand „stop" sagte: den Sender nicht
+            // fallen lassen, sonst sähe das für den Empfänger wie ein Signal aus.
+            std::mem::forget(asked);
+        }
+    });
+    let ctrl_c = async {
+        if tokio::signal::ctrl_c().await.is_err() {
+            // Lässt sich Strg+C nicht abfangen, bleibt nur die Eingabe.
+            std::future::pending::<()>().await;
+        }
+    };
+    tokio::select! {
+        _ = was_asked => {}
+        () = ctrl_c => {}
+    }
 }
 
 #[async_trait]

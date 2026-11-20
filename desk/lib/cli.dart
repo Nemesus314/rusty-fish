@@ -227,7 +227,17 @@ class _ProcessRun implements FishRun {
 
   @override
   void stop() {
-    _process.kill();
+    // Erst bitten, dann beenden. Gemessen von Nemesus am 20.11.2026: nach
+    // einem harten Ende stand der Bot in Discord noch eine Weile als online
+    // da. Auf die Zeile „stop" meldet sich der Fisch bei Discord ab und endet
+    // von selbst. Tut er das nicht binnen vier Sekunden, wird er beendet.
+    try {
+      _process.stdin.writeln('stop');
+      _process.stdin.flush().catchError((Object _) {});
+    } on Object {
+      // Die Eingabe ist schon zu. Dann bleibt nur das Beenden unten.
+    }
+    Timer(const Duration(seconds: 4), _process.kill);
   }
 }
 

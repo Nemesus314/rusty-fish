@@ -131,6 +131,19 @@ class DeskState extends ChangeNotifier {
     _run?.stop();
   }
 
+  /// Hält den Fisch an und wartet, bis er wirklich zu Ende ist, höchstens
+  /// sechs Sekunden. Gebraucht beim Schließen des Fensters: ohne das Warten
+  /// wäre die Maske fort, bevor der Fisch sich bei Discord abmelden konnte.
+  Future<void> stopAndWait() async {
+    final run = _run;
+    if (run == null) {
+      return;
+    }
+    _stopping = true;
+    run.stop();
+    await run.exitCode.timeout(const Duration(seconds: 6), onTimeout: () => -1);
+  }
+
   void _addLine(String line) {
     log.add(line);
     if (log.length > logLimit) {
