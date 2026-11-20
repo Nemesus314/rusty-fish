@@ -160,8 +160,11 @@ fn accepted(status: u16, body: &str) -> Result<Value, ModelError> {
     if !(200..300).contains(&status) {
         // Der Grund steht je nach Dienst als `error.message` oder gleich als
         // Text in `error`.
-        let reason = parsed
-            .as_ref()
+        // Gemessen am 20.11.2026 mit Gemini: dort kam bei HTTP 503 nur „no
+        // reason given" heraus. Google verpackt den Fehler in eine Liste; das
+        // erste Element wird deshalb wie ein gewöhnlicher Fehler gelesen.
+        let root = parsed.as_ref().map(|v| if v.is_array() { &v[0] } else { v });
+        let reason = root
             .and_then(|v| v["error"]["message"].as_str().or_else(|| v["error"].as_str()))
             .unwrap_or("no reason given");
         let reason: String = reason.chars().take(300).collect();

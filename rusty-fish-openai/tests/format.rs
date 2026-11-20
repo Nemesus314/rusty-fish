@@ -170,3 +170,12 @@ fn a_failure_whose_error_is_a_plain_text_is_still_reported() {
     let err = read_response(429, r#"{"error":{"message":"Slow down."}}"#).unwrap_err().0;
     assert!(err.contains("Slow down."), "got {err}");
 }
+
+#[test]
+fn a_failure_wrapped_in_a_list_still_gives_its_reason() {
+    // So meldet Google seine Fehler über die OpenAI-kompatible Adresse.
+    let body = r#"[{"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}]"#;
+    let err = read_completion(503, body).unwrap_err().0;
+    assert!(err.contains("503"), "got {err}");
+    assert!(err.contains("The model is overloaded"), "got {err}");
+}
