@@ -1006,6 +1006,32 @@ void startRequests() {
       expect(saved.rooms.single.seats[0].owner, 'Nemo');
     });
 
+    testWidgets('emptying the id before typing a name does not take the table away', (
+      tester,
+    ) async {
+      // Gast 200 hat eine Kennung und einen Tisch, aber noch keinen Namen.
+      final fake = FakeCli(entries: [entryOf(tablesDoc('pair'))]);
+      await open(tester, fake);
+      await tester.tap(inCard('pair', find.text('Edit')));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const ValueKey('person-1-id')));
+      await tester.pumpAndSettle();
+      // Erst die Kennung leeren, dann den Namen tippen: für einen Augenblick
+      // hat der Mensch keines von beiden.
+      await tester.enterText(find.byKey(const ValueKey('person-1-id')), '');
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('person-1-name')), 'Robin');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      expect(saved.people[1].name, 'Robin');
+      expect(saved.people[1].id, '');
+      expect(saved.rooms.single.seats[1].owner, 'Robin', reason: 'the table is still Robin\'s');
+    });
+
     testWidgets('a profile that points at people by id opens with their names', (tester) async {
       // So steht es in einem Profil von vor dem 21.11.2026, dem jemand von
       // Hand Namen gegeben hat: die Tische zeigen noch mit Kennungen.

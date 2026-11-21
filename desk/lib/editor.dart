@@ -272,7 +272,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   void _followRef(_PersonDraft person) {
     final before = person.lastRef;
     final now = person.ref;
-    if (before != now) {
+    // Solange ein Mensch für einen Augenblick weder Namen noch Kennung hat,
+    // etwa weil jemand erst die Kennung leert und dann den Namen tippt,
+    // bleiben seine Tische, wo sie sind, und ziehen mit, sobald wieder etwas
+    // dasteht. Gemessen von Nemesus am 21.11.2026: bis dahin verlor der Tisch
+    // in dieser Reihenfolge seinen Besitzer.
+    if (now.isNotEmpty && before != now) {
       // Nur wenn kein anderer Mensch dieselbe Angabe trägt: sonst wäre nicht
       // zu sagen, wessen Tische mitziehen sollen.
       final shared = _people.any((other) => other != person && other.ref == before);
