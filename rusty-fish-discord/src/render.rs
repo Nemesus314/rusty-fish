@@ -1,88 +1,33 @@
 //! Wie eine Zustellung in Discord aussieht. Rein, ohne Netz.
+//!
+//! Der Wortlaut der festen Texte steht in `rusty-fish-house`. Hier steht nur,
+//! was Discord eigen ist: die graue Zeile, die Länge einer Nachricht und
+//! welche Namen ein Webhook tragen darf.
 
+use rusty_fish_house::texts::untranslated_note;
+use rusty_fish_room::Delivery;
 use rusty_fish_room::tongue::Tongue;
-use rusty_fish_room::{BUDGET_USED_UP, Delivery, Mark, Reason};
 
 /// Discord nimmt höchstens 2000 Zeichen je Nachricht. Etwas Abstand, falls
 /// Discord anders zählt als wir.
 pub const MESSAGE_LIMIT: usize = 1900;
 
-/// Text einer Zustellung samt ehrlicher Kennzeichnung, auf Englisch. `-# ` ist
-/// in Discord eine kleine graue Zeile. Die Tür nimmt [`render_in`], damit die
-/// Zeile in der Sprache des Tisches steht; das hier ist dessen englische
-/// Fassung, so wie sie bis zum 20.11.2026 an jedem Tisch stand.
+/// Text einer Zustellung samt ehrlicher Kennzeichnung, auf Englisch. Die Tür
+/// nimmt [`render_in`], damit die Zeile in der Sprache des Tisches steht; das
+/// hier ist dessen englische Fassung, so wie sie bis zum 20.11.2026 an jedem
+/// Tisch stand.
 pub fn render(delivery: &Delivery) -> String {
     render_in(delivery, Tongue::English)
 }
 
-// ---------------------------------------------------------------------------
-// Der Hinweis an den Gastgeber, wenn das Übersetzungskontingent leer ist
-//
-// Nemesus am 19.11.2026: „Meine Idee wäre eine Systemnachricht, der nur an den
-// Gastgeber geht. Gleich mit Abfage, ob er es wieder um den selben Betrag
-// erhöhen soll, mit Beitragnennung".
-// ---------------------------------------------------------------------------
-
-/// Eine Zahl mit Tausendertrennern, wie im Englischen üblich: 100,000.
-pub fn grouped(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::new();
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(digit);
+/// Text einer Zustellung samt ehrlicher Kennzeichnung, in der Sprache des
+/// Tisches, an dem sie erscheint. `-# ` ist in Discord eine kleine graue Zeile.
+pub fn render_in(delivery: &Delivery, tongue: Tongue) -> String {
+    match untranslated_note(&delivery.mark, tongue) {
+        None => delivery.text.clone(),
+        Some(note) => format!("{}\n-# {note}", delivery.text),
     }
-    out
 }
-
-/// Die Direktnachricht an den Gastgeber. `allowed` ist, was heute insgesamt
-/// erlaubt war, `step` der eingestellte Tagesbetrag, um den erhöht würde.
-/// Genannt werden Tokens, kein Geld: der Fisch kennt die Preise der Anbieter nicht.
-pub fn budget_notice(allowed: u64, step: u64) -> String {
-    format!(
-        "Rusty Fish: today's translation budget of {} tokens is used up. Messages still \
-         arrive, untranslated and marked. Do you want to raise today's budget by another {} \
-         tokens?",
-        grouped(allowed),
-        grouped(step)
-    )
-}
-
-/// Beschriftung des Knopfs zum Erhöhen, mit Betrag.
-pub fn raise_label(step: u64) -> String {
-    format!("Raise by {}", grouped(step))
-}
-
-/// Beschriftung des Knopfs, mit dem der Gastgeber es dabei belässt.
-pub const KEEP_LABEL: &str = "Leave it";
-
-/// Bestätigung nach dem Erhöhen, mit dem neuen Tagesstand.
-pub fn raised_notice(allowed: u64, left: u64) -> String {
-    format!(
-        "Raised. Today's translation budget is now {} tokens, {} of them are left. \
-         Translation continues with the next message.",
-        grouped(allowed),
-        grouped(left)
-    )
-}
-
-/// Antwort, wenn es nichts zu erhöhen gibt: ein zweiter Klick, oder ein neuer
-/// Tag hat inzwischen begonnen.
-pub fn nothing_to_raise(allowed: u64, left: u64) -> String {
-    format!(
-        "Nothing to raise: {} of today's {} tokens are still left.",
-        grouped(left),
-        grouped(allowed)
-    )
-}
-
-/// Antwort, wenn der Gastgeber es dabei belässt.
-pub const KEPT_NOTICE: &str = "Left as it is. Messages keep arriving, untranslated and marked, \
-    until the new day begins (UTC).";
-
-/// Antwort an jemanden, der nicht der Gastgeber ist und trotzdem drückt.
-pub const NOT_THE_HOST: &str = "Only the host can decide this.";
 
 /// Teilt einen Text in Stücke, die Discord annimmt. Nichts geht verloren.
 pub fn chunks(text: &str, limit: usize) -> Vec<String> {
@@ -123,183 +68,4 @@ pub fn hook_name(name: &str) -> String {
         }
     }
     if out.trim().is_empty() { "Guest".to_owned() } else { out }
-}
-
-/// Der Name des KI-Dienstes, so wie ein Mensch ihn wiedererkennt: der
-/// Rechnername aus der Adresse, ohne Protokoll und Pfad.
-pub fn service_name(base_url: &str) -> String {
-    let url = base_url.trim();
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
-    rest.split('/').next().unwrap_or(rest).to_owned()
-}
-
-/// Der Text, mit dem der Fisch um Zustimmung bittet, auf Englisch. Auf Deutsch
-/// und Russisch gibt es ihn fest ([`consent_text_in`]). Für jede andere Sprache
-/// wird diese Fassung von der KI übersetzt; sie enthält kein Wort eines
-/// Menschen, deshalb darf sie vor der Zustimmung zur KI.
-///
-/// Entschieden von Nemesus am 19.11.2026 („Ja, ergänzen"): die Bitte sagt,
-/// dass der Gastgeber den KI-Dienst gewählt hat, und nennt ihn. Wer zustimmt,
-/// soll wissen, wohin seine Sätze gehen.
-pub fn consent_text(service: &str) -> String {
-    // Bis zum 19.11.2026 hieß es nur „an AI translates in between. To do
-    // that, the AI reads what you write here", ohne zu sagen, wessen KI.
-    format!(
-        "Hello! I am Rusty Fish, a translation bot. In this channel everyone writes in their \
-         own language, and an AI translates in between. The AI is an outside service chosen by \
-         the host of this server ({service}). To translate, it reads what you write here. \
-         Nothing you write is sent to it before you agree. Press OK to agree. Until then your \
-         messages are passed on untranslated."
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Die festen Texte des Fischs im Chat, in drei Sprachen
-//
-// Entschieden von Nemesus am 20.11.2026: „Daraus würde dann folgen, dass wir
-// das Ding dreisprachig aufziehen. [...] Deutsch, Englisch(Standard) und
-// Russisch." Gewählt wird nach der Sprache des Tisches, an dem der Text
-// erscheint; jede andere Sprache bekommt Englisch.
-//
-// Ein fester Text braucht keine KI: er kommt auch an, wenn die KI ausfällt
-// oder das Kontingent leer ist, und er kostet nichts.
-//
-// Benannte Grenze: das Russische hat noch keine Muttersprachlerin geprüft.
-// ---------------------------------------------------------------------------
-
-/// Text einer Zustellung samt ehrlicher Kennzeichnung, in der Sprache des
-/// Tisches, an dem sie erscheint. Der technische Grund eines Fehlers bleibt,
-/// wie der Dienst ihn meldet; übersetzt ist nur der feste Teil davor.
-pub fn render_in(delivery: &Delivery, tongue: Tongue) -> String {
-    let why: String = match &delivery.mark {
-        Mark::Translated | Mark::Original | Mark::Notice => return delivery.text.clone(),
-        Mark::Untranslated(Reason::NoConsent) => no_consent(tongue).to_owned(),
-        Mark::Untranslated(Reason::Failed(why)) => match budget_used_up(tongue) {
-            // Erkannt am Grund, den der Zähler selbst setzt, wie in
-            // `rusty_fish_room::budget_ran_out`.
-            Some(fixed) if why.contains(BUDGET_USED_UP) => fixed.to_owned(),
-            // Der Grund wird gekürzt, die Nachricht nie.
-            _ => why.chars().take(120).map(|c| if c == '\n' { ' ' } else { c }).collect(),
-        },
-    };
-    format!("{}\n-# {}: {why}", delivery.text, not_translated(tongue))
-}
-
-/// Der Anfang der grauen Zeile.
-fn not_translated(tongue: Tongue) -> &'static str {
-    match tongue {
-        Tongue::German => "nicht übersetzt",
-        Tongue::English => "not translated",
-        Tongue::Russian => "не переведено",
-    }
-}
-
-/// Der Grund, wenn der Schreibende der KI noch nicht zugestimmt hat. Ohne
-/// „er" oder „sie": der Fisch weiß nicht, wer geschrieben hat.
-fn no_consent(tongue: Tongue) -> &'static str {
-    match tongue {
-        Tongue::German => "wer das geschrieben hat, hat der KI-Übersetzung noch nicht zugestimmt",
-        Tongue::English => "the writer has not agreed to AI translation yet",
-        Tongue::Russian => "пока нет согласия автора на перевод с помощью ИИ",
-    }
-}
-
-/// Der Grund, wenn das Kontingent des Tages verbraucht ist. Für Englisch
-/// `None`: dort bleibt der Grund, wie der Zähler ihn setzt, er ist schon
-/// englisch ([`BUDGET_USED_UP`]).
-fn budget_used_up(tongue: Tongue) -> Option<&'static str> {
-    match tongue {
-        Tongue::German => Some("das heutige Kontingent für Übersetzungen ist verbraucht"),
-        Tongue::English => None,
-        Tongue::Russian => Some("лимит переводов на сегодня исчерпан"),
-    }
-}
-
-/// Die Bitte um Zustimmung als fester Text, per du, mit dem Namen des
-/// KI-Dienstes. Für jede andere Sprache übersetzt die KI die englische Fassung.
-///
-/// Die drei Fassungen sagen dasselbe wie [`consent_text`]: wer der Fisch ist,
-/// dass eine KI übersetzt, wessen KI es ist, dass sie mitliest, dass vor der
-/// Zustimmung nichts an sie geht, und was bis dahin geschieht. Der Knopf heißt
-/// in jeder Sprache „OK".
-pub fn consent_text_in(tongue: Tongue, service: &str) -> String {
-    match tongue {
-        Tongue::English => consent_text(service),
-        Tongue::German => format!(
-            "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. In diesem Kanal schreibt jeder in \
-             seiner eigenen Sprache, und eine KI übersetzt dazwischen. Die KI ist ein fremder \
-             Dienst, den der Gastgeber dieses Servers gewählt hat ({service}). Zum Übersetzen \
-             liest sie, was du hier schreibst. Nichts von dem, was du schreibst, geht an sie, \
-             bevor du zustimmst. Drücke OK, um zuzustimmen. Bis dahin werden deine Nachrichten \
-             unübersetzt weitergegeben."
-        ),
-        Tongue::Russian => format!(
-            "Привет! Я Rusty Fish, бот-переводчик. В этом канале каждый пишет на своём языке, а \
-             ИИ переводит. ИИ — это внешний сервис, который выбрал хозяин этого сервера \
-             ({service}). Чтобы переводить, он читает то, что ты здесь пишешь. Ничего из того, \
-             что ты пишешь, не отправляется ему, пока ты не согласишься. Нажми OK, чтобы \
-             согласиться. До тех пор твои сообщения передаются без перевода."
-        ),
-    }
-}
-
-/// Die Mitteilung an einen eingeladenen Menschen, an seinem Tisch.
-///
-/// Nemesus am 20.11.2026: „Es sollte auch die Funktion ‚Einladen' geben. Und
-/// dann ein Haken, wer eingeladen wird. Das könnte dann per Systemnachricht
-/// mitgeteilt werden."
-///
-/// `host` ist der Anzeigename des Gastgebers, soweit der Fisch ihn kennt.
-/// Kennt er ihn nicht, steht dort niemand mit Namen. Die Mitteilung sagt, wer
-/// einlädt, dass hier erscheint, was die anderen schreiben, in der Sprache
-/// dieses Tisches, und wer die Übersetzung bezahlt.
-///
-/// Ohne „er" oder „sie" für den Gastgeber: der Fisch kennt nur dessen Namen.
-/// Im Russischen steht deshalb mit Namen die Gegenwart („приглашает"), ohne
-/// Namen die unpersönliche Form („тебя пригласили").
-pub fn invitation(tongue: Tongue, host: Option<&str>) -> String {
-    // Für den, der es liest, ist sein Tisch ein Kanal; so nennt ihn auch die
-    // Bitte um Zustimmung.
-    match (tongue, shown_name(host)) {
-        (Tongue::German, Some(host)) => format!(
-            "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. {host} hat dich eingeladen: Ab jetzt \
-             erscheint hier, was die anderen schreiben, in der Sprache dieses Kanals. Die Kosten \
-             der Übersetzung trägt {host}."
-        ),
-        (Tongue::German, None) => "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. Du bist \
-             eingeladen: Ab jetzt erscheint hier, was die anderen schreiben, in der Sprache dieses \
-             Kanals. Die Kosten der Übersetzung trägt, wer dich eingeladen hat."
-            .to_owned(),
-        (Tongue::English, Some(host)) => format!(
-            "Hello! I am Rusty Fish, a translation bot. {host} has invited you: from now on, what \
-             the others write appears here in the language of this channel. The translation is \
-             paid for by {host}."
-        ),
-        (Tongue::English, None) => "Hello! I am Rusty Fish, a translation bot. You have been \
-             invited: from now on, what the others write appears here in the language of this \
-             channel. The translation is paid for by the person who invited you."
-            .to_owned(),
-        (Tongue::Russian, Some(host)) => format!(
-            "Привет! Я Rusty Fish, бот-переводчик. {host} приглашает тебя: теперь всё, что пишут \
-             остальные, появляется здесь на языке этого канала. Перевод оплачивает {host}."
-        ),
-        (Tongue::Russian, None) => "Привет! Я Rusty Fish, бот-переводчик. Тебя пригласили: теперь \
-             всё, что пишут остальные, появляется здесь на языке этого канала. Перевод оплачивает \
-             тот, кто тебя пригласил."
-            .to_owned(),
-    }
-}
-
-/// Der Anzeigename, wie er in einer Mitteilung stehen darf: in einer Zeile
-/// und nicht beliebig lang. Ein leerer Name ist kein Name.
-///
-/// Ein Anzeigename ist frei gewählt. Ein Zeilenumbruch darin würde die
-/// Mitteilung zerreißen, ein sehr langer Name sie über die Grenze von Discord
-/// schieben.
-fn shown_name(name: Option<&str>) -> Option<String> {
-    let one_line = name?.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.is_empty() {
-        return None;
-    }
-    Some(one_line.chars().take(80).collect())
 }

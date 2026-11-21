@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "rusty-fish-core",
     "rusty-fish-room",
+    "rusty-fish-house",
     "rusty-fish-openai",
     "rusty-fish-anthropic",
     "rusty-fish-providers",

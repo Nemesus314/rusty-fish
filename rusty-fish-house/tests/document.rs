@@ -1,7 +1,7 @@
 //! Tests des bearbeitbaren Dokuments. Kein Netz, keine Dateien.
 
-use rusty_fish_discord::config::Config;
-use rusty_fish_discord::document::{DocLimits, DocPerson, DocRoom, DocSeat, Document};
+use rusty_fish_house::config::Config;
+use rusty_fish_house::document::{DocLimits, DocPerson, DocRoom, DocSeat, Document};
 
 fn seat(channel: &str, lang: &str, gender: Option<&str>) -> DocSeat {
     DocSeat { gender: gender.map(str::to_owned), ..DocSeat::new(channel, lang) }

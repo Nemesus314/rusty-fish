@@ -1,13 +1,13 @@
 //! Tests zu Tischen, Einladungen und den festen Texten in drei Sprachen.
 //! Kein Netz, keine Discord-Verbindung.
 
-use rusty_fish_discord::config::Config;
-use rusty_fish_discord::document::{DocPerson, DocSeat, Document};
-use rusty_fish_discord::invite::{Due, due};
-use rusty_fish_discord::render::{consent_text, consent_text_in, invitation, render, render_in};
-use rusty_fish_discord::state::Store;
+use rusty_fish_house::config::Config;
+use rusty_fish_house::document::{DocPerson, DocSeat, Document};
+use rusty_fish_house::invite::{Due, due};
+use rusty_fish_house::texts::{consent_text, consent_text_in, invitation};
+use rusty_fish_house::state::Store;
 use rusty_fish_room::tongue::Tongue;
-use rusty_fish_room::{BUDGET_USED_UP, Delivery, Gender, Mark, Reason, Sender};
+use rusty_fish_room::Gender;
 use std::collections::BTreeSet;
 
 const ALL: [Tongue; 3] = [Tongue::German, Tongue::English, Tongue::Russian];
@@ -539,58 +539,6 @@ fn the_state_remembers_only_ids_and_stays_as_it_was_while_nobody_is_invited() {
 
 // --- Die festen Texte in drei Sprachen ---------------------------------------
 
-fn delivery(text: &str, mark: Mark) -> Delivery {
-    Delivery { channel: "222".to_owned(), text: text.to_owned(), mark, from: Sender::Writer }
-}
-
-#[test]
-fn a_translation_carries_no_note_in_any_language() {
-    for tongue in ALL {
-        assert_eq!(render_in(&delivery("Привет", Mark::Translated), tongue), "Привет");
-        assert_eq!(render_in(&delivery("See you", Mark::Original), tongue), "See you");
-        assert_eq!(render_in(&delivery("A notice.", Mark::Notice), tongue), "A notice.");
-    }
-}
-
-#[test]
-fn the_grey_line_speaks_the_language_of_the_table() {
-    let no_consent = delivery("Привет", Mark::Untranslated(Reason::NoConsent));
-    let en = render_in(&no_consent, Tongue::English);
-    assert_eq!(en, render(&no_consent), "English is what it always said");
-    let de = render_in(&no_consent, Tongue::German);
-    assert!(de.starts_with("Привет\n-# nicht übersetzt: "), "got {de:?}");
-    assert!(de.contains("zugestimmt"));
-    let ru = render_in(&no_consent, Tongue::Russian);
-    assert!(ru.starts_with("Привет\n-# не переведено: "), "got {ru:?}");
-    assert!(ru.contains("соглас"));
-}
-
-#[test]
-fn a_used_up_budget_is_said_in_the_language_of_the_table() {
-    let out = delivery("Hallo", Mark::Untranslated(Reason::Failed(BUDGET_USED_UP.to_owned())));
-    assert_eq!(render_in(&out, Tongue::English), render(&out));
-    let de = render_in(&out, Tongue::German);
-    assert!(de.starts_with("Hallo\n-# nicht übersetzt: "), "got {de:?}");
-    assert!(de.contains("Kontingent") && !de.contains("budget"), "got {de:?}");
-    let ru = render_in(&out, Tongue::Russian);
-    assert!(ru.starts_with("Hallo\n-# не переведено: "), "got {ru:?}");
-    assert!(ru.contains("лимит") && !ru.contains("budget"), "got {ru:?}");
-}
-
-#[test]
-fn any_other_reason_stays_as_the_service_gave_it() {
-    let out = delivery("Hallo", Mark::Untranslated(Reason::Failed("HTTP 429: quota".into())));
-    assert_eq!(render_in(&out, Tongue::German), "Hallo\n-# nicht übersetzt: HTTP 429: quota");
-    assert_eq!(render_in(&out, Tongue::Russian), "Hallo\n-# не переведено: HTTP 429: quota");
-    assert_eq!(render_in(&out, Tongue::English), "Hallo\n-# not translated: HTTP 429: quota");
-    // Der Grund wird gekürzt, die Nachricht nie.
-    let long = delivery("Hallo", Mark::Untranslated(Reason::Failed("x".repeat(500))));
-    for tongue in ALL {
-        let text = render_in(&long, tongue);
-        assert!(text.starts_with("Hallo\n") && text.chars().count() < 250);
-    }
-}
-
 #[test]
 fn the_consent_prompt_exists_as_a_fixed_text_in_three_languages() {
     assert_eq!(consent_text_in(Tongue::English, "api.example"), consent_text("api.example"));
@@ -647,15 +595,5 @@ fn a_display_name_cannot_break_the_invitation() {
         assert!(odd.contains("Zebra Quokka") && !odd.contains('\n'), "got {odd:?}");
         let long = invitation(tongue, Some(&"z".repeat(5000)));
         assert!(long.chars().count() < 600, "got {} characters", long.chars().count());
-    }
-}
-
-#[test]
-fn every_fixed_text_fits_into_one_discord_message() {
-    use rusty_fish_discord::render::MESSAGE_LIMIT;
-    let service = "a-rather-long-host-name.of-some-ai-service.example";
-    for tongue in ALL {
-        assert!(consent_text_in(tongue, service).chars().count() < MESSAGE_LIMIT);
-        assert!(invitation(tongue, Some(&"z".repeat(5000))).chars().count() < MESSAGE_LIMIT);
     }
 }

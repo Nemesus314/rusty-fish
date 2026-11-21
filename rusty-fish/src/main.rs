@@ -10,11 +10,12 @@ mod keys;
 mod lock;
 mod profiles;
 mod secrets;
+mod stop;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
 use rusty_fish_core::{Gender, Outcome, Request, Secret, translate};
-use rusty_fish_discord::config::Config;
+use rusty_fish_house::config::Config;
 use rusty_fish_providers::{AnyModel, Provider, catalog, connect};
 use serde_json::json;
 use std::io::Read;
@@ -393,8 +394,16 @@ async fn run(command: Command) -> Result<(), String> {
 
             // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt
             // wird, damit die Bitte um Zustimmung nichts anderes nennt.
-            let service = rusty_fish_discord::render::service_name(&base_url);
-            rusty_fish_discord::door::run(token.expose(), config, &state_path, fish, &service).await
+            let service = rusty_fish_house::texts::service_name(&base_url);
+            rusty_fish_discord::door::run(
+                token.expose(),
+                config,
+                &state_path,
+                fish,
+                &service,
+                stop::requested(),
+            )
+            .await
         }
     }
 }

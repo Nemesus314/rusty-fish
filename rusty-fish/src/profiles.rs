@@ -12,10 +12,10 @@
 //! läuft dasselbe Profil später auch auf einem Server ohne Bildschirm.
 
 use crate::lock;
-use rusty_fish_discord::clock::utc_date;
-use rusty_fish_discord::config::Config;
-use rusty_fish_discord::document::Document;
-use rusty_fish_discord::state::Store;
+use rusty_fish_house::clock::utc_date;
+use rusty_fish_house::config::Config;
+use rusty_fish_house::document::Document;
+use rusty_fish_house::state::Store;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 

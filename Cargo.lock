@@ -1920,6 +1920,7 @@ dependencies = [
  "rpassword",
  "rusty-fish-core",
  "rusty-fish-discord",
+ "rusty-fish-house",
  "rusty-fish-providers",
  "serde_json",
  "tokio",
@@ -1943,12 +1944,21 @@ name = "rusty-fish-discord"
 version = "0.1.0"
 dependencies = [
  "rusty-fish-core",
+ "rusty-fish-house",
+ "rusty-fish-room",
+ "serenity",
+ "tokio",
+]
+
+[[package]]
+name = "rusty-fish-house"
+version = "0.1.0"
+dependencies = [
+ "rusty-fish-core",
  "rusty-fish-providers",
  "rusty-fish-room",
  "serde",
  "serde_json",
- "serenity",
- "tokio",
  "toml",
 ]
 

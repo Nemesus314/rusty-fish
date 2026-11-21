@@ -38,27 +38,23 @@
 //!   der ersten Übersetzung. Scheitert sie, steht der Grund in der
 //!   Programmausgabe, und der nächste Start versucht es wieder.
 //!
-//! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Die
-//! Tür reicht nur das heutige Datum und den Tageszähler hinein und legt den
-//! Zähler in ihrer Zustandsdatei ab.
+//! Das Kontingent und die ansprechbare KI stehen in `rusty-fish-room`. Was
+//! nach einer Nachricht zu geschehen hat, entscheidet seit dem 21.11.2026 der
+//! Haushalt (`rusty-fish-house`); er führt auch die Zustandsdatei. Die Tür
+//! reicht herein, was ankam, setzt ab, was er entschieden hat, und lässt
+//! danach speichern.
 //!
 //! In die Ausgabe des Programms gelangen nur Kanal-Kennungen und Fehlergründe,
 //! nie der Text einer Nachricht.
 
-use crate::clock::today;
-use crate::config::Config;
-use crate::invite::due;
 use crate::mention::mention_as_call;
-use crate::render::{
-    KEEP_LABEL, KEPT_NOTICE, MESSAGE_LIMIT, NOT_THE_HOST, budget_notice, chunks, consent_text,
-    consent_text_in, hook_name, invitation, nothing_to_raise, raise_label, raised_notice, render_in,
-};
-use crate::state::Store;
-use rusty_fish_core::{Model, Outcome, Request, translate};
-use rusty_fish_room::tongue::{Tongue, known_tongue, tongue_of};
-use rusty_fish_room::{
-    House, Incoming, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
-};
+use crate::render::{MESSAGE_LIMIT, chunks, hook_name, render_in};
+use rusty_fish_core::Model;
+use rusty_fish_house::clock::today;
+use rusty_fish_house::config::Config;
+use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
+use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation};
+use rusty_fish_room::Sender;
 use serenity::all::{
     ButtonStyle, Channel, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
     CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
@@ -66,7 +62,8 @@ use serenity::all::{
     GetMessages, Http, Interaction, Message, MessageId, Ready, UserId, Webhook,
 };
 use serenity::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -96,35 +93,37 @@ struct Fish<M> {
 }
 
 struct Inner {
-    states: Vec<RoomState>,
-    store: Store,
+    /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen hat.
+    house: Household,
     hooks: HashMap<ChannelId, Webhook>,
-    /// Wen der Fisch in diesem Lauf schon um Zustimmung gebeten hat.
-    asked: HashSet<UserId>,
 }
 
-/// Startet die Tür und läuft, bis die Verbindung endet.
+/// Startet die Tür und läuft, bis die Verbindung endet oder `stop` eintritt.
 ///
 /// `service` ist der Name des KI-Dienstes, zu dem `model` spricht. Er kommt
 /// vom Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
-pub async fn run<M>(
+///
+/// `stop` kommt ebenfalls vom Aufrufer: wann ein Programm anhalten soll,
+/// weiß das Programm, nicht eine seiner Türen.
+pub async fn run<M, S>(
     token: &str,
     config: Config,
     state_path: &Path,
     model: M,
     service: &str,
+    stop: S,
 ) -> Result<(), String>
 where
     M: Model + Send + Sync + 'static,
+    S: Future<Output = ()> + Send + 'static,
 {
-    let store = Store::open(state_path)?;
-    let states = config.rooms.iter().map(|_| RoomState::default()).collect();
+    let house = Household::open(&config, state_path)?;
     let fish = Fish {
         model,
         config,
         service: service.to_owned(),
         me: AtomicU64::new(0),
-        inner: Mutex::new(Inner { states, store, hooks: HashMap::new(), asked: HashSet::new() }),
+        inner: Mutex::new(Inner { house, hooks: HashMap::new() }),
     };
 
     // MESSAGE_CONTENT muss im Entwicklerportal von Discord eingeschaltet sein,
@@ -143,7 +142,7 @@ where
     let shards = client.shard_manager.clone();
     let flag = stopping.clone();
     tokio::spawn(async move {
-        stop_requested().await;
+        stop.await;
         flag.store(true, Ordering::Relaxed);
         eprintln!("rusty-fish: stopping");
         shards.shutdown_all().await;
@@ -154,43 +153,6 @@ where
         // Nach einem gewollten Anhalten ist das Ende der Verbindung kein Fehler.
         Err(_) if stopping.load(Ordering::Relaxed) => Ok(()),
         Err(e) => Err(format!("the Discord connection ended: {e}")),
-    }
-}
-
-/// Wartet, bis jemand den Fisch anhalten will: die Zeile „stop" auf der
-/// Standardeingabe (so hält ihn die Maske an) oder Strg+C im Terminal.
-///
-/// Das bloße Ende der Standardeingabe hält ihn nicht an. Als Dienst ohne
-/// Terminal hat er gar keine Eingabe, und er soll trotzdem laufen.
-async fn stop_requested() {
-    let (asked, was_asked) = tokio::sync::oneshot::channel::<()>();
-    // Ein eigener Thread, weil das Lesen der Eingabe blockiert. Er darf beim
-    // Beenden des Programms einfach liegen bleiben.
-    std::thread::spawn(move || {
-        let stop = std::io::stdin()
-            .lines()
-            .map_while(Result::ok)
-            // Manche Programme, etwa die PowerShell, setzen ein unsichtbares
-            // Zeichen (BOM) vor das erste, was sie in eine Eingabe schreiben.
-            // Gemessen am 20.11.2026: ohne das Abstreifen blieb „stop" wirkungslos.
-            .any(|line| line.trim().trim_start_matches('\u{feff}').trim().eq_ignore_ascii_case("stop"));
-        if stop {
-            let _ = asked.send(());
-        } else {
-            // Eingabe zu Ende, ohne dass jemand „stop" sagte: den Sender nicht
-            // fallen lassen, sonst sähe das für den Empfänger wie ein Signal aus.
-            std::mem::forget(asked);
-        }
-    });
-    let ctrl_c = async {
-        if tokio::signal::ctrl_c().await.is_err() {
-            // Lässt sich Strg+C nicht abfangen, bleibt nur die Eingabe.
-            std::future::pending::<()>().await;
-        }
-    };
-    tokio::select! {
-        _ = was_asked => {}
-        () = ctrl_c => {}
     }
 }
 
@@ -242,11 +204,7 @@ where
         }
 
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
-        let saved = {
-            let mut inner = self.inner.lock().await;
-            inner.store.consent(&click.user.id.to_string());
-            inner.store.save()
-        };
+        let saved = self.inner.lock().await.house.consent(&click.user.id.to_string());
         let reply = match saved {
             Ok(()) => {
                 eprintln!("rusty-fish: consent stored");
@@ -286,18 +244,13 @@ where
         let text = if click.data.custom_id == KEEP_BUTTON {
             KEPT_NOTICE.to_owned()
         } else {
-            let limits = &self.config.limits;
             let mut inner = self.inner.lock().await;
-            let mut tally = inner.store.tally();
-            // Seit der Hinweis hinausging, kann ein neuer Tag begonnen haben.
-            tally.start_day(&today());
-            let raised = tally.raise(limits);
-            let (allowed, left) = (tally.allowed_today(limits), tally.tokens_left(limits));
-            inner.store.set_tally(&tally);
-            if let Err(why) = inner.store.save() {
+            let today = today();
+            let (text, saved) = inner.house.raise(&self.terms(&today));
+            if let Err(why) = saved {
                 eprintln!("rusty-fish: {why}");
             }
-            if raised { raised_notice(allowed, left) } else { nothing_to_raise(allowed, left) }
+            text
         };
 
         // Die Antwort ersetzt den Hinweis und nimmt die Knöpfe weg, damit kein
@@ -308,24 +261,28 @@ where
         }
     }
 
+    /// Was für einen Aufruf des Haushalts feststeht.
+    fn terms<'a>(&'a self, today: &'a str) -> Terms<'a> {
+        Terms { config: &self.config, service: &self.service, today }
+    }
+
     /// Sagt dem Gastgeber, und nur ihm, dass das heutige Kontingent verbraucht
-    /// ist, und fragt, ob er um denselben Betrag erhöhen will.
-    ///
-    /// Nemesus am 19.11.2026: „Meine Idee wäre eine Systemnachricht, der nur an
-    /// den Gastgeber geht. Gleich mit Abfage, ob er es wieder um den selben
-    /// Betrag erhöhen soll, mit Beitragnennung".
-    async fn notify_host(&self, http: &Http, tally: &Tally) {
+    /// ist, und fragt, ob er um denselben Betrag erhöhen will: als
+    /// Direktnachricht mit zwei Knöpfen.
+    async fn notify_host(&self, http: &Http, notice: &HostNotice) {
         let Ok(id) = self.config.host.parse::<u64>() else { return };
-        let limits = &self.config.limits;
-        let step = limits.translation_tokens_per_day;
         let message = CreateMessage::new()
-            .content(budget_notice(tally.allowed_today(limits), step))
+            .content(notice.text.as_str())
             .button(
                 CreateButton::new(RAISE_BUTTON)
-                    .label(raise_label(step))
+                    .label(notice.raise_label.as_str())
                     .style(ButtonStyle::Success),
             )
-            .button(CreateButton::new(KEEP_BUTTON).label(KEEP_LABEL).style(ButtonStyle::Secondary));
+            .button(
+                CreateButton::new(KEEP_BUTTON)
+                    .label(notice.keep_label)
+                    .style(ButtonStyle::Secondary),
+            );
         let sent = match UserId::new(id).create_dm_channel(http).await {
             Ok(dm) => dm.id.send_message(http, message).await.map(|_| ()),
             Err(why) => Err(why),
@@ -342,50 +299,37 @@ where
             return;
         }
         let channel = msg.channel_id.to_string();
-        let Some(room_index) = self.config.room_index(&channel) else { return };
-
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
-        // Schon verarbeitet, etwa weil Nachholen und Live-Meldung sich überschneiden.
-        if inner.store.seen(&channel).is_some_and(|seen| seen >= msg.id.get()) {
+        // Ein Kanal außerhalb jedes Raums geht den Fisch nichts an. Geprüft
+        // vor dem Schloss, damit so eine Nachricht nicht darauf wartet.
+        if self.config.room_index(&channel).is_none() {
             return;
         }
 
+        let mut guard = self.inner.lock().await;
+        let inner = &mut *guard;
+
         let author = msg.author.id.to_string();
-        let is_host = author == self.config.host;
-        let consented = is_host || inner.store.has_consented(&author);
-        let names: Vec<&str> = self.config.ai_names.iter().map(String::as_str).collect();
-        // Die echte Erwähnung des Bots am Anfang zählt wie sein Rufname. Die
-        // Raum-Logik bekommt dafür den Rufnamen statt des Discord-Kürzels; so
+        // Die echte Erwähnung des Bots am Anfang zählt wie sein Rufname. Der
+        // Haushalt bekommt dafür den Rufnamen statt des Discord-Kürzels; so
         // sehen weder die KI noch die anderen Plätze das Kürzel. Ohne Rufnamen
         // ist die Funktion aus, und die Nachricht bleibt, wie sie ist.
-        let called = names
-            .first()
+        let called = self
+            .config
+            .ai_name()
             .and_then(|name| mention_as_call(&msg.content, self.me.load(Ordering::Relaxed), name));
-        let text = called.as_deref().unwrap_or(&msg.content);
-        let incoming = Incoming {
+        let arrived = Arrived {
             channel: &channel,
             author: &author,
-            text,
-            consented,
-            // Die Raum-Logik kennt keine Discord-Kennungen. Was der Gastgeber
-            // über diese Person eingetragen hat, reicht die Tür hinein.
-            author_gender: self.config.gender_of(&author),
+            text: called.as_deref().unwrap_or(&msg.content),
+            // Discord zählt Nachrichten mit einer Zahl, die wächst.
+            mark: msg.id.get(),
         };
-        let room = &self.config.rooms[room_index];
         let today = today();
-        let house = House { limits: &self.config.limits, ai_names: &names, today: &today };
-        let mut tally = inner.store.tally();
-        let deliveries = converse(
-            &self.model,
-            room,
-            &mut inner.states[room_index],
-            &mut tally,
-            &house,
-            &incoming,
-            is_host,
-        )
-        .await;
+        // Nichts zu tun, etwa weil Nachholen und Live-Meldung sich überschneiden.
+        let Some(steps) = inner.house.message(&self.model, &self.terms(&today), &arrived).await
+        else {
+            return;
+        };
 
         // Was ein Mensch schrieb, erscheint unter seinem Namen und Bild. Was
         // die KI sagt, erscheint unter dem Namen, den der Gastgeber ihr gab.
@@ -394,10 +338,10 @@ where
         let assistant = hook_name(self.config.ai_name().unwrap_or(WEBHOOK_NAME));
         let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
         let mut delivered = true;
-        for delivery in &deliveries {
+        for delivery in &steps.deliveries {
             // Die graue Zeile steht in der Sprache des Tisches, an dem sie
             // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
-            let rendered = render_in(delivery, self.tongue_at(&delivery.channel));
+            let rendered = render_in(delivery, self.config.tongue_at(&delivery.channel));
             let (name, avatar, body) = match delivery.from {
                 Sender::Writer => (writer.as_str(), Some(face.as_str()), rendered + &attachments),
                 Sender::Assistant => (assistant.as_str(), None, rendered),
@@ -413,31 +357,21 @@ where
             let _ = msg.react(http, '⚠').await;
         }
 
-        // Die Bitte geht an den Tisch des Schreibenden, auch wenn der Fisch
-        // dort sonst nichts schreibt: er übersetzt die Sätze ja für andere
-        // Tische. Sie unterbleibt nur, wo er von diesem Menschen ohnehin nie
-        // etwas an die KI gäbe (siehe `Config::sends_to_ai`).
-        if !consented && self.config.sends_to_ai(&channel) && inner.asked.insert(msg.author.id) {
-            self.ask_consent(http, msg.channel_id, &channel, &author, &mut tally).await;
+        // Die Bitte um Zustimmung geht an den Tisch des Schreibenden.
+        if let Some(text) = &steps.ask_consent {
+            self.ask_consent(http, msg.channel_id, text).await;
         }
 
-        // Ging etwas unübersetzt hinaus, weil das Kontingent leer ist, erfährt
-        // es der Gastgeber, einmal je Erschöpfung.
-        if budget_ran_out(&deliveries) && tally.notice_due(&self.config.limits) {
-            self.notify_host(http, &tally).await;
+        // Ist das Kontingent leer, erfährt es der Gastgeber.
+        if let Some(notice) = &steps.tell_host {
+            self.notify_host(http, notice).await;
         }
 
-        inner.store.set_tally(&tally);
-        inner.store.saw(&channel, msg.id.get());
-        if let Err(why) = inner.store.save() {
+        // Erst jetzt, nach dem Absetzen: stürzt der Fisch vorher ab, gilt die
+        // Nachricht als nicht gelesen, und der nächste Start holt sie nach.
+        if let Err(why) = inner.house.save() {
             eprintln!("rusty-fish: {why}");
         }
-    }
-
-    /// Die Sprache der festen Texte an diesem Tisch: Deutsch, Englisch oder
-    /// Russisch, je nach Sprache des Tisches; für jede andere Englisch.
-    fn tongue_at(&self, channel: &str) -> Tongue {
-        tongue_of(self.config.lang_of(channel).unwrap_or(""))
     }
 
     /// Teilt Eingeladenen an ihrem Tisch mit, dass dieser Fisch sie jetzt
@@ -447,19 +381,16 @@ where
     /// Und dann ein Haken, wer eingeladen wird. Das könnte dann per
     /// Systemnachricht mitgeteilt werden."
     async fn tell_the_invited(&self, http: &Http) {
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
-        let (now, mut told) = due(&self.config, inner.store.told());
+        let mut inner = self.inner.lock().await;
         // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
-        if now.is_empty() && told == *inner.store.told() {
-            return;
-        }
+        let Some(pending) = inner.house.invitations(&self.config) else { return };
 
-        for invite in &now {
+        let mut reached = Vec::new();
+        for invite in &pending.due {
             let Ok(id) = invite.channel.parse::<u64>() else { continue };
             let channel = ChannelId::new(id);
             let host = self.host_name(http, channel).await;
-            let text = invitation(self.tongue_at(&invite.channel), host.as_deref());
+            let text = invitation(self.config.tongue_at(&invite.channel), host.as_deref());
             // Als der Bot selbst, nicht unter fremdem Namen: es ist seine
             // Mitteilung. Der Anzeigename des Gastgebers ist frei gewählt und
             // darf niemanden anpingen.
@@ -467,7 +398,7 @@ where
                 CreateMessage::new().content(text).allowed_mentions(CreateAllowedMentions::new());
             match channel.send_message(http, message).await {
                 Ok(_) => {
-                    told.insert(invite.person.clone());
+                    reached.push(invite.person.clone());
                     eprintln!("rusty-fish: invitation announced in channel {}", invite.channel);
                 }
                 // Nicht gemerkt: der nächste Start versucht es wieder.
@@ -478,8 +409,7 @@ where
             }
         }
 
-        inner.store.set_told(told);
-        if let Err(why) = inner.store.save() {
+        if let Err(why) = inner.house.invitations_told(pending, &reached) {
             eprintln!("rusty-fish: {why}");
         }
     }
@@ -498,57 +428,16 @@ where
         Some(user.global_name.unwrap_or(user.name))
     }
 
-    /// Bittet in der Sprache des Tisches um Zustimmung.
-    ///
-    /// Auf Deutsch, Englisch und Russisch steht die Bitte fest im Programm:
-    /// sie kostet nichts und kommt auch an, wenn die KI ausfällt. Für jede
-    /// andere Sprache übersetzt die KI die englische Fassung, wie bis zum
-    /// 20.11.2026 für alle.
-    async fn ask_consent(
-        &self,
-        http: &Http,
-        channel_id: ChannelId,
-        channel: &str,
-        author: &str,
-        tally: &mut Tally,
-    ) {
-        let lang = self.config.lang_of(channel).unwrap_or("English");
-        let text = match known_tongue(lang) {
-            Some(tongue) => consent_text_in(tongue, &self.service),
-            None => {
-                let base = consent_text(&self.service);
-                let request = Request {
-                    speaker: "fish",
-                    text: &base,
-                    target_lang: lang,
-                    pass_through: &[],
-                    context: &[],
-                    writer_gender: None,
-                    // Die Bitte spricht den Menschen an, der eben geschrieben
-                    // hat: zuerst die Angabe zu ihm selbst, sonst die des Platzes.
-                    reader_gender: self.config.gender_for(author, channel),
-                    // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
-                    informal: true,
-                };
-                // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist
-                // er leer, fragt der Fisch auf Englisch.
-                let meter = Metered::new(&self.model, tally.tokens_left(&self.config.limits));
-                let translated = translate(&meter, &request).await;
-                tally.spend(meter.used());
-                match translated {
-                    Ok(Outcome::Translated(t)) => t,
-                    // Lieber auf Englisch fragen als gar nicht.
-                    _ => base,
-                }
-            }
-        };
+    /// Setzt die Bitte um Zustimmung ab, mit einem Knopf. Den Wortlaut gibt
+    /// der Haushalt, in der Sprache des Tisches.
+    async fn ask_consent(&self, http: &Http, channel_id: ChannelId, text: &str) {
         // „OK" statt eines Satzes: ein Satz wie „Ich stimme zu" hat in manchen
         // Sprachen ein Geschlecht, und der Fisch weiß nicht, wer drückt.
         let message = CreateMessage::new()
             .content(text)
             .button(CreateButton::new(CONSENT_BUTTON).label("OK").style(ButtonStyle::Success));
         if let Err(why) = channel_id.send_message(http, message).await {
-            eprintln!("rusty-fish: cannot ask for consent in channel {channel}: {why}");
+            eprintln!("rusty-fish: cannot ask for consent in channel {channel_id}: {why}");
         }
     }
 
@@ -561,7 +450,7 @@ where
                 .rooms
                 .iter()
                 .flat_map(|r| r.seats.iter())
-                .filter_map(|s| inner.store.seen(&s.channel).map(|id| (s.channel.clone(), id)))
+                .filter_map(|s| inner.house.seen(&s.channel).map(|id| (s.channel.clone(), id)))
                 .collect()
         };
 

@@ -1,7 +1,11 @@
-//! Einstellungen der Tür, als TOML-Datei. Nichts ist auf einen bestimmten
+//! Das Profil eines Fischs, als TOML-Datei. Nichts ist auf einen bestimmten
 //! Betreiber zugeschnitten: andere sollen den Fisch bei sich laufen lassen.
+//!
+//! Benannte Grenze: Menschen und Kanäle stehen hier mit ihrer Discord-Kennung,
+//! einer Zahl. Das Profil gehört damit zu einer Tür.
 
 use rusty_fish_providers::Provider;
+use rusty_fish_room::tongue::{Tongue, tongue_of};
 use rusty_fish_room::{Gender, Limits, Room, Seat};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -299,6 +303,12 @@ impl Config {
     /// des Besitzers, sonst die Sprache des Platzes.
     pub fn lang_of(&self, channel: &str) -> Option<&str> {
         self.seat_of(channel).map(|s| s.lang.as_str())
+    }
+
+    /// Die Sprache der festen Texte an diesem Tisch: Deutsch, Englisch oder
+    /// Russisch, je nach Sprache des Tisches; für jede andere Englisch.
+    pub fn tongue_at(&self, channel: &str) -> Tongue {
+        tongue_of(self.lang_of(channel).unwrap_or(""))
     }
 
     /// Schreibt dieser Fisch an diesen Kanal? Ein Kanal außerhalb jedes
