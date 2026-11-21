@@ -158,5 +158,10 @@ several profiles at once. `rusty-fish --help` lists everything.
   each card. Each can be stopped on its own. A channel can belong to only one
   running profile; a second profile that names the same channel is not
   started and says why.
+- The green dot of the bot in Discord means that the fish is running, not
+  that it serves this server. Discord shows a bot as online everywhere at
+  once. If the profile for a server is stopped while another one runs, the
+  bot looks online there but translates nothing; what is written meanwhile
+  is caught up when that profile is started again.
 - When the daily budget is used up, the fish asks the host in a direct message
   whether to raise it for the day.
