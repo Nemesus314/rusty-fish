@@ -6,6 +6,7 @@
 //! etwas weiterverarbeitet, gibt es `--json`; Fehler stehen als Text auf der
 //! Fehlerausgabe, und das Programm endet dann mit Code 1.
 
+mod awake;
 mod keys;
 mod lock;
 mod profiles;
@@ -420,6 +421,13 @@ async fn run(command: Command) -> Result<(), String> {
                     None
                 }
             };
+            // Solange der Fisch läuft, soll sich der Rechner nicht von selbst
+            // schlafen legen: ein schlafender PC übersetzt nicht. Verstellt
+            // wird nichts, und mit dem Ende des Programms gilt es nicht mehr.
+            if awake::keep() {
+                eprintln!("rusty-fish: keeping this PC from going to sleep by itself while the fish is on");
+            }
+
             let on_change: OnChange = Box::new(move |names: &[String]| {
                 if let Some(held) = &held
                     && let Err(why) = held.set_profiles(names)

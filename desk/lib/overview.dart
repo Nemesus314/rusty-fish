@@ -7,6 +7,7 @@ import 'dart:ui' show AppExitResponse;
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
 
+import 'about.dart';
 import 'cli.dart';
 import 'desk_state.dart';
 import 'editor.dart';
@@ -268,6 +269,16 @@ class _OverviewPageState extends State<OverviewPage> {
           appBar: AppBar(
             title: const Text('Rusty Fish'),
             actions: [
+              // Wofür das Programm gebaut ist und wer es gebaut hat.
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: TextButton.icon(
+                  key: const ValueKey('about'),
+                  onPressed: () => showAbout(context),
+                  icon: const Icon(Icons.info_outline, size: 18),
+                  label: const Text('About'),
+                ),
+              ),
               Padding(
                 padding: const EdgeInsets.only(right: 16),
                 child: Tooltip(
@@ -334,8 +345,9 @@ class _OverviewPageState extends State<OverviewPage> {
                           const Tooltip(
                             message:
                                 'Writing from a phone works too, through the Discord app, as long '
-                                'as this PC stays on and does not go to sleep. '
-                                'A screen that turns off is fine.',
+                                'as this PC stays on and awake. While the fish is on, it keeps '
+                                'Windows from going to sleep by itself. Closing a laptop lid '
+                                'still stops it. A screen that turns off is fine.',
                             child: Text(
                               'The fish runs while this window is open and this PC is awake.',
                             ),

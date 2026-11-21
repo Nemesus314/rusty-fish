@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart' show Brightness, ThemeMode;
+import 'package:rusty_fish_desk/about.dart';
 import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/desk_state.dart';
 import 'package:rusty_fish_desk/log_file.dart';
@@ -561,6 +562,14 @@ void main() {
         'Matrix ⇄ Matrix · end-to-end encrypted up to the fish',
       );
       expect(connectionHint, contains('AI service reads every message'));
+    });
+  });
+
+  group('the About window', () {
+    test('it shows the version the window really has', () {
+      // Die Zahl steht an zwei Stellen. Dieser Test hält sie gleich.
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(pubspec, contains('\nversion: $deskVersion+'));
     });
   });
 

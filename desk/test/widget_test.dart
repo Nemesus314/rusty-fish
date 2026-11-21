@@ -184,6 +184,32 @@ void main() {
       return copied;
     }
 
+    testWidgets('the About window says what the fish is for, who made it and where to find them', (
+      tester,
+    ) async {
+      final copied = clipboardOf(tester);
+      await open(tester, threeProfiles());
+      expect(find.text('Who made it'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('about')));
+      await tester.pumpAndSettle();
+      expect(find.text('Version 0.2.0'), findsOneWidget);
+      expect(find.textContaining('each in their own language'), findsOneWidget);
+      expect(find.text('Nemesus (Christian Ermisch)'), findsOneWidget);
+      expect(find.text('christianermisch.com'), findsOneWidget);
+      // Solange es keine Adresse gibt, steht da keine erfundene.
+      expect(find.textContaining('Not published yet'), findsOneWidget);
+      expect(find.textContaining('github.com'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('copy-website')));
+      await tester.pumpAndSettle();
+      expect(copied, ['christianermisch.com']);
+
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(find.text('Who made it'), findsNothing);
+    });
+
     testWidgets('one click puts the program\'s own description on the clipboard', (
       tester,
     ) async {

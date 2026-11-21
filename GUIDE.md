@@ -150,11 +150,12 @@ times for several. `rusty-fish --help` lists everything.
 - The fish runs only while the window is open and the PC is awake. Everyone,
   the host included, can write from anywhere, also from the Discord app on a
   phone: Discord carries the messages, and the fish at home translates them.
-  For that the host's PC must stay on and must not go to sleep or hibernate.
-  Before leaving, set Windows so that it does not sleep (Settings, System,
-  Power; check the current names yourself). A screen that turns off or a PC
-  nobody touches is fine; a sleeping PC is not. What is written while the
-  fish is not running is caught up when it starts again.
+  For that the host's PC must stay on and awake. While the fish is on, it
+  asks Windows not to go to sleep by itself, so no setting has to be changed,
+  and no setting is changed. It cannot help it if the lid of a laptop is
+  closed, the PC is put to sleep by hand, or the battery runs out. A screen
+  that turns off is fine. What is written while the fish is not running is
+  caught up when it starts again.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.
 - All profiles run together over one bot. The window has one switch for the
