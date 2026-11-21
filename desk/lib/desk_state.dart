@@ -9,7 +9,10 @@ import 'cli.dart';
 import 'model.dart';
 
 class DeskState extends ChangeNotifier {
-  DeskState(this.cli);
+  DeskState(this.cli, {DateTime Function()? now}) : _now = now ?? DateTime.now;
+
+  /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
+  final DateTime Function() _now;
 
   final FishCli cli;
 
@@ -47,8 +50,17 @@ class DeskState extends ChangeNotifier {
   /// kann nur einmal laufen, sonst käme jede Nachricht doppelt an.
   String? runningName;
 
-  /// Die letzten Meldungen des laufenden oder zuletzt gelaufenen Fischs.
+  /// Die letzten Meldungen des laufenden oder zuletzt gelaufenen Fischs, jede
+  /// mit der Uhrzeit, zu der sie hier ankam.
+  ///
+  /// Nemesus am 21.11.2026: „Die LogFiles haben bis jetzt noch keinen
+  /// Zeitstempel." Gestempelt wird hier und nicht im Fisch: die Maske kennt
+  /// die Ortszeit des Rechners, der Fisch ohne weitere Bibliothek nur Weltzeit.
+  /// Benannte Grenze: ein Fisch, der ohne Maske läuft, stempelt nichts.
   final List<String> log = [];
+
+  /// Die letzte Meldung im Wortlaut des Fischs, ohne Zeitstempel.
+  String? _lastLine;
 
   /// Zu welchem Profil [log] gehört.
   String? logOwner;
@@ -102,6 +114,7 @@ class DeskState extends ChangeNotifier {
     }
     runError = null;
     log.clear();
+    _lastLine = null;
     logOwner = name;
     final FishRun run;
     try {
@@ -133,9 +146,8 @@ class DeskState extends ChangeNotifier {
         if (!stoppedByUs) {
           // Der Fisch ist von selbst gegangen. Der Grund steht in seinen
           // letzten Zeilen; die letzte wird hervorgehoben.
-          runError = log.isNotEmpty
-              ? log.last
-              : 'The fish ended with code $code and gave no reason.';
+          runError =
+              _lastLine ?? 'The fish ended with code $code and gave no reason.';
         }
         _changed();
         if (!_disposed) {
@@ -181,7 +193,8 @@ class DeskState extends ChangeNotifier {
   }
 
   void _addLine(String line) {
-    log.add(line);
+    _lastLine = line;
+    log.add('${logStamp(_now())}  $line');
     if (log.length > logLimit) {
       log.removeRange(0, log.length - logLimit);
     }
@@ -201,4 +214,12 @@ class DeskState extends ChangeNotifier {
     _lines?.cancel();
     super.dispose();
   }
+}
+
+/// Der Zeitstempel einer Protokollzeile: „2026-11-21 03:02:52", in der Zeit,
+/// die [at] trägt. Mit Datum, weil ein Fisch über Mitternacht laufen kann.
+String logStamp(DateTime at) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${at.year.toString().padLeft(4, '0')}-${two(at.month)}-${two(at.day)} '
+      '${two(at.hour)}:${two(at.minute)}:${two(at.second)}';
 }

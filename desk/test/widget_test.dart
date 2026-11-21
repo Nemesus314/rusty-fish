@@ -19,7 +19,12 @@ Future<void> open(WidgetTester tester, FakeCli fake) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    DeskApp(cli: fake, refreshEvery: null, today: () => today),
+    DeskApp(
+      cli: fake,
+      refreshEvery: null,
+      today: () => today,
+      now: () => DateTime(2026, 11, 21, 3, 2, 52),
+    ),
   );
   await tester.pumpAndSettle();
 }
@@ -765,7 +770,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(inCard('study', find.textContaining('Log')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('connected to Discord as Rusty Fish'), findsOneWidget);
+    // Jede Zeile trägt die Uhrzeit, zu der sie ankam.
+    expect(
+      find.text('2026-11-21 03:02:52  rusty-fish: connected to Discord as Rusty Fish'),
+      findsOneWidget,
+    );
 
     await tester.tap(inCard('study', find.text('Stop')));
     await tester.pumpAndSettle();
@@ -787,6 +796,9 @@ void main() {
 
     expect(inCard('study', find.text('Stopped')), findsOneWidget);
     expect(find.textContaining('Discord bot token not stored'), findsWidgets);
+    // Der Grund steht im Wortlaut des Fischs da, ohne Zeitstempel; der gehört
+    // nur ins Protokoll, und das ist hier noch zugeklappt.
+    expect(find.textContaining('2026-11-21'), findsNothing);
   });
 
   testWidgets('a start the program refuses says why', (tester) async {

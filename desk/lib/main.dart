@@ -44,8 +44,12 @@ class DeskApp extends StatelessWidget {
     this.location,
     this.refreshEvery = const Duration(seconds: 4),
     this.today,
+    this.now,
     this.startWith,
   });
+
+  /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
+  final DateTime Function()? now;
 
   /// Womit das Fenster aufgehen soll. Ohne Angabe mit der Übersicht.
   final StartRequest? startWith;
@@ -77,6 +81,7 @@ class DeskApp extends StatelessWidget {
               cli: cli,
               refreshEvery: refreshEvery,
               today: today ?? utcToday,
+              now: now,
               startWith: startWith,
             ),
     );

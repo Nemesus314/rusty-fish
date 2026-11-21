@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rusty_fish_desk/cli.dart';
+import 'package:rusty_fish_desk/desk_state.dart';
 import 'package:rusty_fish_desk/model.dart';
 
 void main() {
@@ -63,6 +64,11 @@ void main() {
       );
       expect(found.found, '/opt/fish/rusty-fish');
     });
+  });
+
+  test('a log line is stamped with date and time, padded', () {
+    expect(logStamp(DateTime(2026, 11, 21, 3, 2, 52)), '2026-11-21 03:02:52');
+    expect(logStamp(DateTime(2027, 1, 5, 23, 59, 9)), '2027-01-05 23:59:09');
   });
 
   test('numbers are grouped the English way', () {

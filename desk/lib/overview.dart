@@ -20,12 +20,16 @@ class OverviewPage extends StatefulWidget {
     required this.cli,
     required this.refreshEvery,
     required this.today,
+    this.now,
     this.startWith,
   });
 
   final FishCli cli;
   final Duration? refreshEvery;
   final String Function() today;
+
+  /// Die Uhr für die Zeitstempel im Protokoll. Ohne Angabe die des Rechners.
+  final DateTime Function()? now;
   final StartRequest? startWith;
 
   @override
@@ -33,7 +37,7 @@ class OverviewPage extends StatefulWidget {
 }
 
 class _OverviewPageState extends State<OverviewPage> {
-  late final DeskState _state = DeskState(widget.cli);
+  late final DeskState _state = DeskState(widget.cli, now: widget.now);
   late final AppLifecycleListener _lifecycle;
   Timer? _timer;
 
