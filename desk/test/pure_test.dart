@@ -564,6 +564,41 @@ void main() {
     });
   });
 
+  group('where the AI reads', () {
+    test('the card says it in words, by what the program found', () {
+      expect(
+        aiPlaceText(const AiReach(service: 'api.openai.com', place: 'outside')),
+        'AI reads at an outside service · api.openai.com',
+      );
+      expect(
+        aiPlaceText(const AiReach(service: 'localhost:11434', place: 'this_machine')),
+        'AI runs on this PC · localhost:11434',
+      );
+      expect(
+        aiPlaceText(const AiReach(service: '192.168.1.20:8000', place: 'own_network')),
+        'AI runs in your own network · 192.168.1.20:8000',
+      );
+      // Ein Ort, den diese Maske nicht kennt: lieber nichts als etwas Geratenes.
+      expect(aiPlaceText(const AiReach(service: 'x', place: 'on the moon')), isNull);
+      // Die Zeile verspricht nicht mehr, als der Fisch prüfen kann.
+      expect(aiPlaceHint, contains('open source'));
+      expect(aiPlaceHint, contains('cannot check'));
+    });
+
+    test('it is read from the list, and an older program simply does not say', () {
+      Map<String, dynamic> entry(String extra) =>
+          jsonDecode('''{"name": "tea", "path": "p", "ok": true, "model": "m", "host": "100",
+            "rooms": [], "people": [], "usage": null, "running": false$extra}''')
+              as Map<String, dynamic>;
+      final told = ProfileEntry.fromJson(
+        entry(', "ai": {"service": "localhost:11434", "place": "this_machine"}'),
+      );
+      expect(told.ai!.service, 'localhost:11434');
+      expect(told.ai!.place, 'this_machine');
+      expect(ProfileEntry.fromJson(entry('')).ai, isNull);
+    });
+  });
+
   group('light or dark', () {
     test('the choice is written as a word and read back', () {
       for (final mode in ThemeMode.values) {

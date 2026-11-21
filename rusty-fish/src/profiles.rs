@@ -16,6 +16,7 @@ use rusty_fish_house::clock::utc_date;
 use rusty_fish_house::config::Config;
 use rusty_fish_house::document::Document;
 use rusty_fish_house::state::Store;
+use rusty_fish_house::texts::service_name;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -197,6 +198,13 @@ impl Folder {
             }
         }
         entry["ok"] = json!(true);
+        // Wohin die Sätze gehen: der Dienst, wie die Bitte um Zustimmung ihn
+        // nennt, und ob er auf diesem Rechner, im eigenen Netz oder draußen
+        // steht. Berechnet, deshalb nur hier und nicht im Dokument.
+        entry["ai"] = json!({
+            "service": service_name(&config.service_address()),
+            "place": config.ai_place().id(),
+        });
 
         let state = self.state_path(name);
         if state.exists() {
@@ -362,6 +370,29 @@ mod tests {
         ]}],
         "people": [{"id": "100", "gender": "male"}]
     }"#;
+
+    #[test]
+    fn the_list_says_where_the_ai_of_a_profile_reads() {
+        let f = temp("ai-place");
+        f.save("outside", DOC).unwrap();
+        let own = DOC.replace(
+            "\"base_url\": null,",
+            "\"provider\": \"custom\", \"base_url\": \"http://localhost:11434/v1\",",
+        );
+        f.save("own", &own).unwrap();
+
+        let v = f.list().unwrap();
+        let by_name = |name: &str| {
+            v["profiles"].as_array().unwrap().iter().find(|p| p["name"] == name).unwrap().clone()
+        };
+        // Der Dienst heißt, wie die Bitte um Zustimmung ihn nennt.
+        assert_eq!(by_name("outside")["ai"], json!({"service": "api.openai.com", "place": "outside"}));
+        assert_eq!(
+            by_name("own")["ai"],
+            json!({"service": "localhost:11434", "place": "this_machine"})
+        );
+        clean(&f);
+    }
 
     // --- Namen ---------------------------------------------------------
 

@@ -25,5 +25,6 @@ pub mod config;
 pub mod document;
 pub mod household;
 pub mod invite;
+pub mod place;
 pub mod state;
 pub mod texts;

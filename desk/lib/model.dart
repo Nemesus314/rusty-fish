@@ -261,6 +261,39 @@ const connectionHint =
     'Whoever runs a door that does not encrypt end to end can read what is written there. '
     'The AI service reads every message it translates, whatever the door.';
 
+/// Wohin der Fisch schickt, was er übersetzen lässt. Das Programm urteilt
+/// nach der Adresse, die wirklich benutzt wird; die Maske zeigt es nur.
+///
+/// Entschieden von Nemesus am 21.11.2026: die Karte sagt, wohin die Sätze
+/// gehen.
+class AiReach {
+  const AiReach({required this.service, required this.place});
+
+  /// Der Dienst, wie auch die Bitte um Zustimmung ihn nennt: der Rechnername
+  /// aus der Adresse.
+  final String service;
+
+  /// "this_machine", "own_network" oder "outside".
+  final String place;
+
+  factory AiReach.fromJson(Map<String, dynamic> json) =>
+      AiReach(service: '${json['service'] ?? ''}', place: '${json['place'] ?? ''}');
+}
+
+/// Wo die KI liest, als eine Zeile für die Karte. Bei einem Ort, den diese
+/// Maske nicht kennt, nichts: lieber keine Aussage als eine geratene.
+String? aiPlaceText(AiReach ai) => switch (ai.place) {
+  'this_machine' => 'AI runs on this PC · ${ai.service}',
+  'own_network' => 'AI runs in your own network · ${ai.service}',
+  'outside' => 'AI reads at an outside service · ${ai.service}',
+  _ => null,
+};
+
+/// Was die Zeile nicht beweisen kann, als Hinweis beim Darüberfahren.
+const aiPlaceHint =
+    'This is where the fish sends what it translates. It goes by the address alone: '
+    'what runs behind that address, and whether the model is open source, the fish cannot check.';
+
 /// Tische, an denen dieser Fisch nur mitliest. Dort schreibt der Fisch dessen,
 /// dem der Tisch gehört, oder niemand.
 String? readOnlyText(ProfileDoc doc) {
@@ -534,7 +567,12 @@ class ProfileEntry {
     required this.doc,
     required this.usage,
     required this.running,
+    this.ai,
   });
+
+  /// Wohin die Sätze gehen. Ein älteres Programm sagt es nicht; dann zeigt
+  /// die Karte dazu nichts, statt etwas zu vermuten.
+  final AiReach? ai;
 
   final String name;
   final String path;
@@ -548,7 +586,9 @@ class ProfileEntry {
     final ok = json['ok'] == true;
     final usage = json['usage'];
     final error = json['error'];
+    final ai = json['ai'];
     return ProfileEntry(
+      ai: ai is Map ? AiReach.fromJson(_map(ai)) : null,
       name: '${json['name'] ?? ''}',
       path: '${json['path'] ?? ''}',
       ok: ok,

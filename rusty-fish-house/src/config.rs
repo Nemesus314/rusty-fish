@@ -372,6 +372,13 @@ impl Config {
             .unwrap_or_default()
     }
 
+    /// Wo der KI-Dienst dieses Profils liest: auf diesem Rechner, im eigenen
+    /// Netz oder draußen. Geurteilt wird nach der Adresse, die wirklich
+    /// benutzt wird (siehe [`crate::place`]).
+    pub fn ai_place(&self) -> crate::place::Place {
+        crate::place::place_of(&self.service_address())
+    }
+
     /// Das grammatische Geschlecht, das der Gastgeber für diese Person
     /// eingetragen hat.
     pub fn gender_of(&self, user: &str) -> Option<Gender> {

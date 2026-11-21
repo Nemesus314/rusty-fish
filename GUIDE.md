@@ -134,7 +134,11 @@ openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 
 - Nothing here is end-to-end encrypted. Discord can read what is written in
   its channels, and the AI service reads every message it translates. The
-  window says for each room over which service it runs.
+  window says for each room over which service it runs, and for each profile
+  where its AI reads: on this PC, in your own network or at an outside
+  service. It judges by the address alone. With a model on your own PC
+  ("Own model or other service" with a local address) no outside AI service
+  reads along.
 - The fish runs only while the window is open and the PC is awake.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.

@@ -533,6 +533,14 @@ class _ProfileCard extends StatelessWidget {
               // Welcher Dienst mit welchem Modell übersetzt. Das ist seit dem
               // 20.11.2026 je Profil wählbar und gehört deshalb auf die Karte.
               Text('${provider!.label} · ${doc.model}'),
+              // Wohin die Sätze gehen: auf diesen Rechner, ins eigene Netz
+              // oder zu einem fremden Dienst.
+              if (entry.ai case final ai?)
+                if (aiPlaceText(ai) case final where?)
+                  Tooltip(
+                    message: aiPlaceHint,
+                    child: Text(where, style: theme.textTheme.bodySmall),
+                  ),
               const SizedBox(height: 4),
               // Für wen dieser Fisch übersetzt. Seit dem 20.11.2026 schreibt
               // ein Fisch nur noch an die Tische, die er bedient: den seines

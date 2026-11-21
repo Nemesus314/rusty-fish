@@ -250,8 +250,9 @@ ProfileDoc tablesDoc(String name, {bool guestInvited = true, bool? guestServed})
   );
 }
 
-ProfileEntry entryOf(ProfileDoc doc, {Usage? usage, bool running = false}) {
+ProfileEntry entryOf(ProfileDoc doc, {Usage? usage, bool running = false, AiReach? ai}) {
   return ProfileEntry(
+    ai: ai,
     name: doc.name,
     path: 'C:\\fish\\profiles\\${doc.name}.toml',
     ok: true,

@@ -218,6 +218,62 @@ void main() {
     );
   }, skip: skip);
 
+  test('names, a table for someone without an id, and where the AI reads', () async {
+    final cli = ProcessFishCli(exe!);
+    const name = 'desk-probe-names';
+    // Der Gastgeber steht mit seinem Namen da. Robin hat einen Tisch und ist
+    // eingeladen, aber noch ohne Kennung. Die KI läuft auf diesem Rechner.
+    const doc = ProfileDoc(
+      name: name,
+      provider: 'custom',
+      model: 'local-model',
+      baseUrl: 'http://localhost:11434/v1',
+      host: 'Nemo',
+      aiNames: [],
+      limits: Limits(translationTokensPerDay: 1, questionsPerGuestPerDay: 1),
+      rooms: [
+        Room(
+          passThrough: [],
+          contextLines: 1,
+          seats: [
+            Seat(channel: '7', lang: 'German', owner: 'Nemo'),
+            Seat(channel: '8', lang: 'English', owner: 'Robin'),
+          ],
+        ),
+      ],
+      people: [
+        Person(id: '42', name: 'Nemo'),
+        Person(name: 'Robin', lang: 'Russian', invited: true),
+      ],
+    );
+    try {
+      await cli.saveProfile(doc);
+    } on CliException {
+      markTestSkipped('this rusty-fish does not know names yet');
+      return;
+    }
+    addTearDown(() => cli.deleteProfile(name));
+
+    final listed = (await cli.listProfiles()).profiles.firstWhere((entry) => entry.name == name);
+    expect(listed.ok, isTrue, reason: '${listed.error}');
+    final back = listed.doc!;
+    expect(back.host, 'Nemo');
+    expect(back.people.map((p) => p.name), ['Nemo', 'Robin']);
+    expect(back.people[1].id, '', reason: 'no id yet');
+    final seats = back.rooms.single.seats;
+    expect(seats.map((s) => s.owner), ['Nemo', 'Robin']);
+    expect(seats.map((s) => s.door), ['discord', 'discord']);
+    // Der Tisch eines Eingeladenen wird bedient, auch ohne dessen Kennung.
+    expect(seats.map((s) => s.served), [true, true]);
+    expect(back.tableText(seats[1]), 'Robin · Russian');
+    expect(servesText(back), 'Translates for you and Robin');
+
+    // Wo die KI liest, sagt das Programm nach der Adresse.
+    expect(listed.ai!.place, 'this_machine');
+    expect(listed.ai!.service, 'localhost:11434');
+    expect(aiPlaceText(listed.ai!), 'AI runs on this PC · localhost:11434');
+  }, skip: skip);
+
   // Braucht ein Programm, das Tische, Muttersprachen und Einladungen schon
   // kennt. Ein älteres lehnt die neuen Felder ab; das wird erkannt und
   // übersprungen, denn diesen Stand muss die Maske aushalten.

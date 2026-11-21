@@ -1040,6 +1040,34 @@ void startRequests() {
     });
   });
 
+  group('where the AI reads', () {
+    testWidgets('every card says where its sentences go', (tester) async {
+      final fake = FakeCli(
+        entries: [
+          entryOf(
+            docOf('cloud'),
+            ai: const AiReach(service: 'api.openai.com', place: 'outside'),
+          ),
+          entryOf(
+            docOf('home', provider: 'custom', baseUrl: 'http://localhost:11434/v1'),
+            ai: const AiReach(service: 'localhost:11434', place: 'this_machine'),
+          ),
+          // Ein älteres Programm nennt den Ort nicht.
+          entryOf(docOf('old')),
+        ],
+      );
+      await open(tester, fake);
+
+      expect(
+        inCard('cloud', find.text('AI reads at an outside service · api.openai.com')),
+        findsOneWidget,
+      );
+      expect(inCard('home', find.text('AI runs on this PC · localhost:11434')), findsOneWidget);
+      expect(inCard('old', find.textContaining('AI runs')), findsNothing);
+      expect(inCard('old', find.textContaining('AI reads')), findsNothing);
+    });
+  });
+
   group('light or dark', () {
     Future<void> openWith(WidgetTester tester, ThemeChoice choice) async {
       tester.view.physicalSize = const Size(1400, 1000);
