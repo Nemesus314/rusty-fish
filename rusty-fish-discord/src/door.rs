@@ -54,7 +54,7 @@ use rusty_fish_house::clock::today;
 use rusty_fish_house::config::Config;
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
 use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation};
-use rusty_fish_room::Sender;
+use rusty_fish_room::{Delivery, Sender};
 use serenity::all::{
     ButtonStyle, Channel, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
     CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
@@ -205,7 +205,11 @@ where
 
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
         let user = click.user.id.to_string();
-        let saved = self.inner.lock().await.house.consent(&user, &self.service);
+        // Das Schloss bleibt bis zum Ende: was jetzt nachgereicht wird, soll
+        // vor dem stehen, was derselbe Mensch gleich danach schreibt.
+        let mut guard = self.inner.lock().await;
+        let inner = &mut *guard;
+        let saved = inner.house.consent(&user, &self.service);
         let reply = match saved {
             Ok(()) => {
                 eprintln!("rusty-fish: consent stored");
@@ -220,6 +224,58 @@ where
         if let Err(why) = click.edit_response(http, edit).await {
             eprintln!("rusty-fish: cannot confirm the consent: {why}");
         }
+
+        // Was dieser Mensch vor dem Klick schrieb, kam unübersetzt an. Jetzt,
+        // da er zugestimmt hat, wird es übersetzt nachgereicht: sonst denkt er,
+        // er habe etwas gesagt, und niemand konnte es lesen.
+        let today = today();
+        let held = inner.house.held_back(&self.model, &self.terms(&today), &user).await;
+        if held.is_empty() {
+            return;
+        }
+        // Nur die Zahl, kein Text.
+        eprintln!("rusty-fish: handing in {} delivery(ies) written before consent", held.len());
+        let name = click
+            .member
+            .as_ref()
+            .and_then(|m| m.nick.clone())
+            .or_else(|| click.user.global_name.clone())
+            .unwrap_or_else(|| click.user.name.clone());
+        self.deliver(http, &mut inner.hooks, &held, &hook_name(&name), &click.user.face(), "").await;
+        if let Err(why) = inner.house.save() {
+            eprintln!("rusty-fish: {why}");
+        }
+    }
+
+    /// Setzt Zustellungen ab: was ein Mensch schrieb, unter seinem Namen und
+    /// Bild; was die KI sagt, unter dem Namen, den der Gastgeber ihr gab.
+    /// Liefert, ob alles ankam.
+    async fn deliver(
+        &self,
+        http: &Http,
+        hooks: &mut HashMap<ChannelId, Webhook>,
+        deliveries: &[Delivery],
+        writer: &str,
+        face: &str,
+        attachments: &str,
+    ) -> bool {
+        let assistant = hook_name(self.config.ai_name().unwrap_or(WEBHOOK_NAME));
+        let mut delivered = true;
+        for delivery in deliveries {
+            // Die graue Zeile steht in der Sprache des Tisches, an dem sie
+            // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
+            let rendered = render_in(delivery, self.config.tongue_at(&delivery.channel));
+            let (name, avatar, body) = match delivery.from {
+                Sender::Writer => (writer, Some(face), rendered + attachments),
+                Sender::Assistant => (assistant.as_str(), None, rendered),
+            };
+            let posted = post(http, hooks, &delivery.channel, name, avatar, &body).await;
+            if let Err(why) = posted {
+                delivered = false;
+                eprintln!("rusty-fish: cannot deliver to channel {}: {why}", delivery.channel);
+            }
+        }
+        delivered
     }
 
     /// Jemand hat einen Knopf am Hinweis zum leeren Kontingent gedrückt.
@@ -336,23 +392,10 @@ where
         // die KI sagt, erscheint unter dem Namen, den der Gastgeber ihr gab.
         let writer = hook_name(&display_name(msg));
         let face = msg.author.face();
-        let assistant = hook_name(self.config.ai_name().unwrap_or(WEBHOOK_NAME));
         let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
-        let mut delivered = true;
-        for delivery in &steps.deliveries {
-            // Die graue Zeile steht in der Sprache des Tisches, an dem sie
-            // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
-            let rendered = render_in(delivery, self.config.tongue_at(&delivery.channel));
-            let (name, avatar, body) = match delivery.from {
-                Sender::Writer => (writer.as_str(), Some(face.as_str()), rendered + &attachments),
-                Sender::Assistant => (assistant.as_str(), None, rendered),
-            };
-            let posted = post(http, &mut inner.hooks, &delivery.channel, name, avatar, &body).await;
-            if let Err(why) = posted {
-                delivered = false;
-                eprintln!("rusty-fish: cannot deliver to channel {}: {why}", delivery.channel);
-            }
-        }
+        let delivered = self
+            .deliver(http, &mut inner.hooks, &steps.deliveries, &writer, &face, &attachments)
+            .await;
         // Kam etwas nicht an, soll der Schreibende es an seiner Nachricht sehen.
         if !delivered {
             let _ = msg.react(http, '⚠').await;

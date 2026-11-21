@@ -21,9 +21,9 @@ use crate::texts::{
 use rusty_fish_core::{Model, Outcome, Request, translate};
 use rusty_fish_room::tongue::known_tongue;
 use rusty_fish_room::{
-    Delivery, House, Incoming, Metered, RoomState, Tally, budget_ran_out, converse,
+    Delivery, House, Incoming, Mark, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
 };
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 /// Was für einen Aufruf feststeht: das Profil, der Name des KI-Dienstes und
@@ -95,12 +95,34 @@ pub struct Invitations {
     kept: BTreeSet<String>,
 }
 
+/// Ein Satz, den jemand schrieb, bevor er der KI zugestimmt hat.
+struct Held {
+    channel: String,
+    text: String,
+}
+
+/// Wie viele Sätze je Mensch der Fisch für das Nachreichen bereithält. Wer
+/// die Bitte lange übersieht und weiterschreibt, bekommt nach dem Klick die
+/// letzten nachgereicht, nicht alle: sonst käme ein Schwall.
+pub const HELD_PER_PERSON: usize = 5;
+
 /// Alles, was sich im Lauf eines Fischs ändert.
 pub struct Household {
     store: Store,
     states: Vec<RoomState>,
     /// Wen der Fisch in diesem Lauf schon um Zustimmung gebeten hat.
     asked: HashSet<String>,
+    /// Was Menschen schrieben, bevor sie zugestimmt haben, nach Kennung.
+    ///
+    /// Gemessen von Nemesus am 21.11.2026 mit einem Zweitkonto: der erste
+    /// Satz eines Gasts kam unübersetzt an, und nach dem Klick auf „OK" blieb
+    /// es dabei. Der Gast denkt, er habe etwas gesagt; der Gastgeber kann es
+    /// nicht lesen. Sein Wort dazu: der Satz „müsste aber nachgereicht
+    /// werden, sobald der User seine Zustimmung gibt".
+    ///
+    /// Die Sätze liegen nur im Arbeitsspeicher, nie in einer Datei, und gehen
+    /// vor der Zustimmung an keine KI. Mit dem Ende des Laufs sind sie fort.
+    held: HashMap<String, VecDeque<Held>>,
 }
 
 impl Household {
@@ -112,6 +134,7 @@ impl Household {
             store: Store::open(state_path)?,
             states: config.rooms.iter().map(|_| RoomState::default()).collect(),
             asked: HashSet::new(),
+            held: HashMap::new(),
         })
     }
 
@@ -141,6 +164,15 @@ impl Household {
         let consented = is_host || self.store.has_consented(msg.author, terms.service);
         if consented {
             self.store.settle_service(msg.author, terms.service);
+        } else if config.sends_to_ai(msg.channel) {
+            // Bereithalten für den Augenblick der Zustimmung (siehe
+            // [`Household::held_back`]). Nur dort, wo der Fisch auch um
+            // Zustimmung bittet.
+            let held = self.held.entry(msg.author.to_owned()).or_default();
+            held.push_back(Held { channel: msg.channel.to_owned(), text: msg.text.to_owned() });
+            while held.len() > HELD_PER_PERSON {
+                held.pop_front();
+            }
         }
         let names: Vec<&str> = config.ai_names.iter().map(String::as_str).collect();
         let incoming = Incoming {
@@ -217,6 +249,69 @@ impl Household {
     pub fn consent(&mut self, user: &str, service: &str) -> Result<(), String> {
         self.store.consent(user, service);
         self.store.save()
+    }
+
+    /// Reicht nach, was dieser Mensch schrieb, bevor er zugestimmt hat: die
+    /// Übersetzungen seiner letzten Sätze, für die Tische, an denen sie
+    /// unübersetzt angekommen sind. Aufzurufen gleich nach
+    /// [`Household::consent`]; die Tür setzt das Ergebnis unter dem Namen des
+    /// Menschen ab und sagt danach `save`.
+    ///
+    /// Zurück kommt nur, was neu ist: eine Übersetzung, oder die Antwort der
+    /// KI, falls einer der Sätze sie ansprach. Ein Satz, der schon in der
+    /// Sprache des anderen Tisches stand, erscheint nicht ein zweites Mal, und
+    /// einer, der sich auch jetzt nicht übersetzen ließ, ebenso wenig: beide
+    /// stehen dort schon im Original.
+    ///
+    /// Ohne gültige Zustimmung kommt nichts zurück, und nichts geht an die KI.
+    ///
+    /// Benannte Grenzen: höchstens [`HELD_PER_PERSON`] Sätze, nur aus diesem
+    /// Lauf, und ohne Anhänge. Im Gesprächskontext stehen die nachgereichten
+    /// Sätze hinter dem, was inzwischen geschrieben wurde.
+    pub async fn held_back<M: Model + Sync>(
+        &mut self,
+        model: &M,
+        terms: &Terms<'_>,
+        user: &str,
+    ) -> Vec<Delivery> {
+        if !self.store.has_consented(user, terms.service) {
+            return Vec::new();
+        }
+        let Some(held) = self.held.remove(user) else { return Vec::new() };
+        let config = terms.config;
+        let names: Vec<&str> = config.ai_names.iter().map(String::as_str).collect();
+        let house = House { limits: &config.limits, ai_names: &names, today: terms.today };
+        let mut tally = self.store.tally();
+        let mut out = Vec::new();
+        for item in &held {
+            // Das Profil kann sich seit dem Satz nicht geändert haben, aber
+            // ein Kanal ohne Raum wäre hier trotzdem kein Grund zu scheitern.
+            let Some(room_index) = config.room_index(&item.channel) else { continue };
+            let incoming = Incoming {
+                channel: &item.channel,
+                author: user,
+                text: &item.text,
+                consented: true,
+                author_gender: config.gender_of(user),
+            };
+            let deliveries = converse(
+                model,
+                &config.rooms[room_index],
+                &mut self.states[room_index],
+                &mut tally,
+                &house,
+                &incoming,
+                user == config.host,
+            )
+            .await;
+            out.extend(
+                deliveries
+                    .into_iter()
+                    .filter(|d| d.mark == Mark::Translated || d.from == Sender::Assistant),
+            );
+        }
+        self.store.set_tally(&tally);
+        out
     }
 
     /// Der Gastgeber will das heutige Kontingent erhöhen. Legt genau einen

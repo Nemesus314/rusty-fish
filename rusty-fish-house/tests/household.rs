@@ -392,6 +392,95 @@ fn a_consent_from_before_services_were_noted_counts_for_the_service_then_in_use(
     assert!(steps.ask_consent.is_some());
 }
 
+// --- Nachreichen nach der Zustimmung -------------------------------------------
+
+#[test]
+fn what_a_guest_wrote_before_agreeing_is_handed_in_translated_after_the_click() {
+    let config = settings("Russian", 100_000);
+    let mut house = Household::open(&config, &state_file("held")).unwrap();
+    let fake = Fake::new();
+
+    // Der Gast schreibt, bevor er zugestimmt hat: es kommt unübersetzt an.
+    let first = handle(&mut house, &fake, &config, &from_guest("Привет", 1)).unwrap();
+    assert_eq!(first.deliveries[0].mark, Mark::Untranslated(Reason::NoConsent));
+    assert_eq!(fake.calls(), 0);
+    // Vor dem Klick wird nichts nachgereicht, und nichts geht an die KI.
+    assert!(now(house.held_back(&fake, &terms(&config), "7")).is_empty());
+    assert_eq!(fake.calls(), 0, "nothing may reach the AI before consent");
+
+    // Er drückt OK. Jetzt kommt sein Satz übersetzt am Tisch des Gastgebers an.
+    house.consent("7", SERVICE).unwrap();
+    let handed_in = now(house.held_back(&fake, &terms(&config), "7"));
+    assert_eq!(handed_in.len(), 1);
+    assert_eq!(handed_in[0].channel, "111");
+    assert_eq!(handed_in[0].text, "TRANSLATED");
+    assert_eq!(handed_in[0].mark, Mark::Translated);
+    assert_eq!(handed_in[0].from, Sender::Writer);
+    assert!(fake.everything_read().contains("Привет"));
+
+    // Einmal, nicht bei jedem weiteren Aufruf wieder.
+    assert!(now(house.held_back(&fake, &terms(&config), "7")).is_empty());
+    assert_eq!(fake.calls(), 1);
+}
+
+#[test]
+fn only_the_last_few_sentences_are_handed_in_and_in_the_order_written() {
+    let config = settings("Russian", 100_000);
+    let mut house = Household::open(&config, &state_file("held-many")).unwrap();
+    let fake = Fake::new();
+    const SENT: [&str; 7] = ["one", "two", "three", "four", "five", "six", "seven"];
+    for (n, text) in SENT.iter().enumerate() {
+        assert!(handle(&mut house, &fake, &config, &from_guest(text, n as u64 + 1)).is_some());
+    }
+
+    house.consent("7", SERVICE).unwrap();
+    let handed_in = now(house.held_back(&fake, &terms(&config), "7"));
+    assert_eq!(handed_in.len(), rusty_fish_house::household::HELD_PER_PERSON);
+    // Die ältesten zwei sind nicht dabei, und die Reihenfolge ist die des Schreibens.
+    let read = fake.everything_read();
+    assert!(!read.contains(">\none\n<") && !read.contains(">\ntwo\n<"), "got {read}");
+    let at = |word: &str| read.find(&format!(">\n{word}\n<")).unwrap_or_else(|| panic!("{word}"));
+    assert!(at("three") < at("four") && at("four") < at("seven"));
+}
+
+#[test]
+fn what_needs_no_translation_or_cannot_get_one_is_not_delivered_a_second_time() {
+    let config = settings("Russian", 100_000);
+
+    // Der Satz stand schon in der Sprache des anderen Tisches.
+    let mut house = Household::open(&config, &state_file("held-skip")).unwrap();
+    let skip = Fake { reply: Ok("=SKIP=".to_owned()), ..Fake::new() };
+    assert!(handle(&mut house, &skip, &config, &from_guest("Hallo", 1)).is_some());
+    house.consent("7", SERVICE).unwrap();
+    assert!(now(house.held_back(&skip, &terms(&config), "7")).is_empty());
+
+    // Die KI fällt aus: das Original steht dort schon, ein zweites hilft niemandem.
+    let mut house = Household::open(&config, &state_file("held-down")).unwrap();
+    let down = Fake::failing();
+    assert!(handle(&mut house, &down, &config, &from_guest("Привет", 1)).is_some());
+    house.consent("7", SERVICE).unwrap();
+    assert!(now(house.held_back(&down, &terms(&config), "7")).is_empty());
+}
+
+#[test]
+fn what_was_held_is_never_written_to_the_state_file() {
+    let config = settings("Russian", 100_000);
+    let path = state_file("held-file");
+    let mut house = Household::open(&config, &path).unwrap();
+    let fake = Fake::new();
+    assert!(handle(&mut house, &fake, &config, &from_guest("Очень личное", 1)).is_some());
+    house.save().unwrap();
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(!on_disk.contains("личное"), "the state file must hold no message text");
+    drop(house);
+
+    // Nach einem Neustart ist es fort: nachgereicht wird nur aus diesem Lauf.
+    let mut house = Household::open(&config, &path).unwrap();
+    house.consent("7", SERVICE).unwrap();
+    assert!(now(house.held_back(&fake, &terms(&config), "7")).is_empty());
+    assert_eq!(fake.calls(), 0);
+}
+
 // --- Die Namen des Gastgebers bleiben im Profil -------------------------------
 
 #[test]

@@ -49,7 +49,10 @@ account there.
   once in the channel, names the AI service and shows an OK button. Until the
   guest presses it, their messages are still passed on, untranslated and
   marked as such, and nothing of them goes to the AI, not even as context for
-  other translations.
+  other translations. Once the guest presses OK, the last messages they wrote
+  before (up to five, and only since the fish was last started) are
+  translated after all and delivered, so that nothing they said stays
+  unreadable for the others. The request says so.
 - After that, the AI service receives: the text of the message, a few earlier
   messages of the conversation for context (ten unless the host changed it),
   and grammar hints the host entered, such as whether writer and reader are

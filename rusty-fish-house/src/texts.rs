@@ -99,7 +99,8 @@ pub fn consent_text(service: &str) -> String {
          own language, and an AI translates in between. The AI is an outside service chosen by \
          the host of this server ({service}). To translate, it reads what you write here. \
          Nothing you write is sent to it before you agree. Press OK to agree. Until then your \
-         messages are passed on untranslated."
+         messages are passed on untranslated; once you agree, the last of them are translated \
+         after all."
     )
 }
 
@@ -175,8 +176,13 @@ fn budget_used_up(tongue: Tongue) -> Option<&'static str> {
 ///
 /// Die drei Fassungen sagen dasselbe wie [`consent_text`]: wer der Fisch ist,
 /// dass eine KI übersetzt, wessen KI es ist, dass sie mitliest, dass vor der
-/// Zustimmung nichts an sie geht, und was bis dahin geschieht. Der Knopf heißt
+/// Zustimmung nichts an sie geht, was bis dahin geschieht, und seit dem
+/// 21.11.2026: dass die letzten Nachrichten nach der Zustimmung nachträglich
+/// übersetzt werden. Wer zustimmt, stimmt damit auch dem zu. Der Knopf heißt
 /// in jeder Sprache „OK".
+///
+/// Im Russischen ohne Vergangenheitsform des Schreibens: die hätte ein
+/// Geschlecht, und der Fisch weiß nicht, wer liest.
 pub fn consent_text_in(tongue: Tongue, service: &str) -> String {
     match tongue {
         Tongue::English => consent_text(service),
@@ -186,14 +192,16 @@ pub fn consent_text_in(tongue: Tongue, service: &str) -> String {
              Dienst, den der Gastgeber dieses Servers gewählt hat ({service}). Zum Übersetzen \
              liest sie, was du hier schreibst. Nichts von dem, was du schreibst, geht an sie, \
              bevor du zustimmst. Drücke OK, um zuzustimmen. Bis dahin werden deine Nachrichten \
-             unübersetzt weitergegeben."
+             unübersetzt weitergegeben; nach deiner Zustimmung werden die letzten nachträglich \
+             übersetzt."
         ),
         Tongue::Russian => format!(
             "Привет! Я Rusty Fish, бот-переводчик. В этом канале каждый пишет на своём языке, а \
              ИИ переводит. ИИ — это внешний сервис, который выбрал хозяин этого сервера \
              ({service}). Чтобы переводить, он читает то, что ты здесь пишешь. Ничего из того, \
              что ты пишешь, не отправляется ему, пока ты не согласишься. Нажми OK, чтобы \
-             согласиться. До тех пор твои сообщения передаются без перевода."
+             согласиться. До тех пор твои сообщения передаются без перевода; после твоего \
+             согласия последние из них будут переведены."
         ),
     }
 }
