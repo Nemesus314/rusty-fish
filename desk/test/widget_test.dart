@@ -766,11 +766,12 @@ void main() {
     expect(fake.started, ['study']);
     expect(inCard('study', find.text('Running')), findsOneWidget);
     expect(inCard('study', find.text('Stop')), findsOneWidget);
-    // Ein Bot, ein Fisch: das andere Profil lässt sich solange nicht starten.
+    // Seit dem 21.11.2026 lässt sich das andere Profil dazunehmen; bis dahin
+    // war sein Knopf gesperrt, solange eines lief.
     final otherStart = tester.widget<ButtonStyleButton>(
       inCard('other', find.ancestor(of: find.text('Start'), matching: find.bySubtype<ButtonStyleButton>())),
     );
-    expect(otherStart.onPressed, isNull);
+    expect(otherStart.onPressed, isNotNull);
 
     fake.lastRun!.emit('rusty-fish: connected to Discord as Rusty Fish');
     await tester.pumpAndSettle();
@@ -1063,6 +1064,139 @@ void startRequests() {
       await tester.pumpAndSettle();
       // Gespeichert zeigen die Tische mit dem Namen auf ihre Besitzer.
       expect(fake.saved.single.rooms.single.seats.map((s) => s.owner), ['Nemo', 'Robin']);
+    });
+  });
+
+  group('several profiles at once', () {
+    FakeCli two() => FakeCli(entries: [entryOf(docOf('tea')), entryOf(docOf('probe'))]);
+
+    Future<void> openLogOf(WidgetTester tester, String profile) async {
+      await tester.ensureVisible(inCard(profile, find.textContaining('Log')));
+      await tester.tap(inCard(profile, find.textContaining('Log')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the second profile joins the running fish instead of starting another', (
+      tester,
+    ) async {
+      final fake = two();
+      await open(tester, fake);
+
+      await tester.tap(inCard('tea', find.text('Start')));
+      await tester.pumpAndSettle();
+      final fish = fake.lastRun!;
+      await tester.tap(inCard('probe', find.text('Start')));
+      await tester.pumpAndSettle();
+
+      // Ein Fisch, nicht zwei: das zweite Profil wird dem laufenden gesagt.
+      expect(fake.started, ['tea']);
+      expect(identical(fake.lastRun, fish), isTrue);
+      expect(fish.said, ['start probe']);
+      expect(inCard('tea', find.text('Running')), findsOneWidget);
+      expect(inCard('probe', find.text('Running')), findsOneWidget);
+    });
+
+    testWidgets('stopping one profile leaves the other running', (tester) async {
+      final fake = two();
+      await open(tester, fake);
+      await tester.tap(inCard('tea', find.text('Start')));
+      await tester.pumpAndSettle();
+      await tester.tap(inCard('probe', find.text('Start')));
+      await tester.pumpAndSettle();
+      final fish = fake.lastRun!;
+
+      await tester.tap(inCard('probe', find.text('Stop')));
+      await tester.pumpAndSettle();
+      expect(fish.said, ['start probe', 'stop probe']);
+      expect(fish.stopped, isFalse, reason: 'the fish goes on for the other profile');
+      expect(inCard('probe', find.text('Stopped')), findsOneWidget);
+      expect(inCard('tea', find.text('Running')), findsOneWidget);
+
+      // Das letzte Profil anzuhalten hält den Fisch an.
+      await tester.tap(inCard('tea', find.text('Stop')));
+      await tester.pumpAndSettle();
+      expect(fish.stopped, isTrue);
+      expect(inCard('tea', find.text('Stopped')), findsOneWidget);
+    });
+
+    testWidgets('every card shows the lines about its own profile and about the whole fish', (
+      tester,
+    ) async {
+      final fake = two();
+      await open(tester, fake);
+      await tester.tap(inCard('tea', find.text('Start')));
+      await tester.pumpAndSettle();
+      await tester.tap(inCard('probe', find.text('Start')));
+      await tester.pumpAndSettle();
+      final fish = fake.lastRun!;
+
+      fish.emit('rusty-fish: connected to Discord as Rusty Fish');
+      fish.emit('rusty-fish: [tea] consent stored');
+      fish.emit('rusty-fish: [probe] catching up on 2 missed message(s)');
+      await tester.pumpAndSettle();
+      await openLogOf(tester, 'tea');
+      await openLogOf(tester, 'probe');
+
+      const at = '2026-11-21 03:02:52  ';
+      final tea = tester.widget<Text>(inCard('tea', find.textContaining('connected to Discord')));
+      final probe = tester.widget<Text>(inCard('probe', find.textContaining('connected to Discord')));
+      // Was den ganzen Fisch betrifft, steht bei beiden.
+      expect(tea.data, contains('${at}rusty-fish: connected to Discord as Rusty Fish'));
+      expect(probe.data, contains('${at}rusty-fish: connected to Discord as Rusty Fish'));
+      // Was ein Profil betrifft, nur bei diesem.
+      expect(tea.data, contains('[tea] consent stored'));
+      expect(tea.data, isNot(contains('[probe]')));
+      expect(probe.data, contains('[probe] catching up'));
+      expect(probe.data, isNot(contains('[tea]')));
+    });
+
+    testWidgets('a profile the running fish cannot take says why, and the others go on', (
+      tester,
+    ) async {
+      final fake = two();
+      await open(tester, fake);
+      await tester.tap(inCard('tea', find.text('Start')));
+      await tester.pumpAndSettle();
+      await tester.tap(inCard('probe', find.text('Start')));
+      await tester.pumpAndSettle();
+      expect(inCard('probe', find.text('Running')), findsOneWidget);
+
+      // So antwortet der Fisch, wenn zwei Profile denselben Kanal nennen.
+      fake.lastRun!.emit(
+        'rusty-fish: [probe] cannot start: channel 222 already belongs to profile "tea", which is running',
+      );
+      await tester.pumpAndSettle();
+      expect(inCard('probe', find.text('Stopped')), findsOneWidget);
+      expect(
+        inCard(
+          'probe',
+          find.text('channel 222 already belongs to profile "tea", which is running'),
+        ),
+        findsOneWidget,
+      );
+      expect(inCard('tea', find.text('Running')), findsOneWidget);
+      expect(fake.lastRun!.stopped, isFalse);
+    });
+
+    testWidgets('when the fish ends by itself every running card says why', (tester) async {
+      final fake = two();
+      await open(tester, fake);
+      await tester.tap(inCard('tea', find.text('Start')));
+      await tester.pumpAndSettle();
+      await tester.tap(inCard('probe', find.text('Start')));
+      await tester.pumpAndSettle();
+
+      fake.lastRun!.emit('rusty-fish: the Discord connection ended: gone');
+      await tester.pumpAndSettle();
+      fake.lastRun!.end(1);
+      await tester.pumpAndSettle();
+      for (final profile in ['tea', 'probe']) {
+        expect(inCard(profile, find.text('Stopped')), findsOneWidget);
+        expect(
+          inCard(profile, find.text('rusty-fish: the Discord connection ended: gone')),
+          findsOneWidget,
+        );
+      }
     });
   });
 

@@ -564,6 +564,24 @@ void main() {
     });
   });
 
+  group('lines of a fish that serves several profiles', () {
+    test('a line says which profile it is about', () {
+      expect(profileOfLine('rusty-fish: [probe] consent stored'), ('probe', 'consent stored'));
+      expect(
+        profileOfLine('rusty-fish: [tea-time] cannot start: OpenAI API key not stored'),
+        ('tea-time', 'cannot start: OpenAI API key not stored'),
+      );
+    });
+
+    test('a line about the whole fish names no profile', () {
+      expect(profileOfLine('rusty-fish: connected to Discord as Rusty Fish'), isNull);
+      expect(profileOfLine('rusty-fish: stopping'), isNull);
+      // Eckige Klammern mitten im Text sind kein Profil.
+      expect(profileOfLine('rusty-fish: click received on [x] y'), isNull);
+      expect(profileOfLine('something else: [probe] x'), isNull);
+    });
+  });
+
   group('where the AI reads', () {
     test('the card says it in words, by what the program found', () {
       expect(

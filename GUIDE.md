@@ -132,7 +132,8 @@ account there.
 
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
-`rusty-fish run --profile NAME`. `rusty-fish --help` lists everything.
+`rusty-fish run --profile NAME`. Give `--profile` several times to serve
+several profiles at once. `rusty-fish --help` lists everything.
 
 ## Limits
 
@@ -153,6 +154,9 @@ openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
   fish is not running is caught up when it starts again.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.
-- One bot runs one profile at a time.
+- Several profiles can run at the same time over one bot: press "Start" on
+  each card. Each can be stopped on its own. A channel can belong to only one
+  running profile; a second profile that names the same channel is not
+  started and says why.
 - When the daily budget is used up, the fish asks the host in a direct message
   whether to raise it for the day.

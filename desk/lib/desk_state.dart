@@ -1,5 +1,6 @@
 // Was die Maske weiß: die Liste der Profile, ob die Geheimnisse liegen, und
-// den einen Fisch, den dieses Fenster gestartet hat.
+// den einen Fisch, den dieses Fenster gestartet hat, samt den Profilen, die
+// er gerade bedient.
 
 import 'dart:async';
 
@@ -16,11 +17,6 @@ class DeskState extends ChangeNotifier {
   /// Öffnet die Protokolldatei eines Profils im Ordner neben den Profilen.
   /// Ohne Angabe (in Tests) steht das Protokoll nur im Fenster.
   final OpenLog Function(String profilesDir, String profile)? openLog;
-
-  OpenLog? _logFile;
-
-  /// Wohin das Protokoll gerade zusätzlich geschrieben wird.
-  String? get logPath => _logFile?.path;
 
   /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
   final DateTime Function() _now;
@@ -57,31 +53,48 @@ class DeskState extends ChangeNotifier {
     return Provider(id: id, label: id, baseUrl: null, needsKey: true);
   }
 
-  /// Das Profil, das dieses Fenster gestartet hat. Höchstens eines: ein Bot
-  /// kann nur einmal laufen, sonst käme jede Nachricht doppelt an.
-  String? runningName;
+  /// Die Profile, die dieses Fenster gestartet hat und die gerade laufen.
+  ///
+  /// Bis zum 21.11.2026 höchstens eines. Nemesus an dem Tag: „Wieso kann ich
+  /// eigentlich nicht alle Profile gleichzeitig laufen lassen, sondern muss
+  /// mich für einen entscheiden?" Seitdem bedient ein Fisch mehrere Profile
+  /// über eine Verbindung: das erste startet ihn, jedes weitere wird ihm
+  /// gesagt, ohne die laufenden zu stören.
+  final Set<String> running = {};
 
-  /// Die letzten Meldungen des laufenden oder zuletzt gelaufenen Fischs, jede
-  /// mit der Uhrzeit, zu der sie hier ankam.
+  /// Ob dieses Fenster gerade einen Fisch laufen hat.
+  bool get hasFish => _run != null;
+
+  /// Die letzten Meldungen des Fischs je Profil, jede mit der Uhrzeit, zu der
+  /// sie hier ankam. Eine Zeile, die ein Profil nennt (`[tea-time]`), steht
+  /// bei diesem; eine, die den ganzen Fisch betrifft, bei allen laufenden.
   ///
   /// Nemesus am 21.11.2026: „Die LogFiles haben bis jetzt noch keinen
   /// Zeitstempel." Gestempelt wird hier und nicht im Fisch: die Maske kennt
   /// die Ortszeit des Rechners, der Fisch ohne weitere Bibliothek nur Weltzeit.
   /// Benannte Grenze: ein Fisch, der ohne Maske läuft, stempelt nichts.
-  final List<String> log = [];
+  final Map<String, List<String>> _logs = {};
+
+  /// Wohin das Protokoll eines Profils zusätzlich geschrieben wird.
+  final Map<String, OpenLog> _files = {};
+
+  /// Warum ein Start gescheitert ist oder der Fisch von selbst geendet hat,
+  /// je Profil.
+  final Map<String, String> _runErrors = {};
 
   /// Die letzte Meldung im Wortlaut des Fischs, ohne Zeitstempel.
   String? _lastLine;
 
-  /// Zu welchem Profil [log] gehört.
-  String? logOwner;
+  List<String> logOf(String name) => _logs[name] ?? const [];
 
-  /// Warum ein Start gescheitert ist oder der Fisch von selbst geendet hat.
-  String? runError;
+  String? logPathOf(String name) => _files[name]?.path;
+
+  String? runErrorOf(String name) => _runErrors[name];
 
   static const int logLimit = 200;
 
   FishRun? _run;
+  Future<void>? _spawning;
   StreamSubscription<String>? _lines;
   bool _disposed = false;
   bool _refreshing = false;
@@ -119,36 +132,51 @@ class DeskState extends ChangeNotifier {
     }
   }
 
+  /// Startet ein Profil. Läuft noch kein Fisch, startet es ihn; läuft schon
+  /// einer, bekommt er das Profil dazu.
   Future<void> start(String name) async {
-    if (_run != null) {
+    if (running.contains(name)) {
       return;
     }
-    runError = null;
-    log.clear();
-    _lastLine = null;
-    logOwner = name;
-    _logFile = null;
-    final open = openLog;
-    final dir = list?.dir;
-    if (open != null && dir != null) {
-      // Eine Datei, die sich nicht öffnen lässt, hält den Fisch nicht auf.
-      // Das Fenster sagt es, und das Protokoll steht dann nur dort.
-      try {
-        _logFile = open(dir, name);
-      } on Exception catch (e) {
-        log.add('${logStamp(_now())}  desk: cannot open the log file: $e');
+    // Zwei Klicks kurz nacheinander auf zwei Karten: der zweite wartet, bis
+    // der Fisch des ersten da ist, statt einen zweiten Fisch zu starten.
+    final pending = _spawning;
+    if (pending != null) {
+      await pending;
+      if (running.contains(name)) {
+        return;
       }
     }
+    _runErrors.remove(name);
+    _logs[name] = [];
+    _openLogFile(name);
+
+    final already = _run;
+    if (already != null) {
+      // Ob es geklappt hat, sagt der Fisch in seiner Ausgabe (siehe
+      // [_addLine]). Bis dahin gilt das Profil als laufend.
+      running.add(name);
+      already.say('start $name');
+      _changed();
+      return;
+    }
+
+    final spawned = Completer<void>();
+    _spawning = spawned.future;
     final FishRun run;
     try {
       run = await cli.run(name);
     } on CliException catch (e) {
-      runError = e.message;
+      _runErrors[name] = e.message;
       _changed();
       return;
+    } finally {
+      _spawning = null;
+      spawned.complete();
     }
+    _lastLine = null;
     _run = run;
-    runningName = name;
+    running.add(name);
     _lines = run.lines.listen(_addLine);
     _changed();
 
@@ -165,12 +193,17 @@ class DeskState extends ChangeNotifier {
         unawaited(_lines?.cancel());
         _lines = null;
         _run = null;
-        runningName = null;
+        final ended = running.toList();
+        running.clear();
+        _files.clear();
         if (!stoppedByUs) {
           // Der Fisch ist von selbst gegangen. Der Grund steht in seinen
-          // letzten Zeilen; die letzte wird hervorgehoben.
-          runError =
-              _lastLine ?? 'The fish ended with code $code and gave no reason.';
+          // letzten Zeilen; die letzte wird hervorgehoben, an jedem Profil,
+          // das dabei mit zu Ende ging.
+          final why = _lastLine ?? 'The fish ended with code $code and gave no reason.';
+          for (final name in ended) {
+            _runErrors[name] = why;
+          }
         }
         _changed();
         if (!_disposed) {
@@ -180,18 +213,45 @@ class DeskState extends ChangeNotifier {
     );
   }
 
-  bool _stopping = false;
-
-  void stop() {
-    final run = _run;
-    if (run == null) {
+  /// Öffnet die Protokolldatei eines Profils. Eine Datei, die sich nicht
+  /// öffnen lässt, hält den Fisch nicht auf. Das Fenster sagt es, und das
+  /// Protokoll steht dann nur dort.
+  void _openLogFile(String name) {
+    _files.remove(name);
+    final open = openLog;
+    final dir = list?.dir;
+    if (open == null || dir == null) {
       return;
     }
-    _stopping = true;
-    run.stop();
+    try {
+      _files[name] = open(dir, name);
+    } on Exception catch (e) {
+      _logs[name]!.add('${logStamp(_now())}  desk: cannot open the log file: $e');
+    }
   }
 
-  /// Beim Schließen des Fensters: den Fisch sofort beenden.
+  bool _stopping = false;
+
+  /// Hält ein Profil an. Ist es das letzte, das läuft, hält der Fisch an; die
+  /// anderen laufen sonst ungestört weiter.
+  void stop(String name) {
+    final run = _run;
+    if (run == null || !running.contains(name)) {
+      return;
+    }
+    if (running.length == 1) {
+      _stopping = true;
+      run.stop();
+      return;
+    }
+    running.remove(name);
+    _files.remove(name);
+    run.say('stop $name');
+    _changed();
+  }
+
+  /// Beim Schließen des Fensters: den Fisch sofort beenden, mit allen
+  /// Profilen.
   ///
   /// Benannte Grenze: der Fisch läuft nur, solange dieses Fenster offen ist.
   /// Wird das Fenster hart beendet (Task-Manager, Absturz), bekommt die
@@ -217,23 +277,43 @@ class DeskState extends ChangeNotifier {
 
   void _addLine(String line) {
     _lastLine = line;
-    final stamped = '${logStamp(_now())}  $line';
-    log.add(stamped);
-    final file = _logFile;
-    if (file != null) {
-      try {
-        file.write(stamped);
-      } on Exception catch (e) {
-        // Einmal sagen, dann nicht bei jeder Zeile wieder scheitern.
-        _logFile = null;
-        log.add('${logStamp(_now())}  desk: cannot write the log file: $e');
+    final about = profileOfLine(line);
+    if (about != null) {
+      final (name, said) = about;
+      if (said.startsWith(_cannotStart)) {
+        // Der laufende Fisch konnte dieses Profil nicht dazunehmen. Die
+        // anderen laufen weiter; der Grund steht an dieser Karte.
+        running.remove(name);
+        _runErrors[name] = said.substring(_cannotStart.length);
+      } else if (said == 'no longer serving') {
+        running.remove(name);
       }
     }
-    if (log.length > logLimit) {
-      log.removeRange(0, log.length - logLimit);
+    // Eine Zeile über ein Profil gehört zu diesem. Eine über den ganzen Fisch
+    // (verbunden, hält an) gehört zu allen, die gerade laufen.
+    final owners = about != null ? [about.$1] : running.toList();
+    final stamped = '${logStamp(_now())}  $line';
+    for (final name in owners) {
+      final log = _logs.putIfAbsent(name, () => []);
+      log.add(stamped);
+      final file = _files[name];
+      if (file != null) {
+        try {
+          file.write(stamped);
+        } on Exception catch (e) {
+          // Einmal sagen, dann nicht bei jeder Zeile wieder scheitern.
+          _files.remove(name);
+          log.add('${logStamp(_now())}  desk: cannot write the log file: $e');
+        }
+      }
+      if (log.length > logLimit) {
+        log.removeRange(0, log.length - logLimit);
+      }
     }
     _changed();
   }
+
+  static const _cannotStart = 'cannot start: ';
 
   void _changed() {
     if (!_disposed) {
@@ -248,6 +328,19 @@ class DeskState extends ChangeNotifier {
     _lines?.cancel();
     super.dispose();
   }
+}
+
+final _tagged = RegExp(r'^rusty-fish: \[([a-z0-9_-]+)\] (.*)$');
+
+/// Von welchem Profil eine Zeile des Fischs handelt, und was sie sagt:
+/// aus `rusty-fish: [probe] consent stored` wird (`probe`, `consent stored`).
+/// Eine Zeile über den ganzen Fisch nennt kein Profil.
+(String, String)? profileOfLine(String line) {
+  final match = _tagged.firstMatch(line);
+  if (match == null) {
+    return null;
+  }
+  return (match.group(1)!, match.group(2)!);
 }
 
 /// Der Zeitstempel einer Protokollzeile: „2026-11-21 03:02:52", in der Zeit,

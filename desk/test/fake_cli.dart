@@ -25,6 +25,12 @@ class FakeRun implements FishRun {
   @override
   Future<int> get exitCode => _exit.future;
 
+  /// Was die Maske dem laufenden Fisch gesagt hat, Zeile für Zeile.
+  final List<String> said = [];
+
+  @override
+  void say(String line) => said.add(line);
+
   @override
   void stop() {
     stopped = true;

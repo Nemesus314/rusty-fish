@@ -484,11 +484,16 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final doc = entry.doc;
-    final runningHere = state.runningName == entry.name;
-    final runningElsewhere = entry.running && !runningHere;
+    final runningHere = state.running.contains(entry.name);
+    // Ein Fisch, den dieses Fenster nicht gestartet hat, etwa aus einem
+    // Terminal. Er hält die Sperre des Bots: solange er läuft, kann dieses
+    // Fenster keinen eigenen starten.
+    final runningElsewhere = entry.running && !runningHere && !state.hasFish;
     final running = runningHere || runningElsewhere;
-    final ownsLog = state.logOwner == entry.name;
-    final runError = ownsLog ? state.runError : null;
+    final fishElsewhere =
+        !state.hasFish && (state.list?.profiles.any((other) => other.running) ?? false);
+    final log = state.logOf(entry.name);
+    final runError = state.runErrorOf(entry.name);
     final provider = doc == null ? null : state.providerOf(doc.provider);
     final keys = state.keys;
     // Fehlt der Schlüssel des Dienstes, würde der Start sicher scheitern. Das
@@ -624,18 +629,21 @@ class _ProfileCard extends StatelessWidget {
               children: [
                 if (doc != null && runningHere)
                   FilledButton.tonal(
-                    onPressed: state.stop,
+                    // Hält nur dieses Profil an. Die anderen laufen weiter.
+                    onPressed: () => state.stop(entry.name),
                     child: const Text('Stop'),
                   ),
                 if (doc != null && !running)
                   Tooltip(
                     message: keyMissing
                         ? 'Store the key for ${provider.label} first.'
-                        : state.runningName == null
-                        ? 'Start this profile'
-                        : 'Stop ${state.runningName} first. One bot can only run once.',
+                        : fishElsewhere
+                        ? 'A fish started outside this window is running. Stop it there first.'
+                        : state.hasFish
+                        ? 'Start this profile as well. The others keep running.'
+                        : 'Start this profile',
                     child: FilledButton(
-                      onPressed: state.runningName == null && !keyMissing
+                      onPressed: !fishElsewhere && !keyMissing
                           ? () => state.start(entry.name)
                           : null,
                       child: const Text('Start'),
@@ -654,8 +662,10 @@ class _ProfileCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (ownsLog && (runningHere || state.log.isNotEmpty))
-              _LogPanel(lines: state.log, path: state.logPath),
+            // Jede Karte zeigt, was ihr Profil betrifft, und was den ganzen
+            // Fisch betrifft, solange ihr Profil läuft.
+            if (runningHere || log.isNotEmpty)
+              _LogPanel(lines: log, path: state.logPathOf(entry.name)),
           ],
         ),
       ),

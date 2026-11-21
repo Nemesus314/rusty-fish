@@ -30,6 +30,11 @@ abstract class FishRun {
   /// Endet, wenn der Fisch endet, auch ohne dass ihn jemand anhält.
   Future<int> get exitCode;
 
+  /// Sagt dem laufenden Fisch eine Zeile: `start NAME` nimmt ein weiteres
+  /// Profil dazu, `stop NAME` nimmt eines weg. Die anderen laufen weiter.
+  void say(String line);
+
+  /// Hält den ganzen Fisch an.
   void stop();
 }
 
@@ -261,18 +266,29 @@ class _ProcessRun implements FishRun {
   @override
   Future<int> get exitCode => _process.exitCode;
 
+  /// Was dem Fisch gesagt wird, geht nacheinander hinaus: die Eingabe nimmt
+  /// keine neue Zeile an, solange die vorige noch unterwegs ist.
+  Future<void> _sending = Future.value();
+
+  @override
+  void say(String line) {
+    _sending = _sending.then((_) async {
+      try {
+        _process.stdin.writeln(line);
+        await _process.stdin.flush();
+      } on Object {
+        // Die Eingabe ist schon zu: der Fisch ist am Ende oder schon fort.
+      }
+    });
+  }
+
   @override
   void stop() {
     // Erst bitten, dann beenden. Gemessen von Nemesus am 20.11.2026: nach
     // einem harten Ende stand der Bot in Discord noch eine Weile als online
     // da. Auf die Zeile „stop" meldet sich der Fisch bei Discord ab und endet
     // von selbst. Tut er das nicht binnen vier Sekunden, wird er beendet.
-    try {
-      _process.stdin.writeln('stop');
-      _process.stdin.flush().catchError((Object _) {});
-    } on Object {
-      // Die Eingabe ist schon zu. Dann bleibt nur das Beenden unten.
-    }
+    say('stop');
     Timer(const Duration(seconds: 4), _process.kill);
   }
 }
