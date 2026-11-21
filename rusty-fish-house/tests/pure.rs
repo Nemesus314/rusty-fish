@@ -205,7 +205,7 @@ fn a_state_file_from_before_the_tally_still_opens() {
     let path = temp_file("old");
     std::fs::write(&path, r#"{ "consented": ["7"], "last_seen": { "111": 50 } }"#).unwrap();
     let store = Store::open(&path).unwrap();
-    assert!(store.has_consented("7"));
+    assert!(store.has_consented("7", "ai.example"));
     assert_eq!(store.seen("111"), Some(50));
     assert_eq!(store.tally(), Tally::default());
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -222,16 +222,16 @@ fn temp_file(name: &str) -> std::path::PathBuf {
 fn the_store_survives_a_restart() {
     let path = temp_file("restart");
     let mut store = Store::open(&path).unwrap();
-    assert!(!store.has_consented("7"));
+    assert!(!store.has_consented("7", "ai.example"));
     assert_eq!(store.seen("111"), None);
-    store.consent("7");
+    store.consent("7", "ai.example");
     store.saw("111", 50);
     store.saw("111", 40); // nie rückwärts
     store.save().unwrap();
 
     let again = Store::open(&path).unwrap();
-    assert!(again.has_consented("7"));
-    assert!(!again.has_consented("8"));
+    assert!(again.has_consented("7", "ai.example"));
+    assert!(!again.has_consented("8", "ai.example"));
     assert_eq!(again.seen("111"), Some(50));
     let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }
@@ -248,7 +248,7 @@ fn a_damaged_store_fails_loudly_instead_of_forgetting() {
 fn the_store_holds_no_message_text() {
     let path = temp_file("notext");
     let mut store = Store::open(&path).unwrap();
-    store.consent("7");
+    store.consent("7", "ai.example");
     store.saw("111", 50);
     store.save().unwrap();
     let raw = std::fs::read_to_string(&path).unwrap();

@@ -39,6 +39,17 @@ pub struct Store {
     /// Programm, das unbekannte Felder ablehnt, liest sie weiter.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     invited_told: BTreeSet<String>,
+    /// Welchem KI-Dienst jemand zugestimmt hat, nach Kennung: der Name des
+    /// Dienstes, so wie die Bitte um Zustimmung ihn nannte.
+    ///
+    /// Seit dem 21.11.2026. Die Bitte sagt, wohin die Sätze gehen; wechselt
+    /// der Gastgeber den Dienst, gilt die Zustimmung dem neuen nicht.
+    ///
+    /// Wer in `consented` steht, aber nicht hier, hat zugestimmt, bevor der
+    /// Dienst gemerkt wurde (siehe [`Store::settle_service`]). Leer wird das
+    /// Feld nicht geschrieben, aus demselben Grund wie `invited_told`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    consented_for: BTreeMap<String, String>,
 }
 
 impl Store {
@@ -57,12 +68,33 @@ impl Store {
         Ok(store)
     }
 
-    pub fn has_consented(&self, user: &str) -> bool {
+    /// Hat dieser Mensch zugestimmt, dass dieser KI-Dienst seine Sätze liest?
+    ///
+    /// Eine Zustimmung, zu der kein Dienst gemerkt ist, gilt: sie stammt von
+    /// vor dem 21.11.2026.
+    pub fn has_consented(&self, user: &str, service: &str) -> bool {
         self.consented.contains(user)
+            && self.consented_for.get(user).is_none_or(|agreed| agreed == service)
     }
 
-    pub fn consent(&mut self, user: &str) {
+    /// Dieser Mensch stimmt diesem KI-Dienst zu. Eine frühere Zustimmung zu
+    /// einem anderen Dienst ist damit ersetzt: gemerkt wird ein Dienst je Mensch.
+    pub fn consent(&mut self, user: &str, service: &str) {
         self.consented.insert(user.to_owned());
+        self.consented_for.insert(user.to_owned(), service.to_owned());
+    }
+
+    /// Trägt zu einer Zustimmung ohne gemerkten Dienst den Dienst nach, der
+    /// jetzt läuft. Wer nicht zugestimmt hat oder schon einen Dienst trägt,
+    /// bleibt, wie er ist.
+    ///
+    /// Benannte Grenze: welchem Dienst so jemand damals wirklich zugestimmt
+    /// hat, weiß der Fisch nicht. Er nimmt den ersten, mit dem er diesen
+    /// Menschen nach dem 21.11.2026 schreiben sieht.
+    pub fn settle_service(&mut self, user: &str, service: &str) {
+        if self.consented.contains(user) && !self.consented_for.contains_key(user) {
+            self.consented_for.insert(user.to_owned(), service.to_owned());
+        }
     }
 
     /// Letzte verarbeitete Nachricht dieses Kanals.

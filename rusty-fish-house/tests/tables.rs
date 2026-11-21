@@ -472,7 +472,7 @@ fn who_was_told_survives_a_restart() {
     std::fs::write(&path, r#"{"consented": ["5"], "last_seen": {}}"#).unwrap();
     let old = Store::open(&path).unwrap();
     assert!(old.told().is_empty());
-    assert!(old.has_consented("5"));
+    assert!(old.has_consented("5", "ai.example"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -525,7 +525,7 @@ fn the_state_remembers_only_ids_and_stays_as_it_was_while_nobody_is_invited() {
     // Solange niemandem etwas mitgeteilt wurde, steht das Feld nicht in der
     // Datei: ein Programm von vor dem 20.11.2026 liest sie weiter.
     let mut store = Store::open(&path).unwrap();
-    store.consent("5");
+    store.consent("5", "ai.example");
     store.save().unwrap();
     let raw = std::fs::read_to_string(&path).unwrap();
     assert!(!raw.contains("invited_told"), "got {raw}");

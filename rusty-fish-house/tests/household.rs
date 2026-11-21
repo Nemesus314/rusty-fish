@@ -158,7 +158,7 @@ fn a_message_that_was_handled_is_not_handled_again() {
     assert_eq!(fake.calls(), 1, "a second handling would be paid for a second time");
     assert_eq!(house.seen("111"), Some(5));
     // Die Lesemarke gilt je Kanal.
-    house.consent("7").unwrap();
+    house.consent("7", SERVICE).unwrap();
     assert!(handle(&mut house, &fake, &config, &from_guest("раз", 3)).is_some());
 }
 
@@ -228,7 +228,7 @@ fn consent_is_stored_at_once_and_holds_after_a_restart() {
     let fake = Fake::new();
 
     let mut house = Household::open(&config, &path).unwrap();
-    house.consent("7").unwrap();
+    house.consent("7", SERVICE).unwrap();
     let steps = handle(&mut house, &fake, &config, &from_guest("Привет", 1)).unwrap();
     assert_eq!(steps.deliveries[0].mark, Mark::Translated);
     assert_eq!(steps.ask_consent, None);
@@ -344,4 +344,50 @@ fn an_invitation_stays_due_until_it_has_reached_the_guest() {
     drop(house);
     let house = Household::open(&config, &path).unwrap();
     assert_eq!(house.invitations(&config), None);
+}
+
+// --- Die Zustimmung gilt einem KI-Dienst ---------------------------------------
+
+#[test]
+fn consent_is_given_to_one_ai_service_and_a_new_one_asks_again() {
+    let config = settings("Russian", 100_000);
+    let mut house = Household::open(&config, &state_file("service")).unwrap();
+    let fake = Fake::new();
+    house.consent("7", SERVICE).unwrap();
+    assert!(handle(&mut house, &fake, &config, &from_guest("раз", 1)).unwrap().ask_consent.is_none());
+    assert_eq!(fake.calls(), 1);
+
+    // Der Gastgeber hat den Dienst gewechselt. Dem neuen hat der Gast nie zugestimmt.
+    let other = Terms { config: &config, service: "other.example", today: TODAY };
+    let steps = now(house.message(&fake, &other, &from_guest("два", 2))).unwrap();
+    assert_eq!(steps.deliveries[0].mark, Mark::Untranslated(Reason::NoConsent));
+    assert_eq!(steps.ask_consent, Some(consent_text_in(Tongue::Russian, "other.example")));
+    assert_eq!(fake.calls(), 1, "no word may reach a service the guest did not agree to");
+
+    // Nach der Zustimmung zum neuen Dienst geht es weiter.
+    house.consent("7", "other.example").unwrap();
+    let steps = now(house.message(&fake, &other, &from_guest("три", 3))).unwrap();
+    assert_eq!(steps.deliveries[0].mark, Mark::Translated);
+}
+
+#[test]
+fn a_consent_from_before_services_were_noted_counts_for_the_service_then_in_use() {
+    let config = settings("Russian", 100_000);
+    let path = state_file("old-consent");
+    // So sah die Datei bis zum 21.11.2026 aus: wer, aber nicht wem.
+    std::fs::write(&path, r#"{"consented": ["7"], "last_seen": {}}"#).unwrap();
+    let fake = Fake::new();
+
+    let mut house = Household::open(&config, &path).unwrap();
+    let steps = handle(&mut house, &fake, &config, &from_guest("раз", 1)).unwrap();
+    assert_eq!(steps.deliveries[0].mark, Mark::Translated, "nobody is asked a second time");
+    house.save().unwrap();
+    drop(house);
+
+    // Von da an ist der Dienst gemerkt, und ein Wechsel fragt neu.
+    let mut house = Household::open(&config, &path).unwrap();
+    let other = Terms { config: &config, service: "other.example", today: TODAY };
+    let steps = now(house.message(&fake, &other, &from_guest("два", 2))).unwrap();
+    assert_eq!(steps.deliveries[0].mark, Mark::Untranslated(Reason::NoConsent));
+    assert!(steps.ask_consent.is_some());
 }

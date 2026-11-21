@@ -204,7 +204,8 @@ where
         }
 
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
-        let saved = self.inner.lock().await.house.consent(&click.user.id.to_string());
+        let user = click.user.id.to_string();
+        let saved = self.inner.lock().await.house.consent(&user, &self.service);
         let reply = match saved {
             Ok(()) => {
                 eprintln!("rusty-fish: consent stored");

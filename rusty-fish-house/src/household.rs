@@ -136,7 +136,12 @@ impl Household {
 
         // Wer den Fisch startet, hat zugestimmt.
         let is_host = msg.author == config.host;
-        let consented = is_host || self.store.has_consented(msg.author);
+        // Die Zustimmung gilt dem KI-Dienst, den die Bitte genannt hat. Nach
+        // einem Wechsel des Dienstes wird neu gefragt.
+        let consented = is_host || self.store.has_consented(msg.author, terms.service);
+        if consented {
+            self.store.settle_service(msg.author, terms.service);
+        }
         let names: Vec<&str> = config.ai_names.iter().map(String::as_str).collect();
         let incoming = Incoming {
             channel: msg.channel,
@@ -202,10 +207,15 @@ impl Household {
         self.store.seen(channel)
     }
 
-    /// Dieser Mensch hat zugestimmt, für sich selbst und für niemanden sonst.
-    /// Wird sofort gespeichert.
-    pub fn consent(&mut self, user: &str) -> Result<(), String> {
-        self.store.consent(user);
+    /// Dieser Mensch hat zugestimmt: für sich selbst und für niemanden sonst,
+    /// und dem KI-Dienst, den die Bitte genannt hat, keinem anderen. Wird
+    /// sofort gespeichert.
+    ///
+    /// Nemesus am 19.11.2026: wer zustimmt, soll wissen, wohin seine Sätze
+    /// gehen. Bis zum 21.11.2026 galt eine Zustimmung trotzdem weiter, wenn
+    /// der Gastgeber danach den Dienst wechselte.
+    pub fn consent(&mut self, user: &str, service: &str) -> Result<(), String> {
+        self.store.consent(user, service);
         self.store.save()
     }
 

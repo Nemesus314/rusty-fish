@@ -58,6 +58,8 @@ account there.
 - The host sets a daily budget. When it is used up, messages still arrive,
   untranslated and marked. Each guest has a daily number of questions to the
   AI (ten unless the host changed it).
+- Agreement is given to one AI service, the one the request names. If the host
+  switches to another service, the fish asks again before anything goes there.
 - Agreement cannot yet be withdrawn in the chat; ask the host.
 
 ## What you need to run your own fish
