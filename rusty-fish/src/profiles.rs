@@ -139,6 +139,15 @@ impl Folder {
 
     /// Alle Profile, als das JSON, das `profile list --json` ausgibt.
     pub fn list(&self) -> Result<Value, String> {
+        let names = self.names()?;
+        let running = lock::running(&self.dir, BOT).map(|r| r.profiles).unwrap_or_default();
+        let profiles: Vec<Value> =
+            names.iter().map(|name| self.entry(name, running.contains(name))).collect();
+        Ok(json!({ "dir": self.dir.to_string_lossy(), "profiles": profiles }))
+    }
+
+    /// Die Namen aller gespeicherten Profile, sortiert.
+    pub fn names(&self) -> Result<Vec<String>, String> {
         let mut names = Vec::new();
         match std::fs::read_dir(&self.dir) {
             Ok(entries) => {
@@ -158,11 +167,7 @@ impl Folder {
             Err(e) => return Err(format!("cannot read {}: {e}", self.dir.display())),
         }
         names.sort();
-
-        let running = lock::running(&self.dir, BOT).map(|r| r.profiles).unwrap_or_default();
-        let profiles: Vec<Value> =
-            names.iter().map(|name| self.entry(name, running.contains(name))).collect();
-        Ok(json!({ "dir": self.dir.to_string_lossy(), "profiles": profiles }))
+        Ok(names)
     }
 
     /// Ein Eintrag der Liste. Ein kaputtes Profil bricht die Liste nicht ab:

@@ -108,6 +108,10 @@ pub struct Profile<M> {
 pub enum Command<M> {
     /// Ein weiteres Profil bedienen, ohne die laufenden zu stören.
     Start(Box<Profile<M>>),
+    /// Ein Profil neu aufnehmen, etwa nachdem es geändert wurde: das laufende
+    /// gleichen Namens geht, dieses kommt. Der Fisch hält dabei nie an, auch
+    /// wenn es sein einziges Profil ist.
+    Restart(Box<Profile<M>>),
     /// Ein Profil nicht mehr bedienen. War es das letzte, hält der Fisch an.
     Stop(String),
     /// Anhalten.
@@ -162,9 +166,17 @@ struct Handler<M>(Arc<Fish<M>>);
 /// Profile es bedient, weiß das Programm, nicht eine seiner Türen. Endet der
 /// Kanal, ohne dass jemand das Anhalten verlangt hat, läuft der Fisch weiter:
 /// als Dienst ohne Terminal hat er niemanden, der ihm etwas sagt.
+///
+/// `lenient` entscheidet, was geschieht, wenn eines der ersten Profile nicht
+/// aufgenommen werden kann. Streng (`false`): der Fisch startet nicht, denn
+/// der Aufrufer hat genau diese Profile verlangt. Nachsichtig (`true`): das
+/// Profil bleibt weg und sagt, warum, und die anderen laufen; so startet
+/// „alle Profile". Kann keines aufgenommen werden, startet der Fisch in
+/// beiden Fällen nicht.
 pub async fn run<M>(
     token: &str,
     first: Vec<Profile<M>>,
+    lenient: bool,
     mut commands: UnboundedReceiver<Command<M>>,
     on_change: OnChange,
 ) -> Result<(), String>
@@ -179,8 +191,17 @@ where
     });
     // Erst alles prüfen, dann verbinden: passt ein Profil nicht, scheitert der
     // Fisch, bevor er sich bei Discord zeigt.
+    let mut any = false;
     for profile in first {
-        fish.start(None, profile).await?;
+        let label = label_of(profile.name.as_deref());
+        match fish.start(None, profile).await {
+            Ok(()) => any = true,
+            Err(why) if lenient => eprintln!("rusty-fish: {label}cannot start: {why}"),
+            Err(why) => return Err(why),
+        }
+    }
+    if !any {
+        return Err("no profile could be started".to_owned());
     }
 
     // MESSAGE_CONTENT muss im Entwicklerportal von Discord eingeschaltet sein,
@@ -205,6 +226,12 @@ where
                 Some(Command::Start(profile)) => {
                     let label = label_of(profile.name.as_deref());
                     if let Err(why) = fish.start(Some(&http), *profile).await {
+                        eprintln!("rusty-fish: {label}cannot start: {why}");
+                    }
+                }
+                Some(Command::Restart(profile)) => {
+                    let label = label_of(profile.name.as_deref());
+                    if let Err(why) = fish.restart(&http, *profile).await {
                         eprintln!("rusty-fish: {label}cannot start: {why}");
                     }
                 }
@@ -281,6 +308,26 @@ where
             served.catch_up(http, self.me.load(Ordering::Relaxed)).await;
         }
         Ok(())
+    }
+
+    /// Nimmt ein Profil neu auf: das laufende gleichen Namens geht, dieses
+    /// kommt, mit frisch gelesenen Einstellungen und frisch geöffnetem
+    /// Zustand. Was das alte gespeichert hat, findet das neue vor.
+    ///
+    /// Lässt sich das neue nicht aufnehmen, etwa weil es nach der Änderung
+    /// einen Kanal mit einem anderen laufenden Profil teilt, läuft danach
+    /// keines von beiden: das alte gälte nicht mehr, und das neue darf nicht.
+    async fn restart(&self, http: &Http, profile: Profile<M>) -> Result<(), String> {
+        if let Some(name) = profile.name.as_deref() {
+            let mut list = self.served.write().await;
+            list.retain(|served| served.name.as_deref() != Some(name));
+        }
+        let started = self.start(Some(http), profile).await;
+        if started.is_err() {
+            let list = self.served.read().await;
+            self.told(&list);
+        }
+        started
     }
 
     /// Nimmt ein Profil aus dem Lauf. Liefert, wie viele noch laufen.

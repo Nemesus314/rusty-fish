@@ -126,7 +126,16 @@ class _OverviewPageState extends State<OverviewPage> {
       ),
     );
     if (saved == true) {
+      final before = _names.toSet();
       await _state.refresh();
+      // Ist der Fisch an, nimmt er das gespeicherte Profil gleich neu auf:
+      // ein geändertes wird neu geladen, ein neues kommt dazu. Die anderen
+      // laufen dabei ungestört weiter.
+      if (isNew) {
+        _names.toSet().difference(before).forEach(_state.saved);
+      } else {
+        _state.saved(doc.name);
+      }
     }
   }
 
@@ -339,7 +348,9 @@ class _OverviewPageState extends State<OverviewPage> {
                         ],
                       ),
                     ),
-                    FilledButton.icon(
+                    _FishSwitch(state: _state),
+                    const SizedBox(width: 12),
+                    FilledButton.tonalIcon(
                       onPressed: () => _openEditor(ProfileDoc.blank(), isNew: true),
                       icon: const Icon(Icons.add),
                       label: const Text('New profile'),
@@ -347,6 +358,13 @@ class _OverviewPageState extends State<OverviewPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
+                // Was den ganzen Fisch betrifft, steht hier und nicht an
+                // einer Karte: warum er nicht anging oder von selbst ausging.
+                if (_state.fishError case final why?)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _ErrorBox(text: why),
+                  ),
                 if (loadError != null) _ErrorBox(text: loadError),
                 // Ein älteres Programm kennt die Auswahl des Dienstes noch
                 // nicht. Die Maske bleibt benutzbar und sagt, was das Programm
@@ -485,13 +503,12 @@ class _ProfileCard extends StatelessWidget {
     final theme = Theme.of(context);
     final doc = entry.doc;
     final runningHere = state.running.contains(entry.name);
+    final starting = state.starting(entry.name);
     // Ein Fisch, den dieses Fenster nicht gestartet hat, etwa aus einem
     // Terminal. Er hält die Sperre des Bots: solange er läuft, kann dieses
     // Fenster keinen eigenen starten.
-    final runningElsewhere = entry.running && !runningHere && !state.hasFish;
+    final runningElsewhere = entry.running && !runningHere && !state.on;
     final running = runningHere || runningElsewhere;
-    final fishElsewhere =
-        !state.hasFish && (state.list?.profiles.any((other) => other.running) ?? false);
     final log = state.logOf(entry.name);
     final runError = state.runErrorOf(entry.name);
     final provider = doc == null ? null : state.providerOf(doc.provider);
@@ -516,7 +533,11 @@ class _ProfileCard extends StatelessWidget {
                   child: Text(entry.name, style: theme.textTheme.titleLarge),
                 ),
                 _StatusLabel(
-                  text: !entry.ok ? 'Invalid' : (running ? 'Running' : 'Stopped'),
+                  text: !entry.ok
+                      ? 'Invalid'
+                      : starting
+                      ? 'Starting'
+                      : (running ? 'Running' : 'Stopped'),
                   kind: !entry.ok
                       ? _StatusKind.invalid
                       : (running ? _StatusKind.running : _StatusKind.stopped),
@@ -627,28 +648,9 @@ class _ProfileCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (doc != null && runningHere)
-                  FilledButton.tonal(
-                    // Hält nur dieses Profil an. Die anderen laufen weiter.
-                    onPressed: () => state.stop(entry.name),
-                    child: const Text('Stop'),
-                  ),
-                if (doc != null && !running)
-                  Tooltip(
-                    message: keyMissing
-                        ? 'Store the key for ${provider.label} first.'
-                        : fishElsewhere
-                        ? 'A fish started outside this window is running. Stop it there first.'
-                        : state.hasFish
-                        ? 'Start this profile as well. The others keep running.'
-                        : 'Start this profile',
-                    child: FilledButton(
-                      onPressed: !fishElsewhere && !keyMissing
-                          ? () => state.start(entry.name)
-                          : null,
-                      child: const Text('Start'),
-                    ),
-                  ),
+                // Kein Start und kein Stop je Profil: der Fisch hat einen
+                // Schalter für alle, oben im Fenster. Ein Profil, das
+                // gespeichert wird, während er an ist, nimmt er neu auf.
                 if (doc != null) ...[
                   OutlinedButton(onPressed: onEdit, child: const Text('Edit')),
                   OutlinedButton(
@@ -656,15 +658,23 @@ class _ProfileCard extends StatelessWidget {
                     child: const Text('Duplicate'),
                   ),
                 ],
-                OutlinedButton(
-                  onPressed: running ? null : onDelete,
-                  child: const Text('Delete'),
+                Tooltip(
+                  // Einem laufenden Fisch die Dateien wegzunehmen hieße, dass
+                  // er seinen Zustand an einen Ort schreibt, den es nicht
+                  // mehr gibt.
+                  message: state.on || running
+                      ? 'Switch the fish off to delete a profile.'
+                      : 'Move this profile to the trash folder',
+                  child: OutlinedButton(
+                    onPressed: state.on || running ? null : onDelete,
+                    child: const Text('Delete'),
+                  ),
                 ),
               ],
             ),
             // Jede Karte zeigt, was ihr Profil betrifft, und was den ganzen
             // Fisch betrifft, solange ihr Profil läuft.
-            if (runningHere || log.isNotEmpty)
+            if (runningHere || starting || log.isNotEmpty)
               _LogPanel(lines: log, path: state.logPathOf(entry.name)),
           ],
         ),
@@ -726,6 +736,53 @@ class _StatusLabel extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Text(text, style: TextStyle(color: foreground)),
+    );
+  }
+}
+
+/// Der eine Schalter des Fischs: an oder aus, für alle Profile zugleich.
+///
+/// Entschieden von Nemesus am 21.11.2026. Ein Bot hat in Discord einen
+/// einzigen Zustand für alle Server. Mit einem Schalter je Profil sah er auch
+/// dort grün aus, wo gerade nichts übersetzt wurde. Mit einem Schalter für
+/// alle sagt der grüne Punkt wieder, was er zeigt.
+class _FishSwitch extends StatelessWidget {
+  const _FishSwitch({required this.state});
+
+  final DeskState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final profiles = state.list?.profiles ?? const <ProfileEntry>[];
+    final startable = profiles.where((entry) => entry.ok).length;
+    // Ein Fisch, den dieses Fenster nicht gestartet hat, etwa aus einem
+    // Terminal. Er hält die Sperre des Bots.
+    final elsewhere = !state.on && profiles.any((entry) => entry.running);
+
+    if (state.on) {
+      final serving = state.running.length;
+      return Tooltip(
+        message: 'Switches the fish off for all profiles. The bot goes offline.',
+        child: FilledButton.tonalIcon(
+          key: const ValueKey('fish-switch'),
+          onPressed: state.switchOff,
+          icon: const Icon(Icons.power_settings_new),
+          label: Text('Switch off · $serving of ${profiles.length} running'),
+        ),
+      );
+    }
+    return Tooltip(
+      message: elsewhere
+          ? 'A fish started outside this window is running. Stop it there first.'
+          : startable == 0
+          ? 'There is no profile to start yet.'
+          : 'Switches the fish on for all profiles.',
+      child: FilledButton.icon(
+        key: const ValueKey('fish-switch'),
+        onPressed: elsewhere || startable == 0 ? null : state.switchOn,
+        icon: const Icon(Icons.power_settings_new),
+        label: const Text('Switch on'),
+      ),
     );
   }
 }

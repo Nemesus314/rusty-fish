@@ -17,6 +17,10 @@ pub enum Input {
     Start(String),
     /// `stop NAME`: dieses Profil nicht mehr bedienen.
     Stop(String),
+    /// `restart NAME`: dieses Profil neu laden, etwa nachdem es geändert
+    /// wurde. Anders als `stop` und `start` hintereinander hält das den Fisch
+    /// auch dann nicht an, wenn es sein einziges Profil ist.
+    Restart(String),
 }
 
 /// Hört zu, was dem Fisch gesagt wird: Zeilen auf der Standardeingabe (so
@@ -71,6 +75,7 @@ pub fn parse(line: &str) -> Option<Input> {
         ("stop", None) => Some(Input::StopAll),
         ("stop", Some(name)) => Some(Input::Stop(name.to_owned())),
         ("start", Some(name)) => Some(Input::Start(name.to_owned())),
+        ("restart", Some(name)) => Some(Input::Restart(name.to_owned())),
         _ => None,
     }
 }
@@ -94,6 +99,8 @@ mod tests {
         assert_eq!(parse("stop probe"), Some(Input::Stop("probe".to_owned())));
         // Der Name bleibt, wie er geschrieben ist.
         assert_eq!(parse("stop Probe"), Some(Input::Stop("Probe".to_owned())));
+        // Ein geändertes Profil wird neu geladen, ohne den Fisch anzuhalten.
+        assert_eq!(parse("restart probe"), Some(Input::Restart("probe".to_owned())));
     }
 
     #[test]
@@ -102,6 +109,7 @@ mod tests {
         assert_eq!(parse("start"), None, "start needs a name");
         assert_eq!(parse("stop it now"), None);
         assert_eq!(parse("nonstop"), None);
-        assert_eq!(parse("restart probe"), None);
+        assert_eq!(parse("restart"), None, "restart needs a name");
+        assert_eq!(parse("reload probe"), None);
     }
 }

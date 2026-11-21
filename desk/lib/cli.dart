@@ -66,7 +66,9 @@ abstract class FishCli {
   /// braucht sie nur gegenüber einem älteren Programm, das keine Dienste nennt.
   Future<List<String>> models({String? provider, String? baseUrl});
 
-  Future<FishRun> run(String name);
+  /// Startet den Fisch mit allen gespeicherten Profilen. Eines, das sich
+  /// nicht starten lässt, sagt in der Ausgabe, warum, und bleibt weg.
+  Future<FishRun> runAll();
 
   /// Die Beschreibung des Programms, die man einer KI zum Erklären gibt. Sie
   /// kommt aus dem Programm selbst, damit sie zu dessen Stand gehört. Ein
@@ -157,10 +159,10 @@ class ProcessFishCli implements FishCli {
   }
 
   @override
-  Future<FishRun> run(String name) async {
+  Future<FishRun> runAll() async {
     final Process process;
     try {
-      process = await Process.start(exe, ['run', '--profile', name]);
+      process = await Process.start(exe, ['run', '--all']);
     } on ProcessException catch (e) {
       throw CliException('Cannot start rusty-fish: ${e.message}');
     }

@@ -102,6 +102,11 @@ enum Command {
         /// standard input add a profile, take one away, or stop it.
         #[arg(long)]
         profile: Vec<String>,
+        /// Serve every saved profile. A profile that cannot be started says
+        /// why and is left out; the others run. The line `restart NAME` on
+        /// the standard input loads a profile again after it was changed.
+        #[arg(long, conflicts_with_all = ["profile", "config"])]
+        all: bool,
     },
     /// Print a description of this program for an AI assistant to explain the setup
     Guide,
@@ -346,7 +351,7 @@ async fn run(command: Command) -> Result<(), String> {
             print!("{}", guide());
             Ok(())
         }
-        Command::Run { config, profile } => {
+        Command::Run { config, profile, all } => {
             // Wo die Einstellungen und ihr Zustand liegen: im Profilordner oder,
             // wie von Anfang an, in einer frei gewählten Datei mit dem Zustand
             // daneben.
@@ -354,7 +359,28 @@ async fn run(command: Command) -> Result<(), String> {
             // Erst alles prüfen, dann verbinden: fehlt etwas, scheitert der
             // Fisch, bevor er sich bei Discord zeigt.
             let mut first = Vec::new();
-            if profile.is_empty() {
+            // Welche Profile dieser Fisch von Anfang an bedient, mit Namen.
+            let mut profile = profile;
+            if all {
+                // Alle gespeicherten Profile. Eines, das sich nicht laden
+                // lässt, sagt warum und bleibt weg; die anderen laufen.
+                //
+                // Nemesus am 21.11.2026: „Stattdessen bauen wir nur einen
+                // Button. An und Aus. Schaltet alle Profile ein oder aus."
+                let folder = folder.clone()?;
+                for name in folder.names()? {
+                    match load_profile(&folder, &name) {
+                        Ok(loaded) => {
+                            first.push(loaded);
+                            profile.push(name);
+                        }
+                        Err(why) => eprintln!("rusty-fish: [{name}] cannot start: {why}"),
+                    }
+                }
+                if first.is_empty() {
+                    return Err("there is no profile that can be started".to_owned());
+                }
+            } else if profile.is_empty() {
                 // Wie von Anfang an: eine frei gewählte Datei mit dem Zustand
                 // daneben.
                 let path = config.unwrap_or_else(|| PathBuf::from("rusty-fish.toml"));
@@ -419,6 +445,15 @@ async fn run(command: Command) -> Result<(), String> {
                                 continue;
                             }
                         },
+                        // Lässt sich das geänderte Profil nicht laden, läuft
+                        // das bisherige weiter: lieber der alte Stand als keiner.
+                        Input::Restart(name) => match folder.clone().and_then(|f| load_profile(&f, &name)) {
+                            Ok(profile) => DoorCommand::Restart(Box::new(profile)),
+                            Err(why) => {
+                                eprintln!("rusty-fish: [{name}] cannot restart: {why}");
+                                continue;
+                            }
+                        },
                     };
                     if to_door.send(command).is_err() {
                         break;
@@ -430,7 +465,7 @@ async fn run(command: Command) -> Result<(), String> {
                 drop(to_door);
             });
 
-            rusty_fish_discord::door::run(token.expose(), first, commands, on_change).await
+            rusty_fish_discord::door::run(token.expose(), first, all, commands, on_change).await
         }
     }
 }

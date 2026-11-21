@@ -325,9 +325,15 @@ void main() {
     await cli.deleteProfile(name);
   }, skip: skip);
 
-  test('a run that cannot start says why and ends', () async {
+  test('a fish with no profile to serve says why and ends', () async {
     final cli = ProcessFishCli(exe!);
-    final run = await cli.run('no-such-profile');
+    // Nur in einem leeren Ordner: mit einem gültigen Profil würde sich der
+    // Fisch mit dem echten Bot bei Discord anmelden. Das darf ein Test nie.
+    if ((await cli.listProfiles()).profiles.isNotEmpty) {
+      markTestSkipped('the throwaway folder is not empty; not starting a real fish');
+      return;
+    }
+    final run = await cli.runAll();
     final lines = <String>[];
     final listening = run.lines.listen(lines.add);
     final code = await run.exitCode.timeout(const Duration(seconds: 20));

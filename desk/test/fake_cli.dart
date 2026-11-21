@@ -168,14 +168,17 @@ class FakeCli implements FishCli {
   }
 
   @override
-  Future<FishRun> run(String name) async {
+  Future<FishRun> runAll() async {
     final error = runError;
     if (error != null) {
       throw CliException(error);
     }
-    started.add(name);
+    runs++;
     return lastRun = FakeRun();
   }
+
+  /// Wie oft die Maske einen Fisch gestartet hat.
+  int runs = 0;
 
   /// Gesetzt: das Programm kennt den Aufruf `guide` nicht (älterer Stand).
   String? guideError;

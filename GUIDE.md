@@ -127,13 +127,16 @@ account there.
      invite them. The name is only your label, so you can see whose table is
      whose; it stays on your PC, and neither Discord nor the AI gets it. The
      Discord user ID can follow later.
-3. Save. The profile appears as a card. Press "Start" on it; the bot goes
-   online in Discord. "Stop", or closing the window, takes it offline.
+3. Save. The profile appears as a card. Press "Switch on" at the top of the
+   window: the fish starts for all profiles and the bot goes online in
+   Discord. "Switch off", or closing the window, takes it offline. A profile
+   that is saved while the fish is on is taken up at once.
 
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
-`rusty-fish run --profile NAME`. Give `--profile` several times to serve
-several profiles at once. `rusty-fish --help` lists everything.
+`rusty-fish run --all`, which serves every profile as the window does.
+`rusty-fish run --profile NAME` serves only that one; give `--profile` several
+times for several. `rusty-fish --help` lists everything.
 
 ## Limits
 
@@ -154,14 +157,16 @@ several profiles at once. `rusty-fish --help` lists everything.
   fish is not running is caught up when it starts again.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.
-- Several profiles can run at the same time over one bot: press "Start" on
-  each card. Each can be stopped on its own. A channel can belong to only one
-  running profile; a second profile that names the same channel is not
-  started and says why.
-- The green dot of the bot in Discord means that the fish is running, not
-  that it serves this server. Discord shows a bot as online everywhere at
-  once. If the profile for a server is stopped while another one runs, the
-  bot looks online there but translates nothing; what is written meanwhile
-  is caught up when that profile is started again.
+- All profiles run together over one bot. The window has one switch for the
+  fish, not one per profile. A channel can belong to only one profile; a
+  second profile that names the same channel is not started and says why on
+  its card, while the others run.
+- Discord shows a bot as online on all its servers at once. That is why
+  there is one switch: when the bot is green, the fish is on for every
+  profile, and the dot means what it shows. Two exceptions: a profile that
+  could not be started says so on its card, and on the command line with
+  `--profile` the fish serves only the profiles named while the bot looks
+  online everywhere. What is written where the fish is not serving is caught
+  up when it serves that profile again.
 - When the daily budget is used up, the fish asks the host in a direct message
   whether to raise it for the day.

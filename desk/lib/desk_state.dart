@@ -53,17 +53,30 @@ class DeskState extends ChangeNotifier {
     return Provider(id: id, label: id, baseUrl: null, needsKey: true);
   }
 
-  /// Die Profile, die dieses Fenster gestartet hat und die gerade laufen.
+  /// Ob der Fisch an ist: ob dieses Fenster ihn gestartet hat und er läuft.
   ///
-  /// Bis zum 21.11.2026 höchstens eines. Nemesus an dem Tag: „Wieso kann ich
-  /// eigentlich nicht alle Profile gleichzeitig laufen lassen, sondern muss
-  /// mich für einen entscheiden?" Seitdem bedient ein Fisch mehrere Profile
-  /// über eine Verbindung: das erste startet ihn, jedes weitere wird ihm
-  /// gesagt, ohne die laufenden zu stören.
+  /// Es gibt einen Schalter für alle Profile, keinen je Profil. Nemesus am
+  /// 21.11.2026, nachdem er zwei Profile auf zwei Servern laufen hatte und der
+  /// Bot auch dort grün aussah, wo gerade nichts übersetzt wurde: „Wir bauen
+  /// die Schalter für die einzelnen Profile ab. Stattdessen bauen wir nur
+  /// einen Button. An und Aus. Schaltet alle Profile ein oder aus. Damit löst
+  /// sich auch gleich das Problem, wenn man 20 Profile hat. Und es ist nicht
+  /// mehr missverständlich."
+  bool get on => _run != null;
+
+  /// Die Profile, die der Fisch gerade bedient. Das sagt er selbst, in seiner
+  /// Ausgabe; die Maske glaubt nur ihm.
   final Set<String> running = {};
 
-  /// Ob dieses Fenster gerade einen Fisch laufen hat.
-  bool get hasFish => _run != null;
+  /// Die Profile, von denen der Fisch noch nicht gesagt hat, ob er sie
+  /// bedient oder warum nicht.
+  final Set<String> _starting = {};
+
+  bool starting(String name) => _starting.contains(name);
+
+  /// Warum der Fisch nicht gestartet werden konnte oder von selbst geendet
+  /// hat. Das betrifft alle Profile, deshalb steht es nicht an einer Karte.
+  String? fishError;
 
   /// Die letzten Meldungen des Fischs je Profil, jede mit der Uhrzeit, zu der
   /// sie hier ankam. Eine Zeile, die ein Profil nennt (`[tea-time]`), steht
@@ -78,8 +91,7 @@ class DeskState extends ChangeNotifier {
   /// Wohin das Protokoll eines Profils zusätzlich geschrieben wird.
   final Map<String, OpenLog> _files = {};
 
-  /// Warum ein Start gescheitert ist oder der Fisch von selbst geendet hat,
-  /// je Profil.
+  /// Warum ein einzelnes Profil nicht läuft, während der Fisch an ist.
   final Map<String, String> _runErrors = {};
 
   /// Die letzte Meldung im Wortlaut des Fischs, ohne Zeitstempel.
@@ -94,7 +106,7 @@ class DeskState extends ChangeNotifier {
   static const int logLimit = 200;
 
   FishRun? _run;
-  Future<void>? _spawning;
+  bool _switching = false;
   StreamSubscription<String>? _lines;
   bool _disposed = false;
   bool _refreshing = false;
@@ -132,51 +144,41 @@ class DeskState extends ChangeNotifier {
     }
   }
 
-  /// Startet ein Profil. Läuft noch kein Fisch, startet es ihn; läuft schon
-  /// einer, bekommt er das Profil dazu.
-  Future<void> start(String name) async {
-    if (running.contains(name)) {
+  /// Schaltet den Fisch an: er bedient alle Profile, die sich starten lassen.
+  /// Eines, das sich nicht starten lässt, sagt an seiner Karte, warum, und
+  /// hält die anderen nicht auf.
+  Future<void> switchOn() async {
+    if (_run != null || _switching) {
       return;
     }
-    // Zwei Klicks kurz nacheinander auf zwei Karten: der zweite wartet, bis
-    // der Fisch des ersten da ist, statt einen zweiten Fisch zu starten.
-    final pending = _spawning;
-    if (pending != null) {
-      await pending;
-      if (running.contains(name)) {
-        return;
-      }
-    }
-    _runErrors.remove(name);
-    _logs[name] = [];
-    _openLogFile(name);
-
-    final already = _run;
-    if (already != null) {
-      // Ob es geklappt hat, sagt der Fisch in seiner Ausgabe (siehe
-      // [_addLine]). Bis dahin gilt das Profil als laufend.
-      running.add(name);
-      already.say('start $name');
-      _changed();
-      return;
-    }
-
-    final spawned = Completer<void>();
-    _spawning = spawned.future;
+    _switching = true;
+    fishError = null;
+    _runErrors.clear();
+    _logs.clear();
+    _files.clear();
+    running.clear();
+    _lastLine = null;
+    // Erwartet wird eine Antwort zu jedem Profil, das das Programm für gültig
+    // hält. Bis sie da ist, zeigt die Karte „Starting".
+    _starting
+      ..clear()
+      ..addAll([
+        for (final entry in list?.profiles ?? const <ProfileEntry>[])
+          if (entry.ok) entry.name,
+      ]);
+    _changed();
     final FishRun run;
     try {
-      run = await cli.run(name);
+      run = await cli.runAll();
     } on CliException catch (e) {
-      _runErrors[name] = e.message;
+      fishError = e.message;
+      _starting.clear();
       _changed();
       return;
     } finally {
-      _spawning = null;
-      spawned.complete();
+      _switching = false;
     }
-    _lastLine = null;
     _run = run;
-    running.add(name);
     _lines = run.lines.listen(_addLine);
     _changed();
 
@@ -193,17 +195,13 @@ class DeskState extends ChangeNotifier {
         unawaited(_lines?.cancel());
         _lines = null;
         _run = null;
-        final ended = running.toList();
         running.clear();
+        _starting.clear();
         _files.clear();
         if (!stoppedByUs) {
           // Der Fisch ist von selbst gegangen. Der Grund steht in seinen
-          // letzten Zeilen; die letzte wird hervorgehoben, an jedem Profil,
-          // das dabei mit zu Ende ging.
-          final why = _lastLine ?? 'The fish ended with code $code and gave no reason.';
-          for (final name in ended) {
-            _runErrors[name] = why;
-          }
+          // letzten Zeilen; die letzte wird hervorgehoben.
+          fishError = _lastLine ?? 'The fish ended with code $code and gave no reason.';
         }
         _changed();
         if (!_disposed) {
@@ -213,40 +211,29 @@ class DeskState extends ChangeNotifier {
     );
   }
 
-  /// Öffnet die Protokolldatei eines Profils. Eine Datei, die sich nicht
-  /// öffnen lässt, hält den Fisch nicht auf. Das Fenster sagt es, und das
-  /// Protokoll steht dann nur dort.
-  void _openLogFile(String name) {
-    _files.remove(name);
-    final open = openLog;
-    final dir = list?.dir;
-    if (open == null || dir == null) {
-      return;
-    }
-    try {
-      _files[name] = open(dir, name);
-    } on Exception catch (e) {
-      _logs[name]!.add('${logStamp(_now())}  desk: cannot open the log file: $e');
-    }
-  }
-
   bool _stopping = false;
 
-  /// Hält ein Profil an. Ist es das letzte, das läuft, hält der Fisch an; die
-  /// anderen laufen sonst ungestört weiter.
-  void stop(String name) {
+  /// Schaltet den Fisch aus, mit allen Profilen.
+  void switchOff() {
     final run = _run;
-    if (run == null || !running.contains(name)) {
+    if (run == null) {
       return;
     }
-    if (running.length == 1) {
-      _stopping = true;
-      run.stop();
+    _stopping = true;
+    run.stop();
+  }
+
+  /// Ein Profil wurde gespeichert, während der Fisch an ist: er nimmt es neu
+  /// auf, ohne die anderen zu stören. Ein neues kommt dazu, ein geändertes
+  /// wird neu geladen.
+  void saved(String name) {
+    final run = _run;
+    if (run == null) {
       return;
     }
-    running.remove(name);
-    _files.remove(name);
-    run.say('stop $name');
+    _runErrors.remove(name);
+    _starting.add(name);
+    run.say(running.contains(name) ? 'restart $name' : 'start $name');
     _changed();
   }
 
@@ -280,21 +267,32 @@ class DeskState extends ChangeNotifier {
     final about = profileOfLine(line);
     if (about != null) {
       final (name, said) = about;
-      if (said.startsWith(_cannotStart)) {
-        // Der laufende Fisch konnte dieses Profil nicht dazunehmen. Die
-        // anderen laufen weiter; der Grund steht an dieser Karte.
+      if (said == 'serving') {
+        running.add(name);
+        _starting.remove(name);
+        _runErrors.remove(name);
+      } else if (said.startsWith(_cannotStart)) {
+        // Der Fisch konnte dieses Profil nicht aufnehmen. Die anderen laufen
+        // weiter; der Grund steht an dieser Karte.
         running.remove(name);
+        _starting.remove(name);
         _runErrors[name] = said.substring(_cannotStart.length);
+      } else if (said.startsWith(_cannotRestart)) {
+        // Das geänderte Profil ließ sich nicht laden. Das bisherige läuft
+        // weiter: lieber der alte Stand als keiner.
+        _starting.remove(name);
+        _runErrors[name] =
+            'Still running with the settings from before: ${said.substring(_cannotRestart.length)}';
       } else if (said == 'no longer serving') {
         running.remove(name);
       }
     }
     // Eine Zeile über ein Profil gehört zu diesem. Eine über den ganzen Fisch
-    // (verbunden, hält an) gehört zu allen, die gerade laufen.
-    final owners = about != null ? [about.$1] : running.toList();
+    // (verbunden, hält an) gehört zu allen, die laufen oder gerade starten.
+    final owners = about != null ? [about.$1] : {...running, ..._starting}.toList();
     final stamped = '${logStamp(_now())}  $line';
     for (final name in owners) {
-      final log = _logs.putIfAbsent(name, () => []);
+      final log = _logOf(name);
       log.add(stamped);
       final file = _files[name];
       if (file != null) {
@@ -313,7 +311,29 @@ class DeskState extends ChangeNotifier {
     _changed();
   }
 
+  /// Das Protokoll eines Profils in diesem Lauf. Beim ersten Mal wird auch
+  /// seine Datei geöffnet. Eine Datei, die sich nicht öffnen lässt, hält den
+  /// Fisch nicht auf: das Fenster sagt es, und das Protokoll steht nur dort.
+  List<String> _logOf(String name) {
+    final known = _logs[name];
+    if (known != null) {
+      return known;
+    }
+    final log = _logs[name] = [];
+    final open = openLog;
+    final dir = list?.dir;
+    if (open != null && dir != null) {
+      try {
+        _files[name] = open(dir, name);
+      } on Exception catch (e) {
+        log.add('${logStamp(_now())}  desk: cannot open the log file: $e');
+      }
+    }
+    return log;
+  }
+
   static const _cannotStart = 'cannot start: ';
+  static const _cannotRestart = 'cannot restart: ';
 
   void _changed() {
     if (!_disposed) {
