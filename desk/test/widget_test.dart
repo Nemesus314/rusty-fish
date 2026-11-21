@@ -126,7 +126,7 @@ void main() {
     expect(inCard('old', find.text('Edit')), findsNothing);
     expect(inCard('old', find.text('Delete')), findsOneWidget);
 
-    expect(find.text('The fish runs while this window is open.'), findsOneWidget);
+    expect(find.text('The fish runs while this window is open and this PC is awake.'), findsOneWidget);
     expect(find.textContaining(r'C:\fish\profiles'), findsWidgets);
   });
 

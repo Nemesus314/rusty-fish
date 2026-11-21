@@ -64,7 +64,8 @@ account there.
 
 ## What you need to run your own fish
 
-- A PC with Windows 11. Other systems have not been tested.
+- A PC with Windows 11. Other systems have not been tested. Versions for
+  Linux and macOS are intended, without a date.
 - The program. It has two parts: the fish itself (`rusty-fish.exe`, a command
   line program) and a window to manage it (`rusty_fish_desk.exe`). Rusty Fish
   is not published yet; until it is, you get it from the person who gave you
@@ -139,7 +140,14 @@ openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
   service. It judges by the address alone. With a model on your own PC
   ("Own model or other service" with a local address) no outside AI service
   reads along.
-- The fish runs only while the window is open and the PC is awake.
+- The fish runs only while the window is open and the PC is awake. Everyone,
+  the host included, can write from anywhere, also from the Discord app on a
+  phone: Discord carries the messages, and the fish at home translates them.
+  For that the host's PC must stay on and must not go to sleep or hibernate.
+  Before leaving, set Windows so that it does not sleep (Settings, System,
+  Power; check the current names yourself). A screen that turns off or a PC
+  nobody touches is fine; a sleeping PC is not. What is written while the
+  fish is not running is caught up when it starts again.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.
 - One bot runs one profile at a time.

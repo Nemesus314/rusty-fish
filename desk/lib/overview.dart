@@ -318,7 +318,19 @@ class _OverviewPageState extends State<OverviewPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('The fish runs while this window is open.'),
+                          // Wer von unterwegs über die Discord-App schreibt,
+                          // braucht zu Hause einen wachen Rechner. Dass ein
+                          // schlafender PC den Fisch anhält, sieht man dem
+                          // Fenster sonst nicht an.
+                          const Tooltip(
+                            message:
+                                'Writing from a phone works too, through the Discord app, as long '
+                                'as this PC stays on and does not go to sleep. '
+                                'A screen that turns off is fine.',
+                            child: Text(
+                              'The fish runs while this window is open and this PC is awake.',
+                            ),
+                          ),
                           if (list != null)
                             Text(
                               'Profiles are kept in ${list.dir}',
