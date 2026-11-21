@@ -157,6 +157,25 @@ fn a_name_is_kept_in_one_line_and_found_again_however_it_was_spaced() {
     assert_eq!(c.owner_of("222"), Some("7"));
 }
 
+// --- Mehrere Profile in einem Fisch ---------------------------------------------
+
+#[test]
+fn two_profiles_may_run_together_only_if_no_channel_belongs_to_both() {
+    let tea = Config::parse(&named(ROBIN)).unwrap();
+    // Dieselben Menschen, andere Kanäle: das geht nebeneinander.
+    let probe = named(ROBIN).replace("\"111\"", "\"333\"").replace("\"222\"", "\"444\"");
+    let probe = Config::parse(&probe).unwrap();
+    assert_eq!(tea.shared_channel(&probe), None);
+    assert_eq!(probe.shared_channel(&tea), None);
+
+    // Ein Kanal in beiden: jede Nachricht dort würde doppelt übersetzt.
+    let overlap = Config::parse(&named(ROBIN).replace("\"111\"", "\"333\"")).unwrap();
+    assert_eq!(tea.shared_channel(&overlap), Some("222"));
+    assert_eq!(overlap.shared_channel(&tea), Some("222"));
+    // Ein Profil überschneidet sich mit sich selbst.
+    assert!(tea.shared_channel(&tea).is_some());
+}
+
 // --- Das Dokument für die Maske -----------------------------------------------
 
 #[test]

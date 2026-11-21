@@ -159,9 +159,9 @@ impl Folder {
         }
         names.sort();
 
-        let running = lock::running(&self.dir, BOT).and_then(|r| r.profile);
+        let running = lock::running(&self.dir, BOT).map(|r| r.profiles).unwrap_or_default();
         let profiles: Vec<Value> =
-            names.iter().map(|name| self.entry(name, running.as_deref() == Some(name))).collect();
+            names.iter().map(|name| self.entry(name, running.contains(name))).collect();
         Ok(json!({ "dir": self.dir.to_string_lossy(), "profiles": profiles }))
     }
 
@@ -277,7 +277,7 @@ impl Folder {
         }
         // Einem laufenden Fisch die Dateien wegzunehmen hieße, dass er seinen
         // Zustand an einen Ort schreibt, den es nicht mehr gibt.
-        if lock::running(&self.dir, BOT).and_then(|r| r.profile).as_deref() == Some(name) {
+        if lock::running(&self.dir, BOT).is_some_and(|r| r.profiles.iter().any(|p| p == name)) {
             return Err(format!("profile \"{name}\" is running; stop it before deleting it"));
         }
 
@@ -644,7 +644,7 @@ mod tests {
         let f = temp("running");
         f.save("tea", DOC).unwrap();
         f.save("coffee", DOC).unwrap();
-        let who = Running { profile: Some("tea".to_owned()), pid: 1, started: 1 };
+        let who = Running { profiles: vec!["tea".to_owned()], pid: 1, started: 1 };
         let held = lock::acquire(f.dir(), BOT, &who).unwrap();
         let v = f.list().unwrap();
         assert_eq!(v["profiles"][0]["name"], "coffee");
@@ -798,7 +798,7 @@ mod tests {
         let f = temp("delrun");
         f.save("tea", DOC).unwrap();
         f.save("coffee", DOC).unwrap();
-        let who = Running { profile: Some("tea".to_owned()), pid: 1, started: 1 };
+        let who = Running { profiles: vec!["tea".to_owned()], pid: 1, started: 1 };
         let held = lock::acquire(f.dir(), BOT, &who).unwrap();
         let err = f.delete("tea", "s").unwrap_err();
         assert!(err.contains("running"), "got {err}");

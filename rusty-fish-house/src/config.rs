@@ -372,6 +372,17 @@ impl Config {
             .unwrap_or_default()
     }
 
+    /// Ein Kanal, den dieses Profil und das andere beide nennen, falls es
+    /// einen gibt. Zwei solche Profile dürfen nicht zugleich laufen: jede
+    /// Nachricht in diesem Kanal würde zweimal übersetzt und zugestellt.
+    pub fn shared_channel(&self, other: &Config) -> Option<&str> {
+        self.rooms
+            .iter()
+            .flat_map(|room| room.seats.iter())
+            .map(|seat| seat.channel.as_str())
+            .find(|channel| other.room_index(channel).is_some())
+    }
+
     /// Wo der KI-Dienst dieses Profils liest: auf diesem Rechner, im eigenen
     /// Netz oder draußen. Geurteilt wird nach der Adresse, die wirklich
     /// benutzt wird (siehe [`crate::place`]).

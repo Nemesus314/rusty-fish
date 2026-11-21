@@ -44,9 +44,24 @@
 //! reicht herein, was ankam, setzt ab, was er entschieden hat, und lässt
 //! danach speichern.
 //!
+//! Seit dem 21.11.2026 bedient ein Fisch mehrere Profile über eine einzige
+//! Verbindung. Nemesus an dem Tag: „Wieso kann ich eigentlich nicht alle
+//! Profile gleichzeitig laufen lassen, sondern muss mich für einen
+//! entscheiden?" Bis dahin war ein Profil ein eigenes Programm, und zwei
+//! Programme mit demselben Bot hätten jede Nachricht und jeden Klick doppelt
+//! gesehen. Jetzt gibt es eine Verbindung, und jede Nachricht und jeder Klick
+//! wird dem Profil zugeordnet, in dessen Kanal er fällt. Jedes Profil hat
+//! seinen eigenen Haushalt, seinen eigenen KI-Dienst und sein eigenes Schloss:
+//! eine lange Übersetzung in einem Profil hält die anderen nicht auf.
+//! Benannte Grenzen dabei:
+//! - Ein Kanal gehört zu höchstens einem laufenden Profil. Ein zweites, das
+//!   denselben Kanal nennt, wird nicht gestartet.
+//! - Alle Profile eines Fischs teilen sich einen Bot.
+//!
 //! In die Ausgabe des Programms gelangen nur Kanal-Kennungen und Fehlergründe,
 //! nie der Text einer Nachricht.
 
+use crate::buttons::{Budget, CONSENT, budget_id, budget_of};
 use crate::mention::mention_as_call;
 use crate::render::{MESSAGE_LIMIT, chunks, hook_name, render_in};
 use rusty_fish_core::Model;
@@ -63,32 +78,58 @@ use serenity::all::{
 };
 use serenity::async_trait;
 use std::collections::HashMap;
-use std::future::Future;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{Mutex, RwLock};
 
-const CONSENT_BUTTON: &str = "rusty-fish-consent";
-/// Die beiden Knöpfe am Hinweis an den Gastgeber.
-const RAISE_BUTTON: &str = "rusty-fish-raise";
-const KEEP_BUTTON: &str = "rusty-fish-keep";
 const WEBHOOK_NAME: &str = "Rusty Fish";
 
-/// Der Fisch an der Discord-Tür: die KI, die Einstellungen und alles, was
-/// sich im Lauf ändert.
-struct Fish<M> {
+/// Die Antwort auf einen Klick, zu dem gerade kein Profil läuft: der Knopf
+/// stammt von einem Profil, das inzwischen angehalten wurde.
+const NOT_RUNNING: &str = "The profile this button belongs to is not running right now.";
+
+/// Ein Profil, wie der Aufrufer es der Tür übergibt: fertig geprüft, mit der
+/// KI, die für es übersetzt.
+pub struct Profile<M> {
+    /// Der Name des Profils. `None`, wenn der Fisch mit einer einzelnen
+    /// Einstellungsdatei gestartet wurde.
+    pub name: Option<String>,
+    pub config: Config,
+    pub state_path: PathBuf,
+    pub model: M,
+    /// Der Name des KI-Dienstes, zu dem `model` spricht. Er kommt vom
+    /// Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
+    pub service: String,
+}
+
+/// Was der Aufrufer dem laufenden Fisch sagen kann.
+pub enum Command<M> {
+    /// Ein weiteres Profil bedienen, ohne die laufenden zu stören.
+    Start(Box<Profile<M>>),
+    /// Ein Profil nicht mehr bedienen. War es das letzte, hält der Fisch an.
+    Stop(String),
+    /// Anhalten.
+    StopAll,
+}
+
+/// Wird gerufen, wenn sich ändert, welche Profile der Fisch bedient, mit
+/// deren Namen. So kann der Aufrufer es anderen sagen, etwa der Maske.
+pub type OnChange = Box<dyn Fn(&[String]) + Send + Sync>;
+
+/// Ein Profil im Lauf: seine Einstellungen, seine KI und alles, was sich
+/// ändert.
+struct Served<M> {
+    name: Option<String>,
     model: M,
     config: Config,
     /// Der Name des KI-Dienstes, wie er in der Bitte um Zustimmung steht.
     service: String,
-    /// Die Benutzer-ID des Bots selbst, bekannt ab dem Ready-Ereignis. Null
-    /// heißt: noch nicht bekannt. Gebraucht wird sie, um die echte Erwähnung
-    /// des Bots am Anfang einer Nachricht zu erkennen.
-    me: AtomicU64,
-    /// Ein einziges Schloss für alles Veränderliche. Es hält die Nachrichten
-    /// eines Raums in der Reihenfolge, in der sie geschrieben wurden: Discord
-    /// meldet sie gleichzeitig, das Schloss lässt sie einzeln durch.
+    /// Ein Schloss für alles Veränderliche dieses Profils. Es hält die
+    /// Nachrichten eines Raums in der Reihenfolge, in der sie geschrieben
+    /// wurden: Discord meldet sie gleichzeitig, das Schloss lässt sie einzeln
+    /// durch.
     inner: Mutex<Inner>,
 }
 
@@ -98,39 +139,55 @@ struct Inner {
     hooks: HashMap<ChannelId, Webhook>,
 }
 
-/// Startet die Tür und läuft, bis die Verbindung endet oder `stop` eintritt.
+/// Der Fisch an der Discord-Tür: die Profile, die er gerade bedient.
+struct Fish<M> {
+    served: RwLock<Vec<Arc<Served<M>>>>,
+    /// Die Benutzer-ID des Bots selbst, bekannt ab dem Ready-Ereignis. Null
+    /// heißt: noch nicht bekannt. Gebraucht wird sie, um die echte Erwähnung
+    /// des Bots am Anfang einer Nachricht zu erkennen.
+    me: AtomicU64,
+    /// Ob die Verbindung steht. Davor kann der Fisch weder mitteilen noch
+    /// nachholen; das geschieht dann für alle Profile auf einmal.
+    ready: AtomicBool,
+    on_change: OnChange,
+}
+
+/// Was Discord meldet, geht an den Fisch.
+struct Handler<M>(Arc<Fish<M>>);
+
+/// Startet die Tür mit den ersten Profilen und läuft, bis die Verbindung
+/// endet, das Anhalten verlangt wird oder das letzte Profil angehalten ist.
 ///
-/// `service` ist der Name des KI-Dienstes, zu dem `model` spricht. Er kommt
-/// vom Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
-///
-/// `stop` kommt ebenfalls vom Aufrufer: wann ein Programm anhalten soll,
-/// weiß das Programm, nicht eine seiner Türen.
-pub async fn run<M, S>(
+/// `commands` kommt vom Aufrufer: wann ein Programm anhalten soll und welche
+/// Profile es bedient, weiß das Programm, nicht eine seiner Türen. Endet der
+/// Kanal, ohne dass jemand das Anhalten verlangt hat, läuft der Fisch weiter:
+/// als Dienst ohne Terminal hat er niemanden, der ihm etwas sagt.
+pub async fn run<M>(
     token: &str,
-    config: Config,
-    state_path: &Path,
-    model: M,
-    service: &str,
-    stop: S,
+    first: Vec<Profile<M>>,
+    mut commands: UnboundedReceiver<Command<M>>,
+    on_change: OnChange,
 ) -> Result<(), String>
 where
     M: Model + Send + Sync + 'static,
-    S: Future<Output = ()> + Send + 'static,
 {
-    let house = Household::open(&config, state_path)?;
-    let fish = Fish {
-        model,
-        config,
-        service: service.to_owned(),
+    let fish = Arc::new(Fish {
+        served: RwLock::new(Vec::new()),
         me: AtomicU64::new(0),
-        inner: Mutex::new(Inner { house, hooks: HashMap::new() }),
-    };
+        ready: AtomicBool::new(false),
+        on_change,
+    });
+    // Erst alles prüfen, dann verbinden: passt ein Profil nicht, scheitert der
+    // Fisch, bevor er sich bei Discord zeigt.
+    for profile in first {
+        fish.start(None, profile).await?;
+    }
 
     // MESSAGE_CONTENT muss im Entwicklerportal von Discord eingeschaltet sein,
     // sonst kommen die Nachrichten ohne Text an.
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
     let mut client = Client::builder(token, intents)
-        .event_handler(fish)
+        .event_handler(Handler(fish.clone()))
         .await
         .map_err(|e| format!("cannot set up the Discord connection: {e}"))?;
 
@@ -141,8 +198,26 @@ where
     let stopping = Arc::new(AtomicBool::new(false));
     let shards = client.shard_manager.clone();
     let flag = stopping.clone();
+    let http = client.http.clone();
     tokio::spawn(async move {
-        stop.await;
+        loop {
+            match commands.recv().await {
+                Some(Command::Start(profile)) => {
+                    let label = label_of(profile.name.as_deref());
+                    if let Err(why) = fish.start(Some(&http), *profile).await {
+                        eprintln!("rusty-fish: {label}cannot start: {why}");
+                    }
+                }
+                Some(Command::Stop(name)) => {
+                    if fish.stop(&name).await == 0 {
+                        break;
+                    }
+                }
+                Some(Command::StopAll) => break,
+                // Niemand kann dem Fisch mehr etwas sagen. Er läuft weiter.
+                None => std::future::pending::<()>().await,
+            }
+        }
         flag.store(true, Ordering::Relaxed);
         eprintln!("rusty-fish: stopping");
         shards.shutdown_all().await;
@@ -156,43 +231,187 @@ where
     }
 }
 
-#[async_trait]
-impl<M> EventHandler for Fish<M>
-where
-    M: Model + Send + Sync + 'static,
-{
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        eprintln!("rusty-fish: connected to Discord as {}", ready.user.name);
-        // Vor dem Nachholen merken, damit auch verpasste Erwähnungen zählen.
-        self.me.store(ready.user.id.get(), Ordering::Relaxed);
-        // Erst die Mitteilung, dann das Nachholen: wer eingeladen ist, soll
-        // lesen, was der Fisch hier tut, bevor die ersten Übersetzungen kommen.
-        self.tell_the_invited(&ctx.http).await;
-        self.catch_up(&ctx.http).await;
-    }
-
-    async fn message(&self, ctx: Context, msg: Message) {
-        self.handle(&ctx.http, &msg).await;
-    }
-
-    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        let Interaction::Component(click) = interaction else { return };
-        // Nur die Kennung des Knopfs, kein Text. Gemessen am 19.11.2026: ein
-        // Klick auf die Zustimmung kam nicht an, und ohne diese Zeile war
-        // nicht zu sehen, ob Discord ihn überhaupt gemeldet hatte.
-        eprintln!("rusty-fish: click received on {}", click.data.custom_id);
-        match click.data.custom_id.as_str() {
-            CONSENT_BUTTON => self.consent_clicked(&ctx.http, &click).await,
-            RAISE_BUTTON | KEEP_BUTTON => self.budget_clicked(&ctx.http, &click).await,
-            _ => {}
-        }
-    }
+/// Wie ein Profil in der Programmausgabe heißt: `[tea-time] ` vor der Zeile,
+/// oder nichts, wenn es keinen Namen hat.
+fn label_of(name: Option<&str>) -> String {
+    name.map(|name| format!("[{name}] ")).unwrap_or_default()
 }
 
 impl<M> Fish<M>
 where
     M: Model + Send + Sync + 'static,
 {
+    /// Nimmt ein Profil in den Lauf. Steht die Verbindung schon (`http`),
+    /// teilt der Fisch gleich mit, wer eingeladen ist, und holt nach, was in
+    /// den Kanälen dieses Profils verpasst wurde.
+    async fn start(&self, http: Option<&Http>, profile: Profile<M>) -> Result<(), String> {
+        let house = Household::open(&profile.config, &profile.state_path)?;
+        let served = Arc::new(Served {
+            name: profile.name,
+            model: profile.model,
+            config: profile.config,
+            service: profile.service,
+            inner: Mutex::new(Inner { house, hooks: HashMap::new() }),
+        });
+        // Prüfen und Aufnehmen unter einem Schloss, zusammen mit der Frage,
+        // ob die Verbindung steht: sonst könnte ein Profil genau zwischen dem
+        // Verbinden und dem Nachholen hereinkommen und bliebe ohne beides.
+        let ready = {
+            let mut list = self.served.write().await;
+            for other in list.iter() {
+                if served.name.is_some() && other.name == served.name {
+                    return Err("this profile is already running".to_owned());
+                }
+                // Ein Kanal in zwei Profilen: jede Nachricht würde doppelt
+                // übersetzt, doppelt zugestellt und doppelt bezahlt.
+                if let Some(channel) = other.config.shared_channel(&served.config) {
+                    return Err(format!(
+                        "channel {channel} already belongs to {}, which is running",
+                        other.title()
+                    ));
+                }
+            }
+            list.push(served.clone());
+            self.told(&list);
+            self.ready.load(Ordering::Relaxed)
+        };
+        served.say("serving");
+        if ready && let Some(http) = http {
+            served.tell_the_invited(http).await;
+            served.catch_up(http, self.me.load(Ordering::Relaxed)).await;
+        }
+        Ok(())
+    }
+
+    /// Nimmt ein Profil aus dem Lauf. Liefert, wie viele noch laufen.
+    async fn stop(&self, name: &str) -> usize {
+        let mut list = self.served.write().await;
+        let before = list.len();
+        list.retain(|served| served.name.as_deref() != Some(name));
+        if list.len() < before {
+            eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
+            self.told(&list);
+        } else {
+            eprintln!("rusty-fish: {}was not running", label_of(Some(name)));
+        }
+        list.len()
+    }
+
+    /// Sagt dem Aufrufer, welche Profile jetzt laufen.
+    fn told(&self, list: &[Arc<Served<M>>]) {
+        let names: Vec<String> = list.iter().filter_map(|s| s.name.clone()).collect();
+        (self.on_change)(&names);
+    }
+
+    /// Das Profil, zu dem dieser Kanal gehört.
+    async fn at(&self, channel: &str) -> Option<Arc<Served<M>>> {
+        let list = self.served.read().await;
+        list.iter().find(|s| s.config.room_index(channel).is_some()).cloned()
+    }
+
+    /// Das Profil, zu dem ein Knopf am Hinweis zum leeren Kontingent gehört.
+    /// Ohne Namen am Knopf nur dann eines, wenn überhaupt nur eines läuft.
+    async fn named(&self, name: Option<&str>) -> Option<Arc<Served<M>>> {
+        let list = self.served.read().await;
+        match name {
+            Some(name) => list.iter().find(|s| s.name.as_deref() == Some(name)).cloned(),
+            None if list.len() == 1 => list.first().cloned(),
+            None => None,
+        }
+    }
+}
+
+#[async_trait]
+impl<M> EventHandler for Handler<M>
+where
+    M: Model + Send + Sync + 'static,
+{
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        let fish = &self.0;
+        eprintln!("rusty-fish: connected to Discord as {}", ready.user.name);
+        // Vor dem Nachholen merken, damit auch verpasste Erwähnungen zählen.
+        fish.me.store(ready.user.id.get(), Ordering::Relaxed);
+        // Unter dem Schloss der Liste, siehe `Fish::start`.
+        let served = {
+            let list = fish.served.write().await;
+            fish.ready.store(true, Ordering::Relaxed);
+            list.clone()
+        };
+        for profile in served {
+            // Erst die Mitteilung, dann das Nachholen: wer eingeladen ist,
+            // soll lesen, was der Fisch hier tut, bevor die ersten
+            // Übersetzungen kommen.
+            profile.tell_the_invited(&ctx.http).await;
+            profile.catch_up(&ctx.http, ready.user.id.get()).await;
+        }
+    }
+
+    async fn message(&self, ctx: Context, msg: Message) {
+        // Was der Fisch selbst abgesetzt hat, darf nicht wieder hereinkommen.
+        if msg.author.bot || msg.webhook_id.is_some() {
+            return;
+        }
+        // Ein Kanal außerhalb jedes Raums geht den Fisch nichts an. Geprüft
+        // vor jedem Schloss eines Profils, damit so eine Nachricht nicht wartet.
+        let Some(profile) = self.0.at(&msg.channel_id.to_string()).await else { return };
+        profile.handle(&ctx.http, &msg, self.0.me.load(Ordering::Relaxed)).await;
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        let Interaction::Component(click) = interaction else { return };
+        let id = click.data.custom_id.as_str();
+        // Nur die Kennung des Knopfs, kein Text. Gemessen am 19.11.2026: ein
+        // Klick auf die Zustimmung kam nicht an, und ohne diese Zeile war
+        // nicht zu sehen, ob Discord ihn überhaupt gemeldet hatte.
+        eprintln!("rusty-fish: click received on {id}");
+        let (profile, choice) = if id == CONSENT {
+            // Die Bitte steht in einem Kanal, und der gehört zu einem Profil.
+            (self.0.at(&click.channel_id.to_string()).await, None)
+        } else if let Some((choice, name)) = budget_of(id) {
+            (self.0.named(name).await, Some(choice))
+        } else {
+            return;
+        };
+        let Some(profile) = profile else {
+            // Der Knopf stammt von einem Profil, das gerade nicht läuft.
+            let response = CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new().content(NOT_RUNNING).ephemeral(true),
+            );
+            if let Err(why) = click.create_response(&ctx.http, response).await {
+                eprintln!("rusty-fish: cannot answer a click without a running profile: {why}");
+            }
+            return;
+        };
+        match choice {
+            None => profile.consent_clicked(&ctx.http, &click).await,
+            Some(choice) => profile.budget_clicked(&ctx.http, &click, choice).await,
+        }
+    }
+}
+
+impl<M> Served<M>
+where
+    M: Model + Send + Sync + 'static,
+{
+    /// Wie dieses Profil in einer Fehlermeldung heißt.
+    fn title(&self) -> String {
+        match &self.name {
+            Some(name) => format!("profile \"{name}\""),
+            None => "the running settings file".to_owned(),
+        }
+    }
+
+    /// Eine Zeile in die Programmausgabe, mit dem Namen des Profils davor.
+    /// Kanal-Kennungen und Fehlergründe, nie der Text einer Nachricht.
+    fn say(&self, text: impl std::fmt::Display) {
+        eprintln!("rusty-fish: {}{text}", label_of(self.name.as_deref()));
+    }
+
+    /// Was für einen Aufruf des Haushalts feststeht.
+    fn terms<'a>(&'a self, today: &'a str) -> Terms<'a> {
+        Terms { config: &self.config, service: &self.service, today }
+    }
+
     /// Jemand hat den Knopf unter der Bitte um Zustimmung gedrückt.
     async fn consent_clicked(&self, http: &Http, click: &ComponentInteraction) {
         // Discord will binnen drei Sekunden eine Antwort, sonst meldet es dem
@@ -200,7 +419,7 @@ where
         // besetzt sein, solange eine Nachricht übersetzt wird. Deshalb erst
         // quittieren (nur für den Klickenden sichtbar), dann speichern.
         if let Err(why) = click.defer_ephemeral(http).await {
-            eprintln!("rusty-fish: cannot acknowledge the consent click: {why}");
+            self.say(format_args!("cannot acknowledge the consent click: {why}"));
         }
 
         // Wer drückt, stimmt für sich selbst zu, für niemanden sonst.
@@ -212,17 +431,17 @@ where
         let saved = inner.house.consent(&user, &self.service);
         let reply = match saved {
             Ok(()) => {
-                eprintln!("rusty-fish: consent stored");
+                self.say("consent stored");
                 "✓"
             }
             Err(why) => {
-                eprintln!("rusty-fish: {why}");
+                self.say(why);
                 "⚠"
             }
         };
         let edit = EditInteractionResponse::new().content(reply);
         if let Err(why) = click.edit_response(http, edit).await {
-            eprintln!("rusty-fish: cannot confirm the consent: {why}");
+            self.say(format_args!("cannot confirm the consent: {why}"));
         }
 
         // Was dieser Mensch vor dem Klick schrieb, kam unübersetzt an. Jetzt,
@@ -234,7 +453,7 @@ where
             return;
         }
         // Nur die Zahl, kein Text.
-        eprintln!("rusty-fish: handing in {} delivery(ies) written before consent", held.len());
+        self.say(format_args!("handing in {} delivery(ies) written before consent", held.len()));
         let name = click
             .member
             .as_ref()
@@ -243,7 +462,7 @@ where
             .unwrap_or_else(|| click.user.name.clone());
         self.deliver(http, &mut inner.hooks, &held, &hook_name(&name), &click.user.face(), "").await;
         if let Err(why) = inner.house.save() {
-            eprintln!("rusty-fish: {why}");
+            self.say(why);
         }
     }
 
@@ -272,21 +491,21 @@ where
             let posted = post(http, hooks, &delivery.channel, name, avatar, &body).await;
             if let Err(why) = posted {
                 delivered = false;
-                eprintln!("rusty-fish: cannot deliver to channel {}: {why}", delivery.channel);
+                self.say(format_args!("cannot deliver to channel {}: {why}", delivery.channel));
             }
         }
         delivered
     }
 
     /// Jemand hat einen Knopf am Hinweis zum leeren Kontingent gedrückt.
-    async fn budget_clicked(&self, http: &Http, click: &ComponentInteraction) {
+    async fn budget_clicked(&self, http: &Http, click: &ComponentInteraction, choice: Budget) {
         // Nur der Klick des Gastgebers zählt: es ist sein Schlüssel und sein Geld.
         if click.user.id.to_string() != self.config.host {
             let response = CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new().content(NOT_THE_HOST).ephemeral(true),
             );
             if let Err(why) = click.create_response(http, response).await {
-                eprintln!("rusty-fish: cannot answer a click on the budget notice: {why}");
+                self.say(format_args!("cannot answer a click on the budget notice: {why}"));
             }
             return;
         }
@@ -295,48 +514,54 @@ where
         // länger besetzt sein, solange eine Nachricht übersetzt wird. Deshalb
         // erst quittieren, dann rechnen, dann den Hinweis ersetzen.
         if let Err(why) = click.defer(http).await {
-            eprintln!("rusty-fish: cannot acknowledge the host's click: {why}");
+            self.say(format_args!("cannot acknowledge the host's click: {why}"));
         }
 
-        let text = if click.data.custom_id == KEEP_BUTTON {
-            KEPT_NOTICE.to_owned()
-        } else {
-            let mut inner = self.inner.lock().await;
-            let today = today();
-            let (text, saved) = inner.house.raise(&self.terms(&today));
-            if let Err(why) = saved {
-                eprintln!("rusty-fish: {why}");
+        let text = match choice {
+            Budget::Keep => KEPT_NOTICE.to_owned(),
+            Budget::Raise => {
+                let mut inner = self.inner.lock().await;
+                let today = today();
+                let (text, saved) = inner.house.raise(&self.terms(&today));
+                if let Err(why) = saved {
+                    self.say(why);
+                }
+                text
             }
-            text
         };
 
         // Die Antwort ersetzt den Hinweis und nimmt die Knöpfe weg, damit kein
         // alter Knopf stehen bleibt.
         let edit = EditInteractionResponse::new().content(text).components(Vec::new());
         if let Err(why) = click.edit_response(http, edit).await {
-            eprintln!("rusty-fish: cannot answer the host: {why}");
+            self.say(format_args!("cannot answer the host: {why}"));
         }
-    }
-
-    /// Was für einen Aufruf des Haushalts feststeht.
-    fn terms<'a>(&'a self, today: &'a str) -> Terms<'a> {
-        Terms { config: &self.config, service: &self.service, today }
     }
 
     /// Sagt dem Gastgeber, und nur ihm, dass das heutige Kontingent verbraucht
     /// ist, und fragt, ob er um denselben Betrag erhöhen will: als
     /// Direktnachricht mit zwei Knöpfen.
+    ///
+    /// Die Knöpfe tragen den Namen des Profils, und der Hinweis nennt ihn:
+    /// laufen mehrere Profile, muss der Gastgeber wissen, welches leer ist,
+    /// und der Fisch, welches er erhöhen soll.
     async fn notify_host(&self, http: &Http, notice: &HostNotice) {
         let Ok(id) = self.config.host.parse::<u64>() else { return };
+        let name = self.name.as_deref();
+        let content = match name {
+            // `-# ` ist in Discord eine kleine graue Zeile.
+            Some(name) => format!("{}\n-# Profile: {name}", notice.text),
+            None => notice.text.clone(),
+        };
         let message = CreateMessage::new()
-            .content(notice.text.as_str())
+            .content(content)
             .button(
-                CreateButton::new(RAISE_BUTTON)
+                CreateButton::new(budget_id(Budget::Raise, name))
                     .label(notice.raise_label.as_str())
                     .style(ButtonStyle::Success),
             )
             .button(
-                CreateButton::new(KEEP_BUTTON)
+                CreateButton::new(budget_id(Budget::Keep, name))
                     .label(notice.keep_label)
                     .style(ButtonStyle::Secondary),
             );
@@ -345,22 +570,19 @@ where
             Err(why) => Err(why),
         };
         if let Err(why) = sent {
-            eprintln!("rusty-fish: cannot tell the host that the budget is used up: {why}");
+            self.say(format_args!("cannot tell the host that the budget is used up: {why}"));
         }
     }
 
-    /// Eine Nachricht aus einem Kanal: an alle anderen Plätze des Raums verteilen.
-    async fn handle(&self, http: &Http, msg: &Message) {
+    /// Eine Nachricht aus einem Kanal dieses Profils: an alle anderen Plätze
+    /// des Raums verteilen. `me` ist die Benutzer-ID des Bots.
+    async fn handle(&self, http: &Http, msg: &Message, me: u64) {
         // Was der Fisch selbst abgesetzt hat, darf nicht wieder hereinkommen.
+        // Auch hier geprüft, weil das Nachholen an `message` vorbeikommt.
         if msg.author.bot || msg.webhook_id.is_some() {
             return;
         }
         let channel = msg.channel_id.to_string();
-        // Ein Kanal außerhalb jedes Raums geht den Fisch nichts an. Geprüft
-        // vor dem Schloss, damit so eine Nachricht nicht darauf wartet.
-        if self.config.room_index(&channel).is_none() {
-            return;
-        }
 
         let mut guard = self.inner.lock().await;
         let inner = &mut *guard;
@@ -370,10 +592,8 @@ where
         // Haushalt bekommt dafür den Rufnamen statt des Discord-Kürzels; so
         // sehen weder die KI noch die anderen Plätze das Kürzel. Ohne Rufnamen
         // ist die Funktion aus, und die Nachricht bleibt, wie sie ist.
-        let called = self
-            .config
-            .ai_name()
-            .and_then(|name| mention_as_call(&msg.content, self.me.load(Ordering::Relaxed), name));
+        let called =
+            self.config.ai_name().and_then(|name| mention_as_call(&msg.content, me, name));
         let arrived = Arrived {
             channel: &channel,
             author: &author,
@@ -414,7 +634,7 @@ where
         // Erst jetzt, nach dem Absetzen: stürzt der Fisch vorher ab, gilt die
         // Nachricht als nicht gelesen, und der nächste Start holt sie nach.
         if let Err(why) = inner.house.save() {
-            eprintln!("rusty-fish: {why}");
+            self.say(why);
         }
     }
 
@@ -443,18 +663,18 @@ where
             match channel.send_message(http, message).await {
                 Ok(_) => {
                     reached.push(invite.person.clone());
-                    eprintln!("rusty-fish: invitation announced in channel {}", invite.channel);
+                    self.say(format_args!("invitation announced in channel {}", invite.channel));
                 }
                 // Nicht gemerkt: der nächste Start versucht es wieder.
-                Err(why) => eprintln!(
-                    "rusty-fish: cannot announce the invitation in channel {}: {why}",
+                Err(why) => self.say(format_args!(
+                    "cannot announce the invitation in channel {}: {why}",
                     invite.channel
-                ),
+                )),
             }
         }
 
         if let Err(why) = inner.house.invitations_told(pending, &reached) {
-            eprintln!("rusty-fish: {why}");
+            self.say(why);
         }
     }
 
@@ -479,15 +699,15 @@ where
         // Sprachen ein Geschlecht, und der Fisch weiß nicht, wer drückt.
         let message = CreateMessage::new()
             .content(text)
-            .button(CreateButton::new(CONSENT_BUTTON).label("OK").style(ButtonStyle::Success));
+            .button(CreateButton::new(CONSENT).label("OK").style(ButtonStyle::Success));
         if let Err(why) = channel_id.send_message(http, message).await {
-            eprintln!("rusty-fish: cannot ask for consent in channel {channel_id}: {why}");
+            self.say(format_args!("cannot ask for consent in channel {channel_id}: {why}"));
         }
     }
 
-    /// Holt nach, was geschrieben wurde, während der Fisch nicht lief. Bei
-    /// zwei gespiegelten Kanälen käme sonst nichts beim anderen an.
-    async fn catch_up(&self, http: &Http) {
+    /// Holt nach, was geschrieben wurde, während der Fisch dieses Profil nicht
+    /// bediente. Bei zwei gespiegelten Kanälen käme sonst nichts beim anderen an.
+    async fn catch_up(&self, http: &Http, me: u64) {
         let marks: Vec<(String, u64)> = {
             let inner = self.inner.lock().await;
             self.config
@@ -516,7 +736,7 @@ where
                         }
                     }
                     Err(why) => {
-                        eprintln!("rusty-fish: cannot catch up on channel {channel}: {why}");
+                        self.say(format_args!("cannot catch up on channel {channel}: {why}"));
                         break;
                     }
                 }
@@ -531,10 +751,10 @@ where
         let from_people =
             missed.iter().filter(|m| !m.author.bot && m.webhook_id.is_none()).count();
         if from_people > 0 {
-            eprintln!("rusty-fish: catching up on {from_people} missed message(s)");
+            self.say(format_args!("catching up on {from_people} missed message(s)"));
         }
         for msg in &missed {
-            self.handle(http, msg).await;
+            self.handle(http, msg, me).await;
         }
     }
 }

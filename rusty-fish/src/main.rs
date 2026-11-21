@@ -15,7 +15,9 @@ mod stop;
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
 use rusty_fish_core::{Gender, Outcome, Request, Secret, translate};
+use rusty_fish_discord::door::{Command as DoorCommand, OnChange, Profile as DoorProfile};
 use rusty_fish_house::config::Config;
+use stop::Input;
 use rusty_fish_providers::{AnyModel, Provider, catalog, connect};
 use serde_json::json;
 use std::io::Read;
@@ -94,9 +96,12 @@ enum Command {
         /// Settings file; see rusty-fish.example.toml [default: rusty-fish.toml]
         #[arg(long, conflicts_with = "profile")]
         config: Option<PathBuf>,
-        /// Name of a saved profile; see `rusty-fish profile list`
+        /// Name of a saved profile; see `rusty-fish profile list`. Give it
+        /// several times to serve several profiles at once. While the fish
+        /// runs, the lines `start NAME`, `stop NAME` and `stop` on its
+        /// standard input add a profile, take one away, or stop it.
         #[arg(long)]
-        profile: Option<String>,
+        profile: Vec<String>,
     },
     /// Print a description of this program for an AI assistant to explain the setup
     Guide,
@@ -346,28 +351,25 @@ async fn run(command: Command) -> Result<(), String> {
             // wie von Anfang an, in einer frei gewählten Datei mit dem Zustand
             // daneben.
             let folder = folder();
-            let (path, state_path) = match &profile {
-                Some(name) => {
-                    profiles::valid_name(name)?;
-                    let folder = folder.clone()?;
-                    (folder.config_path(name), folder.state_path(name))
-                }
-                None => {
-                    let path = config.unwrap_or_else(|| PathBuf::from("rusty-fish.toml"));
-                    let state_path = path.with_extension("state.json");
-                    (path, state_path)
-                }
-            };
-            let text = match &profile {
-                Some(name) => folder.clone()?.read_config(name)?,
-                None => std::fs::read_to_string(&path)
-                    .map_err(|e| format!("cannot read {}: {e}", path.display()))?,
-            };
-            let config = Config::parse(&text)?;
             // Erst alles prüfen, dann verbinden: fehlt etwas, scheitert der
-            // Fisch, bevor er sich bei Discord zeigt. Dienst, Adresse und
-            // Schlüssel kommen aus dem Profil.
-            let key = key_for(config.provider)?;
+            // Fisch, bevor er sich bei Discord zeigt.
+            let mut first = Vec::new();
+            if profile.is_empty() {
+                // Wie von Anfang an: eine frei gewählte Datei mit dem Zustand
+                // daneben.
+                let path = config.unwrap_or_else(|| PathBuf::from("rusty-fish.toml"));
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+                first.push(serve(None, &text, path.with_extension("state.json"))?);
+            } else {
+                let folder = folder.clone()?;
+                for name in &profile {
+                    first.push(load_profile(&folder, name).map_err(|why| {
+                        // Bei einem einzelnen Profil bleibt die Meldung, wie sie war.
+                        if profile.len() == 1 { why } else { format!("profile \"{name}\": {why}") }
+                    })?);
+                }
+            }
             let token = keys::load(profiles::BOT)?.ok_or_else(|| {
                 format!(
                     "{} not stored; run `rusty-fish key set {}` first",
@@ -375,13 +377,14 @@ async fn run(command: Command) -> Result<(), String> {
                     profiles::BOT
                 )
             })?;
-            let base_url = config.service_address();
-            let fish = connect(config.provider, Some(&base_url), &config.model, key)?;
 
             // Ein Bot, ein Fisch: die Sperre gilt bis zum Ende dieses Laufs,
             // auch für einen Start mit --config, denn der Bot ist derselbe.
-            let who = lock::Running { profile, pid: std::process::id(), started: now() };
-            let _held = match &folder {
+            // Seit dem 21.11.2026 bedient dieser eine Fisch mehrere Profile;
+            // welche, steht in der Notiz zur Sperre, und die Maske liest sie.
+            let who =
+                lock::Running { profiles: profile.clone(), pid: std::process::id(), started: now() };
+            let held = match &folder {
                 Ok(folder) => Some(lock::acquire(folder.dir(), profiles::BOT, &who)?),
                 // Nur bei --config erreichbar; mit --profile ist der Ordner oben
                 // schon Pflicht. Lieber ohne Sperre laufen als gar nicht.
@@ -391,19 +394,43 @@ async fn run(command: Command) -> Result<(), String> {
                     None
                 }
             };
+            let on_change: OnChange = Box::new(move |names: &[String]| {
+                if let Some(held) = &held
+                    && let Err(why) = held.set_profiles(names)
+                {
+                    eprintln!("rusty-fish: warning: {why}");
+                }
+            });
 
-            // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt
-            // wird, damit die Bitte um Zustimmung nichts anderes nennt.
-            let service = rusty_fish_house::texts::service_name(&base_url);
-            rusty_fish_discord::door::run(
-                token.expose(),
-                config,
-                &state_path,
-                fish,
-                &service,
-                stop::requested(),
-            )
-            .await
+            // Was dem laufenden Fisch gesagt wird, wird hier zu dem, was die
+            // Tür versteht. Ein Profil, das sich nicht laden lässt, hält die
+            // laufenden nicht auf: der Grund steht in der Ausgabe.
+            let (to_door, commands) = tokio::sync::mpsc::unbounded_channel();
+            let mut said = stop::listen();
+            tokio::spawn(async move {
+                while let Some(input) = said.recv().await {
+                    let command = match input {
+                        Input::StopAll => DoorCommand::StopAll,
+                        Input::Stop(name) => DoorCommand::Stop(name),
+                        Input::Start(name) => match folder.clone().and_then(|f| load_profile(&f, &name)) {
+                            Ok(profile) => DoorCommand::Start(Box::new(profile)),
+                            Err(why) => {
+                                eprintln!("rusty-fish: [{name}] cannot start: {why}");
+                                continue;
+                            }
+                        },
+                    };
+                    if to_door.send(command).is_err() {
+                        break;
+                    }
+                }
+                // Der Sender bleibt am Leben: endet dieser Kreis, soll die Tür
+                // das nicht für ein Signal halten.
+                std::future::pending::<()>().await;
+                drop(to_door);
+            });
+
+            rusty_fish_discord::door::run(token.expose(), first, commands, on_change).await
         }
     }
 }
@@ -478,6 +505,31 @@ fn profile(action: ProfileAction) -> Result<(), String> {
 fn folder() -> Result<Folder, String> {
     let home = profiles::home(&|key| std::env::var(key).ok(), profiles::this_os())?;
     Ok(Folder::at(home.join("profiles")))
+}
+
+/// Lädt ein gespeichertes Profil so weit, dass die Tür es bedienen kann.
+fn load_profile(folder: &Folder, name: &str) -> Result<DoorProfile<AnyModel>, String> {
+    profiles::valid_name(name)?;
+    let text = folder.read_config(name)?;
+    serve(Some(name.to_owned()), &text, folder.state_path(name))
+}
+
+/// Aus dem Text eines Profils wird, was die Tür braucht: die geprüften
+/// Einstellungen und die KI, die für dieses Profil übersetzt. Dienst, Adresse
+/// und Schlüssel kommen aus dem Profil.
+fn serve(
+    name: Option<String>,
+    text: &str,
+    state_path: PathBuf,
+) -> Result<DoorProfile<AnyModel>, String> {
+    let config = Config::parse(text)?;
+    let key = key_for(config.provider)?;
+    let base_url = config.service_address();
+    let model = connect(config.provider, Some(&base_url), &config.model, key)?;
+    // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt wird,
+    // damit die Bitte um Zustimmung nichts anderes nennt.
+    let service = rusty_fish_house::texts::service_name(&base_url);
+    Ok(DoorProfile { name, config, state_path, model, service })
 }
 
 fn now() -> u64 {

@@ -14,6 +14,45 @@ fn delivery(text: &str, mark: Mark) -> Delivery {
     Delivery { channel: "222".to_owned(), text: text.to_owned(), mark, from: Sender::Writer }
 }
 
+// --- die Knöpfe, seit ein Fisch mehrere Profile bedient ----------------------
+
+#[test]
+fn a_budget_button_says_which_profile_it_belongs_to() {
+    use rusty_fish_discord::buttons::{Budget, budget_id, budget_of};
+
+    let raise = budget_id(Budget::Raise, Some("tea-time"));
+    let keep = budget_id(Budget::Keep, Some("tea-time"));
+    assert_ne!(raise, keep);
+    assert_eq!(budget_of(&raise), Some((Budget::Raise, Some("tea-time"))));
+    assert_eq!(budget_of(&keep), Some((Budget::Keep, Some("tea-time"))));
+    // Zwei Profile, zwei verschiedene Knöpfe: ein Klick erhöht nur eines.
+    assert_ne!(raise, budget_id(Budget::Raise, Some("probe")));
+    // Discord nimmt höchstens 100 Zeichen für die Kennung eines Knopfs, und ein
+    // Profilname hat höchstens 40.
+    assert!(budget_id(Budget::Raise, Some(&"n".repeat(40))).chars().count() <= 100);
+}
+
+#[test]
+fn a_button_without_a_profile_is_still_understood() {
+    use rusty_fish_discord::buttons::{Budget, budget_id, budget_of};
+
+    // So heißt der Knopf bei einem Fisch mit einer einzelnen Einstellungsdatei
+    // und an Hinweisen von vor dem 21.11.2026.
+    assert_eq!(budget_id(Budget::Raise, None), "rusty-fish-raise");
+    assert_eq!(budget_of("rusty-fish-raise"), Some((Budget::Raise, None)));
+    assert_eq!(budget_of("rusty-fish-keep"), Some((Budget::Keep, None)));
+}
+
+#[test]
+fn what_is_no_budget_button_is_none() {
+    use rusty_fish_discord::buttons::{CONSENT, budget_of};
+
+    assert_eq!(budget_of(CONSENT), None);
+    assert_eq!(budget_of("rusty-fish-raise:"), None, "a colon without a name");
+    assert_eq!(budget_of("someone-elses-button:tea"), None);
+    assert_eq!(budget_of(""), None);
+}
+
 // --- die echte Erwähnung -----------------------------------------------------
 
 #[test]

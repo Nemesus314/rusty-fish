@@ -7,6 +7,7 @@
 //! hereinreichen, Zustellungen unter dem Namen des Schreibenden absetzen,
 //! Knöpfe, die Erwähnung des Bots, Verpasstes nachholen.
 
+pub mod buttons;
 pub mod door;
 pub mod mention;
 pub mod render;
