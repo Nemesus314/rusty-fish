@@ -17,8 +17,10 @@ import 'cli.dart';
 import 'log_file.dart';
 import 'overview.dart';
 import 'start.dart';
+import 'theme_choice.dart';
 
 export 'start.dart';
+export 'theme_choice.dart';
 
 void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,17 +31,26 @@ void main(List<String> args) {
     windows: Platform.isWindows,
   );
   final exe = location.found;
+  // Hell oder dunkel: was beim letzten Mal gewählt wurde, sonst wie Windows.
+  final settings = deskSettingsPath(
+    environment: Platform.environment,
+    windows: Platform.isWindows,
+  );
   runApp(
     DeskApp(
       cli: exe == null ? null : ProcessFishCli(exe),
       location: location,
       openLog: openLogFile,
       startWith: StartRequest.fromArgs(args),
+      theme: ThemeChoice(
+        initial: settings == null ? ThemeMode.system : readThemeMode(settings),
+        remember: settings == null ? null : (mode) => writeThemeMode(settings, mode),
+      ),
     ),
   );
 }
 
-class DeskApp extends StatelessWidget {
+class DeskApp extends StatefulWidget {
   const DeskApp({
     super.key,
     required this.cli,
@@ -49,7 +60,12 @@ class DeskApp extends StatelessWidget {
     this.now,
     this.openLog,
     this.startWith,
+    this.theme,
   });
+
+  /// Die Wahl zwischen hell und dunkel. Ohne Angabe folgt die Maske dem
+  /// System und merkt sich einen Wechsel nur für diesen Lauf.
+  final ThemeChoice? theme;
 
   /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
   final DateTime Function()? now;
@@ -73,24 +89,41 @@ class DeskApp extends StatelessWidget {
   final String Function()? today;
 
   @override
+  State<DeskApp> createState() => _DeskAppState();
+}
+
+class _DeskAppState extends State<DeskApp> {
+  late final ThemeChoice _theme = widget.theme ?? ThemeChoice();
+
+  /// Dieselbe Grundfarbe für beide Fassungen, damit hell und dunkel als
+  /// dieselbe Maske zu erkennen sind.
+  static const _seed = Color(0xFF1F6F8B);
+
+  @override
   Widget build(BuildContext context) {
-    final cli = this.cli;
-    return MaterialApp(
-      title: 'Rusty Fish',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1F6F8B)),
+    final cli = widget.cli;
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: _theme,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'Rusty Fish',
+        debugShowCheckedModeBanner: false,
+        themeMode: mode,
+        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: _seed)),
+        darkTheme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: _seed, brightness: Brightness.dark),
+        ),
+        home: cli == null
+            ? MissingFishPage(checked: widget.location?.checked ?? const [])
+            : OverviewPage(
+                cli: cli,
+                refreshEvery: widget.refreshEvery,
+                today: widget.today ?? utcToday,
+                now: widget.now,
+                openLog: widget.openLog,
+                startWith: widget.startWith,
+                theme: _theme,
+              ),
       ),
-      home: cli == null
-          ? MissingFishPage(checked: location?.checked ?? const [])
-          : OverviewPage(
-              cli: cli,
-              refreshEvery: refreshEvery,
-              today: today ?? utcToday,
-              now: now,
-              openLog: openLog,
-              startWith: startWith,
-            ),
     );
   }
 }

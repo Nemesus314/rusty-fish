@@ -25,11 +25,16 @@ class Seat {
   const Seat({
     required this.channel,
     required this.lang,
+    this.door = discordDoor,
     this.gender,
     this.owner,
     this.served = true,
   });
 
+  /// Die Tür, zu der dieser Tisch gehört. Bisher gibt es nur Discord.
+  final String door;
+
+  /// Die Kennung des Kanals an dieser Tür.
   final String channel;
 
   /// Die Sprache des Platzes. Sie gilt, solange der Besitzer keine
@@ -37,7 +42,8 @@ class Seat {
   final String lang;
   final Gender? gender;
 
-  /// Die Discord-Kennung des Menschen, dessen Tisch das ist. Ohne Angabe
+  /// Der Mensch, dessen Tisch das ist: sein Name, wie unter den Menschen des
+  /// Profils, oder seine Discord-Kennung (siehe [Person.ref]). Ohne Angabe
   /// gehört der Platz niemandem im Besonderen, wie vor dem 20.11.2026.
   final String? owner;
 
@@ -48,6 +54,8 @@ class Seat {
   final bool served;
 
   factory Seat.fromJson(Map<String, dynamic> json) => Seat(
+    // Ein älteres Programm nennt keine Tür: dann ist es Discord.
+    door: _text(json['door']) ?? discordDoor,
     channel: '${json['channel'] ?? ''}',
     lang: '${json['lang'] ?? ''}',
     gender: genderFromJson(json['gender']),
@@ -59,6 +67,8 @@ class Seat {
   /// Felder ab, die es nicht kennt, und nimmt ein Profil ohne die neuen
   /// Angaben so weiter an.
   Map<String, dynamic> toJson() => {
+    // Discord ist die Tür, die gilt, wenn keine genannt ist.
+    if (door != discordDoor) 'door': door,
     'channel': channel,
     'lang': lang,
     'gender': genderToJson(gender),
@@ -97,14 +107,28 @@ class Room {
 /// Menschen und nicht mehr nur zum Kanal, so wie zuvor schon die Form.
 class Person {
   const Person({
-    required this.id,
+    this.id = '',
+    this.name,
     this.gender,
     this.lang,
     this.neutral,
     this.invited = false,
   });
 
+  /// Die Kennung an der Discord-Tür. Leer, solange man sie noch nicht hat:
+  /// ein Tisch lässt sich schon vorher für jemanden bauen.
   final String id;
+
+  /// Der Name, den der Gastgeber diesem Menschen gibt. Er steht nur im Profil
+  /// und in der Maske; weder Discord noch die KI bekommen ihn.
+  ///
+  /// Entschieden von Nemesus am 21.11.2026: die Namen, die er vergibt,
+  /// gehören in die Maske, damit man sofort sieht, für wen ein Tisch gebaut ist.
+  final String? name;
+
+  /// Womit das Profil auf diesen Menschen zeigt (an einem Tisch, als
+  /// Gastgeber): mit seinem Namen, sonst mit seiner Kennung.
+  String get ref => name ?? id;
 
   /// Die grammatische Form. Bis zum 20.11.2026 Pflicht, seitdem freiwillig:
   /// wer nur seine Muttersprache nennen will, muss keine Form angeben.
@@ -126,7 +150,9 @@ class Person {
   factory Person.fromJson(Map<String, dynamic> json) {
     final neutral = json['neutral'];
     return Person(
-      id: '${json['id'] ?? ''}',
+      // Bis zum 21.11.2026 hieß die Kennung im Austausch `id`.
+      id: _text(json['discord']) ?? _text(json['id']) ?? '',
+      name: _text(json['name']),
       // Bis zum 20.11.2026 stand hier „?? Gender.female": eine fehlende Form
       // wurde still zur weiblichen. Seit die Form freiwillig ist, bleibt eine
       // fehlende Angabe eine fehlende Angabe.
@@ -139,7 +165,8 @@ class Person {
 
   /// Was nicht gesetzt ist, geht nicht hinaus (siehe [Seat.toJson]).
   Map<String, dynamic> toJson() => {
-    'id': id,
+    'name': ?name,
+    if (id.isNotEmpty) 'discord': id,
     'gender': genderToJson(gender),
     'lang': ?lang,
     'neutral': ?neutral,
@@ -159,25 +186,80 @@ String servesText(ProfileDoc doc) {
     return 'Translates at every table';
   }
   final served = seats.where((seat) => seat.served);
-  final host = served.any((seat) => seat.owner == doc.host);
+  final host = served.any(doc.ownedByHost);
+  // Jeder Gast einmal, auch wenn ihm mehrere Tische gehören oder das Profil
+  // einmal mit dem Namen und einmal mit der Kennung auf ihn zeigt.
   final guests = {
     for (final seat in served)
-      if (seat.owner != null && seat.owner != doc.host) seat.owner!,
-  }.length;
+      if (seat.owner != null && !doc.ownedByHost(seat))
+        doc.person(seat.owner)?.ref ?? seat.owner!,
+  };
   final open = served.where((seat) => seat.owner == null).length;
 
+  // Wer einen Namen hat, wird genannt; die anderen werden gezählt.
+  final named = [for (final ref in guests) ?doc.person(ref)?.name];
+  final unnamed = guests.length - named.length;
   final people = [
     if (host) 'you',
-    if (guests == 1) '1 invited guest',
-    if (guests > 1) '$guests invited guests',
+    ...named,
+    if (unnamed == 1) '1 invited guest',
+    if (unnamed > 1) '$unnamed invited guests',
   ];
   final tables = open == 1 ? '1 table' : '$open tables';
   if (people.isEmpty) {
     return open == 0 ? 'Translates at no table' : 'Translates at $tables without an owner';
   }
-  final forWhom = 'Translates for ${people.join(' and ')}';
+  // "you and Robin", ab dreien "you, Robin and 1 invited guest".
+  final last = people.removeLast();
+  final forWhom = 'Translates for ${people.isEmpty ? last : '${people.join(', ')} and $last'}';
   return open == 0 ? forWhom : '$forWhom, and at $tables without an owner';
 }
+
+/// Die Tür, die es bisher gibt.
+const discordDoor = 'discord';
+
+/// Wie eine Tür in der Maske heißt.
+String doorLabel(String door) => switch (door) {
+  discordDoor => 'Discord',
+  'matrix' => 'Matrix',
+  _ => door,
+};
+
+/// Kann diese Tür Ende zu Ende verschlüsseln? Discord kann es nicht.
+bool doorCanEncrypt(String door) => door == 'matrix';
+
+/// Über welche Türen ein Raum läuft, und was das für die Verschlüsselung
+/// heißt: etwa "Discord ⇄ Discord · not end-to-end encrypted".
+///
+/// Entschieden von Nemesus am 21.11.2026: man muss sehen, ob eine Verbindung
+/// Matrix mit Discord, Discord mit Discord oder Matrix mit Matrix ist, weil
+/// Matrix verschlüsseln kann und Discord nicht.
+///
+/// Ein Raum ist so offen wie sein offenster Tisch: was an einem
+/// verschlüsselten Tisch geschrieben wird, erscheint übersetzt auch an den
+/// anderen. Und der KI-Dienst liest in jedem Fall, was er übersetzt; das
+/// sagt der Hinweis an der Karte dazu.
+String connectionText(Room room) {
+  final doors = [for (final seat in room.seats) seat.door];
+  final route = doors.map(doorLabel).join(' ⇄ ');
+  final open = {
+    for (final door in doors)
+      if (!doorCanEncrypt(door)) doorLabel(door),
+  };
+  if (open.isEmpty) {
+    return '$route · end-to-end encrypted up to the fish';
+  }
+  if (open.length == doors.toSet().length) {
+    return '$route · not end-to-end encrypted';
+  }
+  return '$route · not end-to-end encrypted on ${open.join(' and ')}';
+}
+
+/// Was die Zeile über die Verbindung verschweigen würde, als Hinweis beim
+/// Darüberfahren.
+const connectionHint =
+    'Whoever runs a door that does not encrypt end to end can read what is written there. '
+    'The AI service reads every message it translates, whatever the door.';
 
 /// Tische, an denen dieser Fisch nur mitliest. Dort schreibt der Fisch dessen,
 /// dem der Tisch gehört, oder niemand.
@@ -383,17 +465,44 @@ class ProfileDoc {
     'people': [for (final person in people) person.toJson()],
   };
 
-  /// Der Mensch mit dieser Kennung, falls das Profil ihn nennt.
-  Person? person(String? id) {
-    if (id == null) {
+  /// Der Mensch, auf den dieser Name oder diese Kennung zeigt, falls das
+  /// Profil ihn nennt.
+  Person? person(String? ref) {
+    if (ref == null || ref.isEmpty) {
       return null;
     }
     for (final person in people) {
-      if (person.id == id) {
+      if (person.name == ref || person.id == ref) {
         return person;
       }
     }
     return null;
+  }
+
+  /// Ist dieser Mensch der Gastgeber? Das Profil nennt den Gastgeber mit
+  /// seinem Namen oder mit seiner Kennung.
+  bool isHost(Person person) => host.isNotEmpty && (person.id == host || person.name == host);
+
+  /// Gehört dieser Tisch dem Gastgeber?
+  bool ownedByHost(Seat seat) {
+    final owner = seat.owner;
+    if (owner == null || host.isEmpty) {
+      return false;
+    }
+    if (owner == host) {
+      return true;
+    }
+    final who = person(owner);
+    return who != null && isHost(who);
+  }
+
+  /// Ein Tisch als kurzer Text für die Karte: für wen er gebaut ist und in
+  /// welcher Sprache dort gelesen wird, etwa "Robin · Russian". Ohne Namen
+  /// nur die Sprache.
+  String tableText(Seat seat) {
+    final name = person(seat.owner)?.name;
+    final lang = languageAt(seat);
+    return name == null ? lang : '$name · $lang';
   }
 
   /// In welche Sprache an diesem Tisch übersetzt wird: die Muttersprache des

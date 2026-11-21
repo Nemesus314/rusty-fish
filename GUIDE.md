@@ -118,8 +118,11 @@ account there.
    - Rooms: one seat per channel with its Channel ID and its language, and
      whose table it is. Also the neutral language and how many earlier
      messages the AI sees for context.
-   - People: for each person their Discord user ID, mother tongue, neutral
-     languages, grammatical form, and whether you invite them.
+   - People: for each person a name of your choosing, their Discord user ID,
+     mother tongue, neutral languages, grammatical form, and whether you
+     invite them. The name is only your label, so you can see whose table is
+     whose; it stays on your PC, and neither Discord nor the AI gets it. The
+     Discord user ID can follow later.
 3. Save. The profile appears as a card. Press "Start" on it; the bot goes
    online in Discord. "Stop", or closing the window, takes it offline.
 
@@ -129,6 +132,9 @@ openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 
 ## Limits
 
+- Nothing here is end-to-end encrypted. Discord can read what is written in
+  its channels, and the AI service reads every message it translates. The
+  window says for each room over which service it runs.
 - The fish runs only while the window is open and the PC is awake.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.

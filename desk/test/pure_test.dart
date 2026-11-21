@@ -4,10 +4,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart' show Brightness, ThemeMode;
 import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/desk_state.dart';
 import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/model.dart';
+import 'package:rusty_fish_desk/theme_choice.dart';
 
 void main() {
   group('locating the program', () {
@@ -329,7 +331,7 @@ void main() {
       final json = doc.toJson();
       final people = json['people'] as List;
       expect(people[1], {
-        'id': '200',
+        'discord': '200',
         'gender': null,
         'lang': 'Russian',
         'neutral': ['English', 'French'],
@@ -367,7 +369,7 @@ void main() {
       // Was nicht gesetzt ist, geht auch nicht hinaus. Ein älteres Programm
       // lehnt Felder ab, die es nicht kennt.
       final json = doc.toJson();
-      expect((json['people'] as List).single, {'id': '200', 'gender': 'female'});
+      expect((json['people'] as List).single, {'discord': '200', 'gender': 'female'});
       expect(((json['rooms'] as List).single['seats'] as List).first, {
         'channel': '111',
         'lang': 'German',
@@ -453,6 +455,163 @@ void main() {
       ]);
       expect(servesText(nobody), 'Translates at no table');
       expect(readOnlyText(nobody), '2 tables are read only');
+    });
+  });
+
+  group('names the host gives, and the door of a table', () {
+    // Der Gastgeber heißt Nemo und hat eine Kennung, Robin hat noch keine,
+    // und ein Dritter steht nur mit seiner Kennung da.
+    ProfileDoc named({String host = 'Nemo', String hostTable = 'Nemo'}) => ProfileDoc(
+      name: 'tea',
+      provider: 'openai',
+      model: 'm',
+      baseUrl: null,
+      host: host,
+      aiNames: const [],
+      limits: const Limits(translationTokensPerDay: 1, questionsPerGuestPerDay: 1),
+      rooms: [
+        Room(
+          passThrough: const [],
+          contextLines: 1,
+          seats: [
+            Seat(channel: '1', lang: 'German', owner: hostTable),
+            const Seat(channel: '2', lang: 'English', owner: 'Robin'),
+            const Seat(channel: '3', lang: 'Korean', owner: '300'),
+          ],
+        ),
+      ],
+      people: const [
+        Person(id: '100', name: 'Nemo'),
+        Person(name: 'Robin', lang: 'Russian', invited: true),
+        Person(id: '300'),
+      ],
+    );
+
+    test('a person is read with a name and an id, under the new and the old word', () {
+      final robin = Person.fromJson({'name': 'Robin', 'discord': '7'});
+      expect(robin.name, 'Robin');
+      expect(robin.id, '7');
+      expect(robin.ref, 'Robin', reason: 'tables point at a person by name');
+
+      // So schrieb es das Programm bis zum 21.11.2026.
+      final old = Person.fromJson({'id': '7', 'name': null});
+      expect(old.name, isNull);
+      expect(old.id, '7');
+      expect(old.ref, '7');
+    });
+
+    test('a name goes out, an id that is not known yet does not', () {
+      expect(const Person(name: 'Robin').toJson(), {'name': 'Robin', 'gender': null});
+      expect(const Person(id: '7', name: 'Robin').toJson(), {
+        'name': 'Robin',
+        'discord': '7',
+        'gender': null,
+      });
+    });
+
+    test('the card says for whom a table is built', () {
+      final doc = named();
+      final seats = doc.rooms.single.seats;
+      expect(doc.tableText(seats[0]), 'Nemo · German');
+      // Die Muttersprache des Besitzers gilt, auch ohne Kennung.
+      expect(doc.tableText(seats[1]), 'Robin · Russian');
+      // Wer keinen Namen hat, erscheint nicht als Zahl.
+      expect(doc.tableText(seats[2]), 'Korean');
+    });
+
+    test('a named guest is named, the others are counted', () {
+      expect(servesText(named()), 'Translates for you, Robin and 1 invited guest');
+    });
+
+    test('the host is the same person by name and by id', () {
+      // Das Profil nennt den Gastgeber mit der Kennung, sein Tisch mit dem Namen.
+      expect(servesText(named(host: '100')), startsWith('Translates for you,'));
+      // Und umgekehrt.
+      expect(servesText(named(hostTable: '100')), startsWith('Translates for you,'));
+      final doc = named();
+      expect(doc.isHost(doc.people[0]), isTrue);
+      expect(doc.isHost(doc.people[1]), isFalse);
+    });
+
+    test('a table names its door, and Discord is meant when none is named', () {
+      expect(Seat.fromJson({'channel': '1', 'lang': 'German'}).door, 'discord');
+      expect(Seat.fromJson({'door': 'matrix', 'channel': '1', 'lang': 'German'}).door, 'matrix');
+      expect(const Seat(channel: '1', lang: 'German').toJson().containsKey('door'), isFalse);
+      expect(const Seat(door: 'matrix', channel: '1', lang: 'German').toJson()['door'], 'matrix');
+    });
+
+    test('the connection says which doors, and whether the way is encrypted', () {
+      Room over(List<String> doors) => Room(
+        passThrough: const [],
+        contextLines: 1,
+        seats: [for (final door in doors) Seat(door: door, channel: '1', lang: 'German')],
+      );
+      expect(
+        connectionText(over(['discord', 'discord'])),
+        'Discord ⇄ Discord · not end-to-end encrypted',
+      );
+      // Ein Raum ist so offen wie sein offenster Tisch.
+      expect(
+        connectionText(over(['discord', 'matrix'])),
+        'Discord ⇄ Matrix · not end-to-end encrypted on Discord',
+      );
+      // Auch dann liest der Fisch mit, und mit ihm der KI-Dienst.
+      expect(
+        connectionText(over(['matrix', 'matrix'])),
+        'Matrix ⇄ Matrix · end-to-end encrypted up to the fish',
+      );
+      expect(connectionHint, contains('AI service reads every message'));
+    });
+  });
+
+  group('light or dark', () {
+    test('the choice is written as a word and read back', () {
+      for (final mode in ThemeMode.values) {
+        expect(themeModeFromText(themeModeToText(mode)), mode);
+      }
+      expect(themeModeFromText(null), ThemeMode.system);
+      expect(themeModeFromText('purple'), ThemeMode.system);
+    });
+
+    test('it is kept in the folder of rusty-fish, by the rule of the program', () {
+      expect(
+        deskSettingsPath(environment: {'APPDATA': r'C:\Users\x\AppData\Roaming'}, windows: true),
+        r'C:\Users\x\AppData\Roaming\rusty-fish\desk.json',
+      );
+      expect(
+        deskSettingsPath(
+          environment: {'RUSTY_FISH_HOME': r'D:\fish', 'APPDATA': r'C:\x'},
+          windows: true,
+        ),
+        r'D:\fish\desk.json',
+      );
+      expect(deskSettingsPath(environment: {'RUSTY_FISH_HOME': '/fish'}, windows: false), '/fish/desk.json');
+      // Ohne Ort gilt die Wahl nur, solange das Fenster offen ist.
+      expect(deskSettingsPath(environment: {'HOME': '/home/x'}, windows: false), isNull);
+    });
+
+    test('the first click turns what is shown around, and the choice is remembered', () {
+      final remembered = <ThemeMode>[];
+      final choice = ThemeChoice(remember: remembered.add);
+      expect(choice.value, ThemeMode.system);
+      // Windows ist hell eingestellt: der erste Klick macht dunkel.
+      choice.toggle(Brightness.light);
+      expect(choice.value, ThemeMode.dark);
+      choice.toggle(Brightness.dark);
+      expect(choice.value, ThemeMode.light);
+      expect(remembered, [ThemeMode.dark, ThemeMode.light]);
+    });
+
+    test('the choice survives closing the window, and a broken file does no harm', () {
+      final dir = Directory.systemTemp.createTempSync('rusty-fish-theme');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // Der Ordner darf noch fehlen.
+      final path = '${dir.path}${Platform.pathSeparator}new${Platform.pathSeparator}desk.json';
+      expect(readThemeMode(path), ThemeMode.system, reason: 'no file yet');
+      writeThemeMode(path, ThemeMode.dark);
+      expect(readThemeMode(path), ThemeMode.dark);
+      File(path).writeAsStringSync('not json');
+      expect(readThemeMode(path), ThemeMode.system);
     });
   });
 }

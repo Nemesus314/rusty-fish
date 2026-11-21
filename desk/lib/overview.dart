@@ -14,6 +14,7 @@ import 'log_file.dart';
 import 'model.dart';
 import 'secrets.dart';
 import 'start.dart';
+import 'theme_choice.dart';
 
 class OverviewPage extends StatefulWidget {
   const OverviewPage({
@@ -24,7 +25,11 @@ class OverviewPage extends StatefulWidget {
     this.now,
     this.openLog,
     this.startWith,
+    this.theme,
   });
+
+  /// Die Wahl zwischen hell und dunkel. Ohne Angabe gibt es keinen Umschalter.
+  final ThemeChoice? theme;
 
   final FishCli cli;
   final Duration? refreshEvery;
@@ -286,6 +291,19 @@ class _OverviewPageState extends State<OverviewPage> {
                   onPressed: _secrets,
                 ),
               ),
+              // Hell oder dunkel. Das Zeichen zeigt, wohin der Klick führt.
+              if (widget.theme case final choice?)
+                Builder(
+                  builder: (context) {
+                    final dark = Theme.of(context).brightness == Brightness.dark;
+                    return IconButton(
+                      key: const ValueKey('toggle-theme'),
+                      tooltip: dark ? 'Switch to light' : 'Switch to dark',
+                      onPressed: () => choice.toggle(Theme.of(context).brightness),
+                      icon: Icon(dark ? Icons.light_mode : Icons.dark_mode),
+                    );
+                  },
+                ),
               const SizedBox(width: 8),
             ],
           ),
@@ -496,13 +514,21 @@ class _ProfileCard extends StatelessWidget {
               ),
               Text(entry.path, style: theme.textTheme.bodySmall),
             ] else ...[
-              for (final room in doc.rooms)
+              for (final room in doc.rooms) ...[
                 Text(
-                  // Die Sprache eines Tisches ist die Muttersprache seines
-                  // Besitzers, sonst die des Platzes.
-                  room.seats.map(doc.languageAt).join(' ⇄ '),
+                  // Für wen ein Tisch gebaut ist, und in welcher Sprache dort
+                  // gelesen wird: die Muttersprache seines Besitzers, sonst
+                  // die des Platzes.
+                  room.seats.map(doc.tableText).join(' ⇄ '),
                   style: theme.textTheme.titleMedium,
                 ),
+                // Über welche Türen der Raum läuft. Daran hängt, ob das
+                // Gespräch unterwegs verschlüsselt ist.
+                Tooltip(
+                  message: connectionHint,
+                  child: Text(connectionText(room), style: theme.textTheme.bodySmall),
+                ),
+              ],
               const SizedBox(height: 4),
               // Welcher Dienst mit welchem Modell übersetzt. Das ist seit dem
               // 20.11.2026 je Profil wählbar und gehört deshalb auf die Karte.

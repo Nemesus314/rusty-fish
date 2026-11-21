@@ -64,13 +64,18 @@ class _SeatDraft {
     : channel = TextEditingController(text: seat.channel),
       lang = TextEditingController(text: seat.lang),
       form = _formOf(seat.gender),
+      door = seat.door,
       owner = seat.owner ?? '';
 
   final TextEditingController channel;
   final TextEditingController lang;
   _Form form;
 
-  /// Die Kennung dessen, dem der Tisch gehört. Leer: niemandem im Besonderen.
+  /// Die Tür dieses Tisches. Bisher gibt es nur Discord, deshalb kein Feld.
+  final String door;
+
+  /// Wem der Tisch gehört: der Name des Menschen, sonst seine Kennung (siehe
+  /// [_PersonDraft.ref]). Leer: niemandem im Besonderen.
   String owner;
 
   void dispose() {
@@ -100,14 +105,28 @@ class _RoomDraft {
 
 class _PersonDraft {
   _PersonDraft(Person? person)
-    : id = TextEditingController(text: person?.id ?? ''),
+    : name = TextEditingController(text: person?.name ?? ''),
+      id = TextEditingController(text: person?.id ?? ''),
       lang = TextEditingController(text: person?.lang ?? ''),
       neutral = TextEditingController(text: person?.neutral?.join(', ') ?? ''),
       // Bis zum 20.11.2026 begann ein neuer Mensch mit der weiblichen Form,
       // weil eine Form Pflicht war. Seitdem ist sie freiwillig.
       form = _formOf(person?.gender),
       invited = person?.invited ?? false,
-      _nothingNeutral = person?.neutral?.isEmpty ?? false;
+      _nothingNeutral = person?.neutral?.isEmpty ?? false {
+    lastRef = ref;
+  }
+
+  /// Der Name, den der Gastgeber diesem Menschen gibt.
+  final TextEditingController name;
+
+  /// Womit Tische auf diesen Menschen zeigen: mit seinem Namen, sonst mit
+  /// seiner Kennung. So schreibt es auch das Programm ins Profil.
+  String get ref => name.text.trim().isNotEmpty ? name.text.trim() : id.text.trim();
+
+  /// Worauf die Tische zuletzt zeigten. Ändert sich [ref], weil jemand den
+  /// Namen tippt, ziehen die Tische dieses Menschen mit.
+  String lastRef = '';
 
   final TextEditingController id;
   final TextEditingController lang;
@@ -135,6 +154,7 @@ class _PersonDraft {
   }
 
   void dispose() {
+    name.dispose();
     id.dispose();
     lang.dispose();
     neutral.dispose();
@@ -190,6 +210,18 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _aiNames = [for (final name in doc.aiNames) TextEditingController(text: name)];
     _rooms = [for (final room in doc.rooms) _RoomDraft(room)];
     _people = [for (final person in doc.people) _watched(_PersonDraft(person))];
+    // Ein Profil kann mit dem Namen oder mit der Kennung auf einen Menschen
+    // zeigen. Im Formular zeigt jeder Tisch einheitlich mit [_PersonDraft.ref]
+    // auf seinen Besitzer, damit die Auswahl ihn findet.
+    for (final seat in _rooms.expand((room) => room.seats)) {
+      for (final person in _people) {
+        final owner = seat.owner;
+        if (owner.isNotEmpty && (owner == person.name.text.trim() || owner == person.id.text.trim())) {
+          seat.owner = person.ref;
+          break;
+        }
+      }
+    }
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
     // Die Auswahl „Whose table" nennt den Gastgeber mit seiner Kennung, und
@@ -228,24 +260,60 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   /// Kennung und Muttersprache eines Menschen stehen auch in der Auswahl
   /// „Whose table". Ändert sich dort etwas, muss die Auswahl es zeigen.
   _PersonDraft _watched(_PersonDraft person) {
-    person.id.addListener(_redraw);
+    void followed() => _followRef(person);
+    person.name.addListener(followed);
+    person.id.addListener(followed);
     person.lang.addListener(_redraw);
     return person;
   }
 
+  /// Der Name oder die Kennung eines Menschen hat sich geändert. Die Tische,
+  /// die auf ihn zeigten, zeigen weiter auf ihn.
+  void _followRef(_PersonDraft person) {
+    final before = person.lastRef;
+    final now = person.ref;
+    if (before != now) {
+      // Nur wenn kein anderer Mensch dieselbe Angabe trägt: sonst wäre nicht
+      // zu sagen, wessen Tische mitziehen sollen.
+      final shared = _people.any((other) => other != person && other.ref == before);
+      if (before.isNotEmpty && !shared) {
+        for (final seat in _rooms.expand((room) => room.seats)) {
+          if (seat.owner == before) {
+            seat.owner = now;
+          }
+        }
+      }
+      person.lastRef = now;
+    }
+    _redraw();
+  }
+
+  /// Der Gastgeber, wie er im Feld steht: seine Kennung oder sein Name.
   String get _hostId => _host.text.trim();
 
-  /// Die Muttersprache eines Menschen, so wie sie gerade im Formular steht.
-  String? _motherTongue(String id) {
-    if (id.isEmpty) {
+  /// Ist dieser Mensch der Gastgeber?
+  bool _isHost(_PersonDraft person) {
+    final host = _hostId;
+    return host.isNotEmpty && (person.id.text.trim() == host || person.name.text.trim() == host);
+  }
+
+  /// Der Mensch, auf den ein Tisch zeigt, so wie er gerade im Formular steht.
+  _PersonDraft? _personAt(String ref) {
+    if (ref.isEmpty) {
       return null;
     }
     for (final person in _people) {
-      if (person.id.text.trim() == id && person.lang.text.trim().isNotEmpty) {
-        return person.lang.text.trim();
+      if (person.ref == ref) {
+        return person;
       }
     }
     return null;
+  }
+
+  /// Die Muttersprache eines Menschen, so wie sie gerade im Formular steht.
+  String? _motherTongue(String ref) {
+    final lang = _personAt(ref)?.lang.text.trim() ?? '';
+    return lang.isEmpty ? null : lang;
   }
 
   /// Wer als Besitzer eines Tisches zur Wahl steht: niemand, der Gastgeber und
@@ -259,24 +327,32 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     }
 
     final host = _hostId;
-    final ids = <String>{
-      for (final person in _people)
-        if (person.id.text.trim().isNotEmpty && person.id.text.trim() != host)
-          person.id.text.trim(),
-    };
+    // Jede Angabe einmal: eine Auswahl verträgt keinen Wert doppelt, auch
+    // nicht für den Augenblick, in dem zwei Menschen gleich heißen.
+    final choices = <String, String>{};
+    // Der Gastgeber zuerst. Steht er nicht unter den Menschen, zeigt ein
+    // Tisch mit seiner Kennung auf ihn, wie vor dem 21.11.2026.
+    for (final person in _people.where(_isHost)) {
+      if (person.ref.isNotEmpty) {
+        choices.putIfAbsent(person.ref, () => 'You (host) · ${person.ref}');
+      }
+    }
+    if (choices.isEmpty && host.isNotEmpty) {
+      choices[host] = 'You (host) · $host';
+    }
+    for (final person in _people) {
+      if (person.ref.isNotEmpty) {
+        choices.putIfAbsent(person.ref, () => person.ref);
+      }
+    }
     return [
       const DropdownMenuItem(value: '', child: Text('nobody in particular')),
-      if (host.isNotEmpty)
+      for (final MapEntry(key: ref, value: label) in choices.entries)
         DropdownMenuItem(
-          value: host,
-          child: Text(withTongue('You (host) · $host', host), overflow: TextOverflow.ellipsis),
+          value: ref,
+          child: Text(withTongue(label, ref), overflow: TextOverflow.ellipsis),
         ),
-      for (final id in ids)
-        DropdownMenuItem(
-          value: id,
-          child: Text(withTongue(id, id), overflow: TextOverflow.ellipsis),
-        ),
-      if (current.isNotEmpty && current != host && !ids.contains(current))
+      if (current.isNotEmpty && !choices.containsKey(current))
         DropdownMenuItem(
           value: current,
           child: Text('$current (not listed under People)', overflow: TextOverflow.ellipsis),
@@ -382,6 +458,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           seats: [
             for (final seat in room.seats)
               Seat(
+                door: seat.door,
                 channel: seat.channel.text.trim(),
                 lang: seat.lang.text.trim(),
                 gender: _genderOf(seat.form),
@@ -409,10 +486,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       ),
       rooms: rooms,
       people: [
+        // Eine Zeile ohne Namen und ohne Kennung ist über niemanden.
         for (final person in _people)
-          if (person.id.text.trim().isNotEmpty)
+          if (person.ref.isNotEmpty)
             Person(
               id: person.id.text.trim(),
+              name: person.name.text.trim().isEmpty ? null : person.name.text.trim(),
               gender: _genderOf(person.form),
               lang: person.lang.text.trim().isEmpty ? null : person.lang.text.trim(),
               neutral: person.neutralLangs,
@@ -977,7 +1056,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             child: TextField(
               key: ValueKey('seat-$r-$s-channel'),
               controller: seat.channel,
-              decoration: const InputDecoration(labelText: 'Channel ID'),
+              decoration: const InputDecoration(labelText: 'Discord channel ID'),
             ),
           ),
           const SizedBox(width: 12),
@@ -1035,7 +1114,6 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   }
 
   Widget _peopleSection() {
-    final host = _hostId;
     return _Section(
       key: _peopleKey,
       title: 'People',
@@ -1049,13 +1127,20 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         ),
         const SizedBox(height: 4),
         Text(
+          'Name: your own label for this person, so you can see whose table is whose. '
+          'It stays in this profile; neither Discord nor the AI gets it. '
+          'The Discord user ID can follow later.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
           'Invited: your fish translates for this person, on your key. '
           'You as the host need no tick.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
         for (final (index, person) in _people.indexed)
-          _person(index, person, isHost: host.isNotEmpty && person.id.text.trim() == host),
+          _person(index, person, isHost: _isHost(person)),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -1076,14 +1161,25 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
+            flex: 2,
+            child: TextField(
+              key: ValueKey('person-$index-name'),
+              controller: person.name,
+              decoration: InputDecoration(
+                labelText: 'Name',
+                hintText: 'Robin',
+                helperText: isHost ? 'This is you, the host.' : null,
+                helperMaxLines: 2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
             flex: 3,
             child: TextField(
               key: ValueKey('person-$index-id'),
               controller: person.id,
-              decoration: InputDecoration(
-                labelText: 'Discord user ID',
-                helperText: isHost ? 'This is you, the host.' : null,
-              ),
+              decoration: const InputDecoration(labelText: 'Discord user ID'),
             ),
           ),
           const SizedBox(width: 12),
@@ -1107,7 +1203,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
               decoration: const InputDecoration(
                 labelText: 'Neutral languages',
                 helperText: 'Stay untranslated for this person. Empty: as in the room.',
-                helperMaxLines: 2,
+                helperMaxLines: 3,
               ),
             ),
           ),

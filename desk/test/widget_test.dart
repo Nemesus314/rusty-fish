@@ -945,4 +945,140 @@ void startRequests() {
     expect(at.profile, 'tea');
     expect(at.section, 'people');
   });
+
+  group('names the host gives', () {
+    // Nemo ist der Gastgeber. Robin hat einen Tisch, aber noch keine Kennung.
+    FakeCli withNames() => FakeCli(
+      entries: [
+        entryOf(
+          docOf(
+            'tea',
+            people: const [
+              Person(id: '100', name: 'Nemo', lang: 'German'),
+              Person(name: 'Robin', lang: 'Russian', invited: true),
+            ],
+            seats: const [
+              Seat(channel: '111', lang: 'German', owner: 'Nemo'),
+              Seat(channel: '222', lang: 'English', owner: 'Robin'),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    testWidgets('the card shows for whom the tables are built and over which door', (tester) async {
+      await open(tester, withNames());
+
+      expect(inCard('tea', find.text('Nemo · German ⇄ Robin · Russian')), findsOneWidget);
+      expect(inCard('tea', find.text('Translates for you and Robin')), findsOneWidget);
+      expect(
+        inCard('tea', find.text('Discord ⇄ Discord · not end-to-end encrypted')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a name is typed once and the table follows it', (tester) async {
+      final fake = withNames();
+      await open(tester, fake);
+      await tester.tap(inCard('tea', find.text('Edit')));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const ValueKey('person-1-name')));
+      await tester.pumpAndSettle();
+      expect(textOf(tester, const ValueKey('person-1-name')), 'Robin');
+      expect(textOf(tester, const ValueKey('person-1-id')), '', reason: 'no id yet');
+      // Der Gastgeber steht mit seinem Namen da und ist als solcher erkannt.
+      expect(textOf(tester, const ValueKey('person-0-name')), 'Nemo');
+      expect(find.text('This is you, the host.'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const ValueKey('person-1-name')), 'Robin Goodfellow');
+      await tester.enterText(find.byKey(const ValueKey('person-1-id')), '200');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      expect(saved.people[1].name, 'Robin Goodfellow');
+      expect(saved.people[1].id, '200');
+      expect(saved.people[1].invited, isTrue);
+      // Der Tisch zeigt weiter auf denselben Menschen, unter dem neuen Namen.
+      expect(saved.rooms.single.seats[1].owner, 'Robin Goodfellow');
+      expect(saved.rooms.single.seats[0].owner, 'Nemo');
+    });
+
+    testWidgets('a profile that points at people by id opens with their names', (tester) async {
+      // So steht es in einem Profil von vor dem 21.11.2026, dem jemand von
+      // Hand Namen gegeben hat: die Tische zeigen noch mit Kennungen.
+      final fake = FakeCli(
+        entries: [
+          entryOf(
+            docOf(
+              'tea',
+              people: const [
+                Person(id: '100', name: 'Nemo'),
+                Person(id: '200', name: 'Robin', invited: true),
+              ],
+              seats: const [
+                Seat(channel: '111', lang: 'German', owner: '100'),
+                Seat(channel: '222', lang: 'Russian', owner: '200'),
+              ],
+            ),
+          ),
+        ],
+      );
+      await open(tester, fake);
+      expect(inCard('tea', find.text('Nemo · German ⇄ Robin · Russian')), findsOneWidget);
+      expect(inCard('tea', find.text('Translates for you and Robin')), findsOneWidget);
+
+      await tester.tap(inCard('tea', find.text('Edit')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('not listed under People'), findsNothing);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      // Gespeichert zeigen die Tische mit dem Namen auf ihre Besitzer.
+      expect(fake.saved.single.rooms.single.seats.map((s) => s.owner), ['Nemo', 'Robin']);
+    });
+  });
+
+  group('light or dark', () {
+    Future<void> openWith(WidgetTester tester, ThemeChoice choice) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        DeskApp(
+          cli: FakeCli(entries: [entryOf(docOf('study'))]),
+          refreshEvery: null,
+          today: () => today,
+          theme: choice,
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Brightness shown(WidgetTester tester) =>
+        Theme.of(tester.element(find.byKey(const ValueKey('profile-study')))).brightness;
+
+    testWidgets('one click turns the whole window dark, another one light again', (tester) async {
+      final remembered = <ThemeMode>[];
+      await openWith(tester, ThemeChoice(initial: ThemeMode.light, remember: remembered.add));
+      expect(shown(tester), Brightness.light);
+      expect(find.byTooltip('Switch to dark'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('toggle-theme')));
+      await tester.pumpAndSettle();
+      expect(shown(tester), Brightness.dark);
+      expect(find.byTooltip('Switch to light'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('toggle-theme')));
+      await tester.pumpAndSettle();
+      expect(shown(tester), Brightness.light);
+      expect(remembered, [ThemeMode.dark, ThemeMode.light]);
+    });
+
+    testWidgets('a choice from last time is there when the window opens', (tester) async {
+      await openWith(tester, ThemeChoice(initial: ThemeMode.dark));
+      expect(shown(tester), Brightness.dark);
+    });
+  });
 }
