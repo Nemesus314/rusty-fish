@@ -484,7 +484,7 @@ mod tests {
     fn a_document_that_would_not_start_is_not_written() {
         let f = temp("refuse");
         // Neu: es entsteht keine Datei.
-        let err = f.save("tea", &DOC.replace("\"100\",", "\"me\",")).unwrap_err();
+        let err = f.save("tea", &DOC.replace("\"host\": \"100\"", "\"host\": \"me\"")).unwrap_err();
         assert!(err.contains("host"), "got {err}");
         assert!(!f.config_path("tea").exists());
 
@@ -568,7 +568,7 @@ mod tests {
         assert_eq!(tea["rooms"][0]["pass_through"][0], "English");
         assert_eq!(tea["rooms"][0]["seats"][0]["channel"], "111");
         assert_eq!(tea["rooms"][0]["seats"][1]["gender"], "female");
-        assert_eq!(tea["people"][0]["id"], "100");
+        assert_eq!(tea["people"][0]["discord"], "100");
         assert_eq!(tea["people"][0]["gender"], "male");
         // Ohne Zustandsdatei gibt es keinen Verbrauch zu zeigen.
         assert!(tea["usage"].is_null());
@@ -658,9 +658,9 @@ mod tests {
         assert_eq!(
             tea["people"],
             json!([
-                {"id": "42", "gender": "male", "lang": "German", "neutral": null, "invited": false},
-                {"id": "9", "gender": null, "lang": "Русский", "neutral": ["English"], "invited": true},
-                {"id": "11", "gender": null, "lang": "Korean", "neutral": null, "invited": false},
+                {"name": null, "discord": "42", "gender": "male", "lang": "German", "neutral": null, "invited": false},
+                {"name": null, "discord": "9", "gender": null, "lang": "Русский", "neutral": ["English"], "invited": true},
+                {"name": null, "discord": "11", "gender": null, "lang": "Korean", "neutral": null, "invited": false},
             ])
         );
         clean(&f);
@@ -727,7 +727,7 @@ mod tests {
         }
         assert_eq!(
             tea["people"],
-            json!([{"id": "100", "gender": "male", "lang": null, "neutral": null, "invited": false}])
+            json!([{"name": null, "discord": "100", "gender": "male", "lang": null, "neutral": null, "invited": false}])
         );
 
         let doc = f.show("tea").unwrap();

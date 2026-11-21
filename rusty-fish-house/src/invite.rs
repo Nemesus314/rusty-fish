@@ -44,7 +44,11 @@ pub fn due(config: &Config, told: &BTreeSet<String>) -> (Vec<Due>, BTreeSet<Stri
         if !invited || owner == config.host {
             continue;
         }
-        if told.contains(owner) {
+        // Gemerkt wird der Schlüssel des Menschen: seine Kennung, sonst sein
+        // Name. Wer unter seinem Namen benachrichtigt wurde und erst danach
+        // eine Kennung bekam, gilt weiter als benachrichtigt.
+        let told_by_name = config.name_of(owner).is_some_and(|name| told.contains(name));
+        if told.contains(owner) || told_by_name {
             kept.insert(owner.to_owned());
         } else if !now.iter().any(|due| due.person == owner) {
             now.push(Due { person: owner.to_owned(), channel: seat.channel.clone() });

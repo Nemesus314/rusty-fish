@@ -391,3 +391,52 @@ fn a_consent_from_before_services_were_noted_counts_for_the_service_then_in_use(
     assert_eq!(steps.deliveries[0].mark, Mark::Untranslated(Reason::NoConsent));
     assert!(steps.ask_consent.is_some());
 }
+
+// --- Die Namen des Gastgebers bleiben im Profil -------------------------------
+
+#[test]
+fn the_names_the_host_gave_never_reach_the_ai() {
+    let config = Config::parse(
+        r#"
+model = "some-model"
+host = "Captain Nemo"
+ai_name = "Fish"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "111"
+  lang = "German"
+  owner = "Captain Nemo"
+
+  [[room.seat]]
+  discord = "222"
+  lang = "Russian"
+  owner = "Robin Goodfellow"
+
+[[person]]
+name = "Captain Nemo"
+discord = "100"
+
+[[person]]
+name = "Robin Goodfellow"
+discord = "7"
+invited = true
+"#,
+    )
+    .unwrap();
+    let mut house = Household::open(&config, &state_file("names")).unwrap();
+    let fake = Fake::new();
+    house.consent("7", SERVICE).unwrap();
+
+    // Übersetzen in beide Richtungen und eine Frage an die KI.
+    assert!(handle(&mut house, &fake, &config, &from_host("Guten Morgen", 1)).is_some());
+    assert!(handle(&mut house, &fake, &config, &from_guest("Доброе утро", 2)).is_some());
+    assert!(handle(&mut house, &fake, &config, &from_host("Fish, wie spät ist es?", 3)).is_some());
+    assert!(fake.calls() >= 3);
+
+    let read = fake.everything_read();
+    for private in ["Nemo", "Captain", "Robin", "Goodfellow"] {
+        assert!(!read.contains(private), "the AI was told the name {private:?}");
+    }
+}

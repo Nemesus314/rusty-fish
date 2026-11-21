@@ -183,7 +183,9 @@ fn the_document_goes_out_as_json_in_the_agreed_shape() {
     assert_eq!(v["limits"]["translation_tokens_per_day"], 2500);
     assert_eq!(v["rooms"][0]["seats"][1]["gender"], "female");
     assert!(v["rooms"][1]["seats"][0]["gender"].is_null());
-    assert_eq!(v["people"][1]["id"], "777");
+    assert_eq!(v["people"][1]["discord"], "777");
+    assert!(v["people"][1]["name"].is_null());
+    assert_eq!(v["rooms"][0]["seats"][0]["door"], "discord");
     assert_eq!(v["base_url"], "http://localhost:11434/v1");
     assert_eq!(v["provider"], "custom");
 }

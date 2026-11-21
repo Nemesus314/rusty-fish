@@ -1,8 +1,22 @@
 //! Das Profil eines Fischs, als TOML-Datei. Nichts ist auf einen bestimmten
 //! Betreiber zugeschnitten: andere sollen den Fisch bei sich laufen lassen.
 //!
-//! Benannte Grenze: Menschen und Kanäle stehen hier mit ihrer Discord-Kennung,
-//! einer Zahl. Das Profil gehört damit zu einer Tür.
+//! Seit dem 21.11.2026 trägt ein Mensch im Profil einen Namen, den der
+//! Gastgeber vergibt, und daran hängt seine Kennung an einer Tür. Der Name ist
+//! das Etikett des Gastgebers, wie ein Eintrag im Adressbuch: er verlässt das
+//! Profil nie, weder zur KI noch zu Discord. `host` und `owner` zeigen mit dem
+//! Namen auf einen Menschen; die Discord-Kennung an derselben Stelle gilt
+//! weiter, so wie Profile bis dahin geschrieben waren.
+//!
+//! Benannte Grenzen:
+//! - Es gibt eine Tür, Discord. Ein Tisch nennt sie schon (`discord = "..."`),
+//!   damit ein Raum später Tische aus mehreren Türen haben kann.
+//! - Innen steht ein Mensch unter einem Schlüssel: seiner Discord-Kennung,
+//!   sonst seinem Namen. Mit einer zweiten Tür braucht es dafür eine Adresse
+//!   aus Tür und Kennung.
+//! - Zustimmung, Fragenzähler und Lesemarken hängen an der Kennung, nicht am
+//!   Namen. Dass zwei Kennungen derselbe Mensch sind, behauptet nur der
+//!   Gastgeber; darauf darf keine Zustimmung ruhen.
 
 use rusty_fish_providers::Provider;
 use rusty_fish_room::tongue::{Tongue, tongue_of};
@@ -25,6 +39,9 @@ pub struct Config {
     pub base_url: Option<String>,
     /// Discord-Kennung des Gastgebers. Wer den Fisch startet, hat zugestimmt.
     pub host: String,
+    /// Der Gastgeber, wie er im Profil steht: sein Name oder seine Kennung.
+    /// Die Maske zeigt und speichert das Eingetragene.
+    pub host_written: String,
     /// Die Rufnamen der KI. Der erste ist der Name, unter dem sie erscheint;
     /// jeder gilt als Ansprache. Ist die Liste leer, übersetzt sie nur.
     /// Nemesus am 18.11.2026: „Den können wir frei wählen."
@@ -37,15 +54,17 @@ pub struct Config {
     /// Die Räume, so wie die Raum-Logik sie braucht: an jedem Tisch steht
     /// schon, was dort gilt (siehe [`Written`] für das, was eingetragen wurde).
     pub rooms: Vec<Room>,
-    /// Was der Gastgeber über einzelne Menschen eingetragen hat, nach
-    /// Discord-Kennung. Freiwillig.
+    /// Was der Gastgeber über einzelne Menschen eingetragen hat. Freiwillig.
+    /// Der Schlüssel ist die Discord-Kennung des Menschen; hat er noch keine,
+    /// sein Name. Die beiden können nicht zusammenfallen: eine Kennung besteht
+    /// nur aus Ziffern, ein Name nie.
     ///
     /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
     /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
     /// reinschalten." Seine Frage, weil das Geschlecht bis dahin am Platz
     /// hing: „Wie können wir das ändern?"
     pub people: BTreeMap<String, Person>,
-    /// Die Kennungen der Menschen in der Reihenfolge, in der sie eingetragen
+    /// Die Schlüssel der Menschen in der Reihenfolge, in der sie eingetragen
     /// sind. Die Maske zeigt sie so wieder und findet nach dem Speichern vor,
     /// was sie geschickt hat; nach Kennung sortiert stünde "9" hinter "42".
     pub people_order: Vec<String>,
@@ -61,6 +80,18 @@ pub struct Config {
 /// [...]: Übersetze alles für eine Russin, halte dich von Englisch fern."
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Person {
+    /// Der Name, den der Gastgeber diesem Menschen gibt. Er steht nur im
+    /// Profil und in der Maske; so sieht man, für wen ein Tisch gebaut ist.
+    ///
+    /// Nemesus am 21.11.2026: „Die Namen, die ich vergebe, gehören in der
+    /// Windows Version auf jeden Fall in die Maske. So kann man sofort sehen,
+    /// für wen man die Tische gebaut hat."
+    pub name: Option<String>,
+    /// Die Kennung dieses Menschen an der Discord-Tür. Sie darf fehlen: ein
+    /// Tisch lässt sich für jemanden bauen, dessen Kennung man noch nicht hat.
+    /// Dann gilt an seinem Tisch schon alles, nur seine eigenen Formen als
+    /// Schreibender kennt der Fisch erst mit der Kennung.
+    pub discord: Option<String>,
     /// Grammatisches Geschlecht, als Hinweis für die Grammatik.
     pub gender: Option<Gender>,
     /// Die Muttersprache: in sie wird an seinem Tisch übersetzt.
@@ -81,10 +112,16 @@ pub struct Person {
 pub struct Written {
     pub lang: String,
     pub gender: Option<Gender>,
-    /// Discord-Kennung des Menschen, dessen Tisch das ist. Er muss dafür nicht
+    /// Der Mensch, dessen Tisch das ist: sein Schlüssel in [`Config::people`].
+    /// Wer mit einer bloßen Discord-Kennung eingetragen ist, muss dafür nicht
     /// unter `[[person]]` stehen.
     pub owner: Option<String>,
+    /// Der Besitzer, wie er im Profil steht: sein Name oder seine Kennung.
+    pub owner_written: Option<String>,
 }
+
+/// Die Türen, die dieser Fisch kennt. Ein Tisch gehört zu genau einer.
+pub const DOORS: [&str; 1] = ["discord"];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -105,7 +142,10 @@ struct RawConfig {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPerson {
-    id: String,
+    name: Option<String>,
+    discord: Option<String>,
+    /// Das alte Wort für `discord`, aus Profilen von vor dem 21.11.2026.
+    id: Option<String>,
     gender: Option<String>,
     lang: Option<String>,
     neutral: Option<Vec<String>>,
@@ -143,7 +183,10 @@ struct RawRoom {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawSeat {
-    channel: String,
+    /// Der Kanal dieses Tisches an der Discord-Tür.
+    discord: Option<String>,
+    /// Das alte Wort für `discord`, aus Profilen von vor dem 21.11.2026.
+    channel: Option<String>,
     lang: String,
     gender: Option<String>,
     owner: Option<String>,
@@ -162,30 +205,70 @@ impl Config {
         if model.is_empty() {
             return Err("configuration: `model` is empty".to_owned());
         }
-        let host = discord_id(&raw.host, "host")?;
-        if raw.rooms.is_empty() {
-            return Err("configuration: no `[[room]]` is defined".to_owned());
-        }
-
-        // Die Menschen zuerst: was an einem Tisch gilt, hängt an seinem Besitzer.
+        // Die Menschen zuerst: `host` und `owner` zeigen mit Namen auf sie, und
+        // was an einem Tisch gilt, hängt an seinem Besitzer.
         let mut people = BTreeMap::new();
         let mut people_order = Vec::new();
-        for person in raw.people {
-            let id = discord_id(&person.id, "id")?;
+        // Vom Namen zum Schlüssel.
+        let mut names: BTreeMap<String, String> = BTreeMap::new();
+        for (n, person) in raw.people.into_iter().enumerate() {
+            let name = read_person_name(person.name.as_deref())?;
+            let discord = match (filled(person.discord.as_deref()), filled(person.id.as_deref())) {
+                (Some(_), Some(_)) => {
+                    return Err(format!(
+                        "configuration: person {} has both `discord` and `id`; `id` is the old \
+                         word for `discord`, give one of them",
+                        n + 1
+                    ));
+                }
+                (Some(id), None) => Some(discord_id(id, "discord")?),
+                (None, Some(id)) => Some(discord_id(id, "id")?),
+                (None, None) => None,
+            };
+            // Die Kennung, sonst der Name. Eines von beiden muss da sein,
+            // sonst wäre der Eintrag über niemanden.
+            let Some(key) = discord.clone().or_else(|| name.clone()) else {
+                return Err(format!(
+                    "configuration: person {} needs a `name` or a `discord` id",
+                    n + 1
+                ));
+            };
             let entry = Person {
                 // Bis zum 20.11.2026 war das Geschlecht hier Pflicht, weil ein
                 // Eintrag sonst nichts aussagte. Seit ein Mensch auch Sprache
                 // und Einladung trägt, ist es freiwillig wie die anderen.
-                gender: read_gender(person.gender.as_deref(), &format!("person {id}"))?,
+                gender: read_gender(person.gender.as_deref(), &format!("person {key}"))?,
                 lang: person.lang.map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()),
                 neutral: person.neutral.map(clean_langs),
                 invited: person.invited,
+                name: name.clone(),
+                discord,
             };
             // Zwei Einträge zur selben Person wären ein Versehen oder ein Widerspruch.
-            if people.insert(id.clone(), entry).is_some() {
-                return Err(format!("configuration: person {id} is listed twice"));
+            if people.insert(key.clone(), entry).is_some() {
+                return Err(format!("configuration: person {key} is listed twice"));
             }
-            people_order.push(id);
+            if let Some(name) = name
+                && names.insert(name.clone(), key.clone()).is_some()
+            {
+                return Err(format!("configuration: the name {name:?} is used for two people"));
+            }
+            people_order.push(key);
+        }
+
+        // Der Gastgeber: sein Name oder, wie von Anfang an, seine Kennung. Die
+        // Kennung braucht der Fisch in jedem Fall: an ihr erkennt er an der
+        // Tür, wer der Gastgeber ist, und an sie schickt er dessen Hinweise.
+        let host_written = raw.host.trim().to_owned();
+        let host = points_at(&host_written, "host", &names)?;
+        if !is_id(&host) {
+            return Err(format!(
+                "configuration: the host {host_written:?} needs a Discord id: add \
+                 `discord = \"...\"` to that `[[person]]`"
+            ));
+        }
+        if raw.rooms.is_empty() {
+            return Err("configuration: no `[[room]]` is defined".to_owned());
         }
 
         let mut written = BTreeMap::new();
@@ -196,7 +279,25 @@ impl Config {
             }
             let mut seats = Vec::new();
             for seat in room.seats {
-                let channel = discord_id(&seat.channel, "channel")?;
+                let channel = match (filled(seat.discord.as_deref()), filled(seat.channel.as_deref()))
+                {
+                    (Some(_), Some(_)) => {
+                        return Err(format!(
+                            "configuration: a seat in room {} has both `discord` and `channel`; \
+                             `channel` is the old word for `discord`, give one of them",
+                            n + 1
+                        ));
+                    }
+                    (Some(id), None) => discord_id(id, "discord")?,
+                    (None, Some(id)) => discord_id(id, "channel")?,
+                    (None, None) => {
+                        return Err(format!(
+                            "configuration: a seat in room {} needs `discord`, the id of its \
+                             Discord channel",
+                            n + 1
+                        ));
+                    }
+                };
                 let lang = seat.lang.trim().to_owned();
                 if lang.is_empty() {
                     return Err(format!("configuration: `lang` is empty for channel {channel}"));
@@ -207,12 +308,13 @@ impl Config {
                 }
                 let gender = read_gender(seat.gender.as_deref(), &format!("channel {channel}"))?;
                 // Ein leerer Besitzer heißt wie ein fehlender: der Tisch gehört niemandem.
-                let owner = match seat.owner.as_deref().map(str::trim) {
-                    None | Some("") => None,
-                    Some(id) => Some(discord_id(id, "owner")?),
+                let owner_written = filled(seat.owner.as_deref()).map(str::to_owned);
+                let owner = match &owner_written {
+                    None => None,
+                    Some(who) => Some(points_at(who, "owner", &names)?),
                 };
                 seats.push(at_the_table(&channel, &lang, gender, owner.as_deref(), &host, &people));
-                written.insert(channel, Written { lang, gender, owner });
+                written.insert(channel, Written { lang, gender, owner, owner_written });
             }
             rooms.push(Room {
                 seats,
@@ -251,6 +353,7 @@ impl Config {
             model,
             base_url,
             host,
+            host_written,
             ai_names,
             limits,
             rooms,
@@ -317,9 +420,15 @@ impl Config {
         self.seat_of(channel).is_some_and(|s| s.served)
     }
 
-    /// Wessen Tisch ist dieser Kanal?
+    /// Wessen Tisch ist dieser Kanal? Der Schlüssel des Menschen in
+    /// [`Config::people`]: seine Discord-Kennung, sonst sein Name.
     pub fn owner_of(&self, channel: &str) -> Option<&str> {
         self.written.get(channel).and_then(|w| w.owner.as_deref())
+    }
+
+    /// Der Name, den der Gastgeber dem Menschen mit diesem Schlüssel gab.
+    pub fn name_of(&self, key: &str) -> Option<&str> {
+        self.people.get(key).and_then(|p| p.name.as_deref())
     }
 
     /// Gäbe dieser Fisch an die KI, was an diesem Kanal geschrieben wird?
@@ -427,6 +536,56 @@ fn read_gender(value: Option<&str>, whose: &str) -> Result<Option<Gender>, Strin
             "configuration: `gender` for {whose} must be \"female\" or \"male\", got {value:?}"
         )),
     }
+}
+
+/// Ein eingetragener Text ohne Leerraum drumherum; ein leerer gilt als keiner.
+fn filled(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// Sieht dieser Text aus wie eine Kennung, also nur Ziffern?
+fn is_id(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Liest den Namen, den der Gastgeber einem Menschen gibt. Ein leerer gilt
+/// als keiner.
+///
+/// Ein Name aus lauter Ziffern wird abgelehnt: an `host` und `owner` wäre er
+/// von einer Kennung nicht zu unterscheiden.
+fn read_person_name(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(name) = filled(value) else { return Ok(None) };
+    if is_id(name) {
+        return Err(format!(
+            "configuration: the name {name:?} consists of digits only; that would be taken for \
+             an id"
+        ));
+    }
+    // In einer Zeile: der Name steht in Listen und Auswahlfeldern der Maske.
+    Ok(Some(name.split_whitespace().collect::<Vec<_>>().join(" ")))
+}
+
+/// Auf wen `host` oder `owner` zeigt: der Schlüssel des Menschen.
+///
+/// Ziffern sind eine Discord-Kennung, wie von Anfang an; dieser Mensch muss
+/// nicht unter `[[person]]` stehen. Alles andere ist ein Name und muss dort
+/// stehen, sonst wäre ein Tippfehler ein Tisch für niemanden.
+fn points_at(
+    value: &str,
+    field: &str,
+    names: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let value = value.trim();
+    if is_id(value) {
+        return discord_id(value, field);
+    }
+    let name = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    names.get(&name).cloned().ok_or_else(|| {
+        format!(
+            "configuration: `{field}` must be the name of a `[[person]]` or a Discord id (digits \
+             only, not zero), got {value:?}"
+        )
+    })
 }
 
 /// Discord-Kennungen sind Zahlen. Ein Kanalname wie "#general" ist keine.

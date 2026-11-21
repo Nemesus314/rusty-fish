@@ -374,7 +374,7 @@ fn the_shipped_example_shows_a_person_commented_out() {
     // Wer die Zeichen davor entfernt, bekommt eine gültige Einstellung.
     let switched_on = filled
         .replace("# [[person]]", "[[person]]")
-        .replace("# id = \"000000000000000003\"", "id = \"000000000000000003\"")
+        .replace("# discord = \"000000000000000003\"", "discord = \"000000000000000003\"")
         .replace("# gender = \"male\"", "gender = \"male\"");
     let c = Config::parse(&switched_on).unwrap();
     assert_eq!(c.gender_of("000000000000000003"), Some(Gender::Male));

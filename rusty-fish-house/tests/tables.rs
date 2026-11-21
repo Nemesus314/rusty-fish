@@ -305,7 +305,7 @@ fn people_keep_the_order_in_which_they_were_written() {
     let doc = Document::from_json(json).unwrap();
     let (_, config) = doc.check().unwrap();
     let back = Document::from(&config);
-    let ids: Vec<&str> = back.people.iter().map(|p| p.id.as_str()).collect();
+    let ids: Vec<&str> = back.people.iter().map(|p| p.discord.as_deref().unwrap_or("")).collect();
     assert_eq!(ids, ["42", "9", "11"]);
     assert_eq!(back, doc);
 }
@@ -321,8 +321,8 @@ fn the_new_fields_always_go_out_even_when_empty() {
     assert!(!seats[0].as_object().unwrap().contains_key("served"), "only the list says so");
 
     let bare = &v["people"][1];
-    assert_eq!(bare["id"], "888");
-    for field in ["gender", "lang", "neutral"] {
+    assert_eq!(bare["discord"], "888");
+    for field in ["name", "gender", "lang", "neutral"] {
         assert!(bare.as_object().unwrap().contains_key(field), "{field} is missing");
         assert!(bare[field].is_null(), "{field}");
     }
@@ -387,14 +387,16 @@ fn the_shipped_example_shows_the_new_settings_commented_out() {
 
     // Wer die Zeichen davor entfernt, bekommt eine gültige Einstellung.
     let switched_on = filled
-        .replace("# owner = \"000000000000000003\"", "owner = \"000000000000000003\"")
+        .replace("# owner = \"Robin\"", "owner = \"Robin\"")
         .replace("# [[person]]", "[[person]]")
-        .replace("# id = \"000000000000000003\"", "id = \"000000000000000003\"")
+        .replace("# name = \"Robin\"", "name = \"Robin\"")
+        .replace("# discord = \"000000000000000003\"", "discord = \"000000000000000003\"")
         .replace("# lang = \"Russian\"", "lang = \"Russian\"")
         .replace("# neutral = [\"English\"]", "neutral = [\"English\"]")
         .replace("# invited = true", "invited = true");
     let c = Config::parse(&switched_on).unwrap();
     let person = &c.people["000000000000000003"];
+    assert_eq!(person.name.as_deref(), Some("Robin"));
     assert_eq!(person.lang.as_deref(), Some("Russian"));
     assert_eq!(person.neutral.as_deref(), Some(&["English".to_owned()][..]));
     assert!(person.invited);

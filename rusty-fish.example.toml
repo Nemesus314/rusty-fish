@@ -20,8 +20,10 @@ model = "put-a-model-name-here"
 # speaks the OpenAI chat format. A key is optional there.
 # base_url = "http://localhost:11434/v1"
 
-# Your own Discord user id. Whoever runs the fish has agreed to the AI reading
-# along; everyone else is asked once in their channel.
+# Who you are: your own Discord user id, or the name you give yourself in a
+# person entry below (that entry then carries your id). Whoever runs the fish
+# has agreed to the AI reading along; everyone else is asked once in their
+# channel.
 # In Discord: Settings -> Advanced -> Developer Mode, then right-click yourself -> Copy User ID.
 host = "000000000000000000"
 
@@ -55,13 +57,14 @@ pass_through = ["English"]
 # How many earlier messages the AI sees for context. Each one costs with every translation.
 context_lines = 10
 
-  # Right-click a channel -> Copy Channel ID.
+  # A seat names its door and its channel there. Discord is the only door so
+  # far: right-click a channel -> Copy Channel ID.
   [[room.seat]]
-  channel = "000000000000000001"
+  discord = "000000000000000001"
   lang = "German"
 
   [[room.seat]]
-  channel = "000000000000000002"
+  discord = "000000000000000002"
   lang = "Russian"
   # Optional: "female" or "male", for the person at this seat. Some languages
   # mark the gender of who speaks and who is spoken to ("I was tired", "did you
@@ -69,15 +72,21 @@ context_lines = 10
   # passed to the AI as a grammar hint only. Leave it out if several people of
   # different gender share the seat.
   # gender = "female"
-  # Optional: the Discord user id of the person whose table this seat is. The
-  # fish writes only at tables without an owner, at your own (owner = host) and
-  # at those of people you invited below; at all others it only reads along.
-  # owner = "000000000000000003"
+  # Optional: the person whose table this seat is, by the name you gave them
+  # below (a bare Discord user id works too). The fish writes only at tables
+  # without an owner, at your own (owner = host) and at those of people you
+  # invited below; at all others it only reads along.
+  # owner = "Robin"
 
-# Optional, as often as you like: what you know about one person, by Discord
-# user id (right-click the person -> Copy User ID). Only the id is required.
+# Optional, as often as you like: what you know about one person.
 # [[person]]
-# id = "000000000000000003"
+# A name of your choosing, so you can see whose table is whose. It stays in
+# this file and in the window; neither Discord nor the AI ever gets it.
+# name = "Robin"
+# The person's Discord user id (right-click the person -> Copy User ID). You
+# can leave it out until you have it: the table, the language and the
+# invitation work without. A name or an id is required.
+# discord = "000000000000000003"
 # The same grammar hint as at a seat. A person's own entry goes before the
 # gender of the seat, so people keep their own forms at someone else's seat.
 # gender = "male"

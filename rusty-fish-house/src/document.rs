@@ -10,7 +10,7 @@
 //! speichern, was der Fisch beim Start ablehnen würde, und es gibt keine
 //! zweite Prüfung, die von der ersten abweichen könnte.
 
-use crate::config::Config;
+use crate::config::{Config, DOORS};
 use rusty_fish_room::{Gender, Limits};
 use serde::{Deserialize, Serialize};
 
@@ -72,12 +72,18 @@ pub struct DocRoom {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocSeat {
+    /// Die Tür, zu der dieser Tisch gehört. Bisher gibt es nur "discord";
+    /// fehlt die Angabe, gilt sie.
+    #[serde(default = "default_door")]
+    pub door: String,
+    /// Die Kennung des Kanals an dieser Tür.
     pub channel: String,
     pub lang: String,
     /// `null`, "female" oder "male".
     #[serde(default)]
     pub gender: Option<String>,
-    /// Discord-Kennung des Menschen, dessen Tisch das ist, oder `null`.
+    /// Der Mensch, dessen Tisch das ist: sein Name, wie unter `people`, oder
+    /// seine Discord-Kennung. `null`, wenn der Tisch niemandem gehört.
     #[serde(default)]
     pub owner: Option<String>,
     /// Schreibt dieser Fisch an diesen Tisch? Berechnet, nicht eingestellt:
@@ -87,11 +93,18 @@ pub struct DocSeat {
     pub served: Option<bool>,
 }
 
-/// Was der Gastgeber über einen Menschen einträgt. Nur die Kennung ist Pflicht.
+/// Was der Gastgeber über einen Menschen einträgt. Pflicht ist ein Name oder
+/// eine Kennung.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocPerson {
-    pub id: String,
+    /// Der Name, den der Gastgeber diesem Menschen gibt, oder `null`.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Die Kennung an der Discord-Tür, oder `null`. Bis zum 21.11.2026 hieß
+    /// das Feld `id`; so wird es weiter angenommen.
+    #[serde(default, alias = "id")]
+    pub discord: Option<String>,
     /// `null`, "female" oder "male".
     #[serde(default)]
     pub gender: Option<String>,
@@ -108,9 +121,21 @@ pub struct DocPerson {
 }
 
 impl DocPerson {
-    /// Ein Mensch, über den nur die Kennung eingetragen ist.
+    /// Ein Mensch, über den nur die Discord-Kennung eingetragen ist.
     pub fn new(id: &str) -> DocPerson {
-        DocPerson { id: id.to_owned(), gender: None, lang: None, neutral: None, invited: false }
+        DocPerson {
+            name: None,
+            discord: Some(id.to_owned()),
+            gender: None,
+            lang: None,
+            neutral: None,
+            invited: false,
+        }
+    }
+
+    /// Ein Mensch, über den nur der Name eingetragen ist.
+    pub fn named(name: &str) -> DocPerson {
+        DocPerson { name: Some(name.to_owned()), discord: None, ..DocPerson::new("") }
     }
 }
 
@@ -118,6 +143,7 @@ impl DocSeat {
     /// Ein Platz ohne Besitzer und ohne Anrede.
     pub fn new(channel: &str, lang: &str) -> DocSeat {
         DocSeat {
+            door: default_door(),
             channel: channel.to_owned(),
             lang: lang.to_owned(),
             gender: None,
@@ -129,6 +155,10 @@ impl DocSeat {
 
 fn default_context_lines() -> usize {
     10
+}
+
+fn default_door() -> String {
+    "discord".to_owned()
 }
 
 fn default_provider() -> String {
@@ -151,7 +181,8 @@ impl From<&Config> for Document {
             provider: config.provider.id().to_owned(),
             model: config.model.clone(),
             base_url: config.base_url.clone(),
-            host: config.host.clone(),
+            // Gezeigt wird, was eingetragen wurde: der Name, wenn dort einer steht.
+            host: config.host_written.clone(),
             ai_names: config.ai_names.clone(),
             limits: DocLimits {
                 translation_tokens_per_day: config.limits.translation_tokens_per_day,
@@ -172,12 +203,13 @@ impl From<&Config> for Document {
                             // "German" stehen hat, soll das wiederfinden.
                             let written = config.written.get(&seat.channel);
                             DocSeat {
+                                door: default_door(),
                                 channel: seat.channel.clone(),
                                 lang: written.map_or_else(|| seat.lang.clone(), |w| w.lang.clone()),
                                 gender: written
                                     .map_or(seat.gender, |w| w.gender)
                                     .map(|g| gender_word(g).to_owned()),
-                                owner: written.and_then(|w| w.owner.clone()),
+                                owner: written.and_then(|w| w.owner_written.clone()),
                                 served: None,
                             }
                         })
@@ -189,9 +221,10 @@ impl From<&Config> for Document {
             people: config
                 .people_order
                 .iter()
-                .filter_map(|id| config.people.get(id).map(|person| (id, person)))
-                .map(|(id, person)| DocPerson {
-                    id: id.clone(),
+                .filter_map(|key| config.people.get(key))
+                .map(|person| DocPerson {
+                    name: person.name.clone(),
+                    discord: person.discord.clone(),
                     gender: person.gender.map(|g| gender_word(g).to_owned()),
                     lang: person.lang.clone(),
                     neutral: person.neutral.clone(),
@@ -246,7 +279,9 @@ impl Document {
             out.push_str(&format!("context_lines = {}\n", room.context_lines));
             for seat in &room.seats {
                 out.push_str("\n  [[room.seat]]\n");
-                out.push_str(&format!("  channel = {}\n", quote(&seat.channel)));
+                // Der Tisch nennt seine Tür: der Kanal steht unter ihrem Namen.
+                // Eine Tür, die es nicht gibt, lehnt `check` vorher ab.
+                out.push_str(&format!("  {} = {}\n", seat.door.trim(), quote(&seat.channel)));
                 out.push_str(&format!("  lang = {}\n", quote(&seat.lang)));
                 if let Some(gender) = &seat.gender {
                     out.push_str(&format!("  gender = {}\n", quote(gender)));
@@ -261,7 +296,12 @@ impl Document {
 
         for person in &self.people {
             out.push_str("\n[[person]]\n");
-            out.push_str(&format!("id = {}\n", quote(&person.id)));
+            if let Some(name) = person.name.as_deref().filter(|n| !n.trim().is_empty()) {
+                out.push_str(&format!("name = {}\n", quote(name)));
+            }
+            if let Some(id) = person.discord.as_deref().filter(|d| !d.trim().is_empty()) {
+                out.push_str(&format!("discord = {}\n", quote(id)));
+            }
             if let Some(gender) = &person.gender {
                 out.push_str(&format!("gender = {}\n", quote(gender)));
             }
@@ -297,6 +337,15 @@ impl Document {
     /// liefert den Text, der gespeichert werden darf, samt den gelesenen
     /// Einstellungen.
     pub fn check(&self) -> Result<(String, Config), String> {
+        for seat in self.rooms.iter().flat_map(|room| room.seats.iter()) {
+            let door = seat.door.trim();
+            if !DOORS.contains(&door) {
+                return Err(format!(
+                    "configuration: the door {door:?} is not built; this fish knows: {}",
+                    DOORS.join(", ")
+                ));
+            }
+        }
         let toml = self.to_toml();
         let config = Config::parse(&toml)?;
         Ok((toml, config))
