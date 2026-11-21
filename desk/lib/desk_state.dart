@@ -6,10 +6,21 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'cli.dart';
+import 'log_file.dart';
 import 'model.dart';
 
 class DeskState extends ChangeNotifier {
-  DeskState(this.cli, {DateTime Function()? now}) : _now = now ?? DateTime.now;
+  DeskState(this.cli, {DateTime Function()? now, this.openLog})
+    : _now = now ?? DateTime.now;
+
+  /// Öffnet die Protokolldatei eines Profils im Ordner neben den Profilen.
+  /// Ohne Angabe (in Tests) steht das Protokoll nur im Fenster.
+  final OpenLog Function(String profilesDir, String profile)? openLog;
+
+  OpenLog? _logFile;
+
+  /// Wohin das Protokoll gerade zusätzlich geschrieben wird.
+  String? get logPath => _logFile?.path;
 
   /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
   final DateTime Function() _now;
@@ -116,6 +127,18 @@ class DeskState extends ChangeNotifier {
     log.clear();
     _lastLine = null;
     logOwner = name;
+    _logFile = null;
+    final open = openLog;
+    final dir = list?.dir;
+    if (open != null && dir != null) {
+      // Eine Datei, die sich nicht öffnen lässt, hält den Fisch nicht auf.
+      // Das Fenster sagt es, und das Protokoll steht dann nur dort.
+      try {
+        _logFile = open(dir, name);
+      } on Exception catch (e) {
+        log.add('${logStamp(_now())}  desk: cannot open the log file: $e');
+      }
+    }
     final FishRun run;
     try {
       run = await cli.run(name);
@@ -194,7 +217,18 @@ class DeskState extends ChangeNotifier {
 
   void _addLine(String line) {
     _lastLine = line;
-    log.add('${logStamp(_now())}  $line');
+    final stamped = '${logStamp(_now())}  $line';
+    log.add(stamped);
+    final file = _logFile;
+    if (file != null) {
+      try {
+        file.write(stamped);
+      } on Exception catch (e) {
+        // Einmal sagen, dann nicht bei jeder Zeile wieder scheitern.
+        _logFile = null;
+        log.add('${logStamp(_now())}  desk: cannot write the log file: $e');
+      }
+    }
     if (log.length > logLimit) {
       log.removeRange(0, log.length - logLimit);
     }

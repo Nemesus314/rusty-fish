@@ -1,10 +1,12 @@
 // Tests der Teile, die ohne Fenster auskommen.
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/desk_state.dart';
+import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/model.dart';
 
 void main() {
@@ -69,6 +71,46 @@ void main() {
   test('a log line is stamped with date and time, padded', () {
     expect(logStamp(DateTime(2026, 11, 21, 3, 2, 52)), '2026-11-21 03:02:52');
     expect(logStamp(DateTime(2027, 1, 5, 23, 59, 9)), '2027-01-05 23:59:09');
+  });
+
+  group('the log file', () {
+    late Directory home;
+
+    setUp(() {
+      home = Directory.systemTemp.createTempSync('rf-log-');
+      Directory('${home.path}${Platform.pathSeparator}profiles').createSync();
+    });
+
+    tearDown(() => home.deleteSync(recursive: true));
+
+    String profiles() => '${home.path}${Platform.pathSeparator}profiles';
+
+    test('lies beside the profiles and keeps what earlier runs wrote', () {
+      final first = openLogFile(profiles(), 'study');
+      first.write('one');
+      final second = openLogFile(profiles(), 'study');
+      second.write('two');
+
+      final sep = Platform.pathSeparator;
+      expect(second.path, '${home.path}${sep}logs${sep}study.log');
+      expect(File(second.path).readAsStringSync(), 'one\ntwo\n');
+      // Im Ordner der Profile selbst liegt nichts Neues.
+      expect(Directory(profiles()).listSync(), isEmpty);
+    });
+
+    test('a file that grew too large is set aside, and only one old one stays', () {
+      final sep = Platform.pathSeparator;
+      final old = File('${home.path}${sep}logs${sep}study.old.log');
+
+      openLogFile(profiles(), 'study', maxBytes: 5).write('first run');
+      openLogFile(profiles(), 'study', maxBytes: 5).write('second run');
+      expect(old.readAsStringSync(), 'first run\n');
+
+      final third = openLogFile(profiles(), 'study', maxBytes: 5);
+      third.write('third run');
+      expect(old.readAsStringSync(), 'second run\n');
+      expect(File(third.path).readAsStringSync(), 'third run\n');
+    });
   });
 
   test('numbers are grouped the English way', () {

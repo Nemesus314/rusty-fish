@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
+import 'log_file.dart';
 import 'overview.dart';
 import 'start.dart';
 
@@ -32,6 +33,7 @@ void main(List<String> args) {
     DeskApp(
       cli: exe == null ? null : ProcessFishCli(exe),
       location: location,
+      openLog: openLogFile,
       startWith: StartRequest.fromArgs(args),
     ),
   );
@@ -45,11 +47,15 @@ class DeskApp extends StatelessWidget {
     this.refreshEvery = const Duration(seconds: 4),
     this.today,
     this.now,
+    this.openLog,
     this.startWith,
   });
 
   /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
   final DateTime Function()? now;
+
+  /// Öffnet die Protokolldatei eines Profils. In Tests keine.
+  final OpenLog Function(String profilesDir, String profile)? openLog;
 
   /// Womit das Fenster aufgehen soll. Ohne Angabe mit der Übersicht.
   final StartRequest? startWith;
@@ -82,6 +88,7 @@ class DeskApp extends StatelessWidget {
               refreshEvery: refreshEvery,
               today: today ?? utcToday,
               now: now,
+              openLog: openLog,
               startWith: startWith,
             ),
     );

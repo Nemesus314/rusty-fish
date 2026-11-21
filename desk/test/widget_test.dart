@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:rusty_fish_desk/cli.dart';
+import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/main.dart';
 import 'package:rusty_fish_desk/model.dart';
 
@@ -12,7 +13,11 @@ import 'fake_cli.dart';
 
 const today = '2026-11-20';
 
-Future<void> open(WidgetTester tester, FakeCli fake) async {
+Future<void> open(
+  WidgetTester tester,
+  FakeCli fake, {
+  OpenLog Function(String profilesDir, String profile)? openLog,
+}) async {
   // Ein Fenster in der Größe eines gewöhnlichen Desktops, damit die Karten
   // so nebeneinander stehen wie im echten Programm.
   tester.view.physicalSize = const Size(1400, 1000);
@@ -24,6 +29,7 @@ Future<void> open(WidgetTester tester, FakeCli fake) async {
       refreshEvery: null,
       today: () => today,
       now: () => DateTime(2026, 11, 21, 3, 2, 52),
+      openLog: openLog,
     ),
   );
   await tester.pumpAndSettle();
@@ -781,6 +787,62 @@ void main() {
     expect(fake.lastRun!.stopped, isTrue);
     expect(inCard('study', find.text('Stopped')), findsOneWidget);
     expect(inCard('study', find.text('Start')), findsOneWidget);
+  });
+
+  testWidgets('the log also goes to a file, and the window says where', (
+    tester,
+  ) async {
+    final written = <String>[];
+    final opened = <String>[];
+    final fake = FakeCli(entries: [entryOf(docOf('study'))]);
+    await open(
+      tester,
+      fake,
+      openLog: (dir, profile) {
+        opened.add('$dir | $profile');
+        return OpenLog(r'C:\fish\logs\study.log', written.add);
+      },
+    );
+
+    await tester.tap(inCard('study', find.text('Start')));
+    await tester.pumpAndSettle();
+    fake.lastRun!.emit('rusty-fish: connected to Discord as Rusty Fish');
+    await tester.pumpAndSettle();
+    await tester.tap(inCard('study', find.textContaining('Log')));
+    await tester.pumpAndSettle();
+
+    expect(opened, [r'C:\fish\profiles | study']);
+    expect(written, [
+      '2026-11-21 03:02:52  rusty-fish: connected to Discord as Rusty Fish',
+    ]);
+    expect(find.text(r'Also written to C:\fish\logs\study.log'), findsOneWidget);
+  });
+
+  testWidgets('a log file that fails says so once and the fish keeps running', (
+    tester,
+  ) async {
+    final fake = FakeCli(entries: [entryOf(docOf('study'))]);
+    await open(
+      tester,
+      fake,
+      openLog: (dir, profile) => OpenLog(
+        r'C:\fish\logs\study.log',
+        (line) => throw const FormatException('disk full'),
+      ),
+    );
+
+    await tester.tap(inCard('study', find.text('Start')));
+    await tester.pumpAndSettle();
+    fake.lastRun!.emit('rusty-fish: one');
+    fake.lastRun!.emit('rusty-fish: two');
+    await tester.pumpAndSettle();
+    await tester.tap(inCard('study', find.textContaining('Log')));
+    await tester.pumpAndSettle();
+
+    expect(inCard('study', find.text('Running')), findsOneWidget);
+    expect(find.textContaining('Log (3 lines)'), findsOneWidget);
+    expect(find.textContaining('cannot write the log file'), findsOneWidget);
+    expect(find.textContaining('Also written to'), findsNothing);
   });
 
   testWidgets('a fish that ends on its own says why', (tester) async {

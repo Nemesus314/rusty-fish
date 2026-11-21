@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import 'cli.dart';
 import 'desk_state.dart';
 import 'editor.dart';
+import 'log_file.dart';
 import 'model.dart';
 import 'secrets.dart';
 import 'start.dart';
@@ -21,6 +22,7 @@ class OverviewPage extends StatefulWidget {
     required this.refreshEvery,
     required this.today,
     this.now,
+    this.openLog,
     this.startWith,
   });
 
@@ -30,6 +32,9 @@ class OverviewPage extends StatefulWidget {
 
   /// Die Uhr für die Zeitstempel im Protokoll. Ohne Angabe die des Rechners.
   final DateTime Function()? now;
+
+  /// Öffnet die Protokolldatei eines Profils. Ohne Angabe gibt es keine.
+  final OpenLog Function(String profilesDir, String profile)? openLog;
   final StartRequest? startWith;
 
   @override
@@ -37,7 +42,11 @@ class OverviewPage extends StatefulWidget {
 }
 
 class _OverviewPageState extends State<OverviewPage> {
-  late final DeskState _state = DeskState(widget.cli, now: widget.now);
+  late final DeskState _state = DeskState(
+    widget.cli,
+    now: widget.now,
+    openLog: widget.openLog,
+  );
   late final AppLifecycleListener _lifecycle;
   Timer? _timer;
 
@@ -600,7 +609,7 @@ class _ProfileCard extends StatelessWidget {
               ],
             ),
             if (ownsLog && (runningHere || state.log.isNotEmpty))
-              _LogPanel(lines: state.log),
+              _LogPanel(lines: state.log, path: state.logPath),
           ],
         ),
       ),
@@ -668,9 +677,12 @@ class _StatusLabel extends StatelessWidget {
 /// Die letzten Meldungen des Fischs. Er schreibt nur Kennungen und Gründe,
 /// nie den Text einer Nachricht.
 class _LogPanel extends StatelessWidget {
-  const _LogPanel({required this.lines});
+  const _LogPanel({required this.lines, required this.path});
 
   final List<String> lines;
+
+  /// Die Datei, in der dieselben Zeilen stehen, wenn es eine gibt.
+  final String? path;
 
   @override
   Widget build(BuildContext context) {
@@ -692,6 +704,17 @@ class _LogPanel extends StatelessWidget {
             ),
           ),
         ),
+        if (path != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              child: SelectableText(
+                'Also written to $path',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ),
       ],
     );
   }
