@@ -20,6 +20,14 @@ their language. What is written in one channel appears in the others,
 translated by an AI, under the name and picture of the person who wrote it.
 Discord shows the tag "APP" next to such a mirrored message.
 
+- No message is translated on its own. The AI gets the last messages of the
+  conversation with it (ten unless the host changed it), in their original
+  wording and with the speakers as letters, so that references, tone and forms
+  of address carry over.
+- The AI outputs only the translation, without notes. A play on words or a dry
+  remark can lose its edge on the way without anyone noticing. The original
+  stays readable in the channel it was written in, and anyone can ask the AI
+  by its call name how something was meant; it sees the same earlier messages.
 - A neutral language, for example English, can be set to stay untranslated.
 - The AI can have call names, for example "Fish". A message that starts with a
   call name, or with an @-mention of the bot, is a question to the AI. The
