@@ -84,8 +84,70 @@ fn skip_means_nothing_to_translate() {
 #[test]
 fn pass_through_languages_are_named_to_the_model() {
     let p = build_prompt(&request("See you tomorrow"));
-    assert!(p.system.contains("English"));
-    assert!(p.system.contains("=SKIP="));
+    assert!(p.system.contains("=English="));
+}
+
+#[test]
+fn the_model_is_asked_to_name_the_language_first() {
+    let mut r = request("Привет");
+    r.target_lang = "English";
+    r.pass_through = &["Russian", "German"];
+    let p = build_prompt(&r);
+    assert!(p.system.contains("write =English= or =Russian= or =German= if"), "got: {}", p.system);
+    assert!(p.system.contains("=OTHER= for every other language"), "got: {}", p.system);
+    assert!(p.system.contains("into English"), "got: {}", p.system);
+
+    r.pass_through = &[];
+    let p = build_prompt(&r);
+    assert!(p.system.contains("write =English= if"), "got: {}", p.system);
+    assert!(!p.system.contains("Russian"), "got: {}", p.system);
+}
+
+#[test]
+fn the_code_decides_by_the_named_language_not_the_model() {
+    // Gemessen am 22.11.2026: gpt-6-luna übersetzte Russisch ins Englische,
+    // obwohl Russisch unübersetzt bleiben sollte. Nennt die KI die Sprache,
+    // bleibt der Text stehen, auch wenn sie trotzdem eine Übersetzung anhängt.
+    let mut r = request("Какая сегодня погода?");
+    r.target_lang = "English";
+    r.pass_through = &["Russian"];
+    for answer in ["=Russian=", "=Russian=\nWhat's the weather like today?", " =russian= \n", "=English="] {
+        let fake = Fake::says(answer);
+        assert_eq!(now(translate(&fake, &r)), Ok(Outcome::Skip), "answer {answer:?}");
+    }
+}
+
+#[test]
+fn after_other_comes_the_translation() {
+    let r = request("Hallo, wie geht es dir?");
+    for answer in ["=OTHER=\nПривет, как дела?", "=OTHER= Привет, как дела?", "=German=\nПривет, как дела?"] {
+        let fake = Fake::says(answer);
+        assert_eq!(
+            now(translate(&fake, &r)),
+            Ok(Outcome::Translated("Привет, как дела?".to_owned())),
+            "answer {answer:?}"
+        );
+    }
+}
+
+#[test]
+fn a_named_language_without_a_translation_fails_loudly() {
+    let r = request("Hallo");
+    for answer in ["=OTHER=", "=OTHER=\n  ", "=German="] {
+        let fake = Fake::says(answer);
+        assert_eq!(now(translate(&fake, &r)), Err(FishError::EmptyAnswer), "answer {answer:?}");
+    }
+    let fake = Fake::says("=OTHER=\n=SKIP= (no words)");
+    assert!(matches!(now(translate(&fake, &r)), Err(FishError::UnclearAnswer(_))));
+}
+
+#[test]
+fn a_language_name_of_the_host_in_another_script_is_matched_too() {
+    let mut r = request("Привет");
+    r.target_lang = "Русский";
+    r.pass_through = &[];
+    let fake = Fake::says("=Русский=");
+    assert_eq!(now(translate(&fake, &r)), Ok(Outcome::Skip));
 }
 
 #[test]
