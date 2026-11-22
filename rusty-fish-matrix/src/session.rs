@@ -234,11 +234,31 @@ pub async fn connect(access: &Access, store: &Path) -> Result<Client, String> {
     Ok(client)
 }
 
+/// Die Sitzung ohne die Ablage des Geräts: genug, um dem Server etwas zu
+/// sagen, zu wenig, um in einem verschlüsselten Raum zu lesen.
+async fn without_store(access: &Access) -> Result<Client, String> {
+    let client = Client::builder()
+        .homeserver_url(&access.homeserver)
+        .build()
+        .await
+        .map_err(|e| format!("cannot reach the Matrix server: {e}"))?;
+    client
+        .matrix_auth()
+        .restore_session(access.session(), RoomLoadSettings::default())
+        .await
+        .map_err(|e| format!("cannot take up the Matrix session again: {e}"))?;
+    Ok(client)
+}
+
 /// Meldet den Fisch ab: die Sitzung endet beim Server, und die Ablage des
 /// Geräts wird geleert. Erreicht er den Server nicht, wird trotzdem geleert;
 /// zurück kommt dann der Grund als Hinweis.
 pub async fn logout(access: &Access, store: &Path) -> Result<Option<String>, String> {
-    let told = match connect(access, store).await {
+    // Dem Server genügt der Zugang. Die Ablage wird dafür nicht geöffnet:
+    // die Bibliothek hielte ihre Dateien offen, solange dieses Programm
+    // läuft, und Windows löscht keine offene Datei. Gemessen am 22.11.2026
+    // im ersten echten Lauf: Abmelden scheiterte genau daran.
+    let told = match without_store(access).await {
         Ok(client) => client.matrix_auth().logout().await.err().map(|e| e.to_string()),
         Err(why) => Some(why),
     };

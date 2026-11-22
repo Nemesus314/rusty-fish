@@ -572,16 +572,29 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
             };
             // Ein Zugang, der sich nicht lesen lässt, wird trotzdem vergessen.
             let told = match rusty_fish_matrix::session::Access::parse(secret.expose()) {
-                Ok(access) => rusty_fish_matrix::session::logout(&access, &store).await?,
-                Err(_) => {
-                    rusty_fish_matrix::session::clear(&store)?;
-                    None
-                }
+                Ok(access) => rusty_fish_matrix::session::logout(&access, &store).await,
+                Err(_) => rusty_fish_matrix::session::clear(&store).map(|()| None),
             };
+            // Der Zugang wird in jedem Fall vergessen. Bliebe er nach einem
+            // Fehler stehen, hielte sich der Fisch weiter für angemeldet und
+            // böte kein neues Anmelden an (so geschehen am 22.11.2026).
             keys::forget(secrets::MATRIX)?;
-            println!("Logged out of Matrix. The device store is empty.");
-            if let Some(note) = told {
-                println!("Note: {note}.");
+            match told {
+                Ok(told) => {
+                    println!("Logged out of Matrix. The device store is empty.");
+                    if let Some(note) = told {
+                        println!("Note: {note}.");
+                    }
+                }
+                // Die Ablage ist ohne den Zugang wertlos: ihr Kennwort stand
+                // darin. Die nächste Anmeldung leert sie.
+                Err(why) => {
+                    println!("Logged out of Matrix.");
+                    println!(
+                        "Note: the device store could not be emptied ({why}); the next login \
+                         empties it."
+                    );
+                }
             }
             Ok(())
         }
