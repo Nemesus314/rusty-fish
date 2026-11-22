@@ -74,6 +74,9 @@ account there.
   AI (ten unless the host changed it).
 - Agreement is given to one AI service, the one the request names. If the host
   switches to another service, the fish asks again before anything goes there.
+- A guest who writes on without agreeing sees the request again once five
+  more messages of the conversation have pushed it out of sight, until they
+  agree.
 - Agreement cannot yet be withdrawn in the chat; ask the host.
 
 ## What you need to run your own fish
@@ -121,11 +124,12 @@ account there.
 
 ## Setting up the program
 
-1. Open the window (`rusty_fish_desk.exe`). The title bar shows "AI keys" and
-   "Bot token". Click one of them, then store your API key and your bot token.
-   They are kept in the Windows Credential Manager, not in a file, and the
-   window never shows them again. With the token stored, the same window
-   offers "Copy the link that brings this bot onto a server". Open that link
+1. Open the window (`rusty_fish_desk.exe`). The title bar shows "AI keys",
+   "Bot token" and "Matrix"; each opens a window of its own. Store your API
+   key under "AI keys" and your bot token under "Bot token". They are kept in
+   the Windows Credential Manager, not in a file, and the window never shows
+   them again. With the token stored, the window of the bot token offers
+   "Copy the link that brings this bot onto a server". Open that link
    yourself to add the bot to your own server. To join someone else's server
    with your own fish, send the link to whoever owns that server; they open
    it, choose the server and see the four permissions before they agree. The
@@ -177,8 +181,7 @@ ordinary account at any Matrix server that accepts a login with a password;
 there is no developer portal and no bot token. Create it the way you created
 your own.
 
-1. In the window, click "AI keys" or "Bot token" in the title bar. The same
-   window has a block "Matrix account". Enter the user ID of the fish (it
+1. In the window, click "Matrix" in the title bar. Enter the user ID of the fish (it
    looks like @name:server) and its password, then press "Log in". The
    password is used once and not kept. Kept are the access of this one
    device, in the Windows Credential Manager, and the fish's device keys, in

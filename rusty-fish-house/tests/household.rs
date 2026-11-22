@@ -6,7 +6,7 @@
 
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_house::config::Config;
-use rusty_fish_house::household::{Arrived, Household, Steps, Terms};
+use rusty_fish_house::household::{ASK_AGAIN_AFTER, Arrived, Household, Steps, Terms};
 use rusty_fish_house::invite::Due;
 use rusty_fish_house::texts::{
     KEEP_LABEL, budget_notice, consent_text, consent_text_in, nothing_to_raise, raise_label,
@@ -201,7 +201,49 @@ fn nothing_counts_as_read_until_the_door_says_save() {
 // --- Die Zustimmung ------------------------------------------------------------
 
 #[test]
-fn a_guest_is_asked_once_per_run_and_until_then_nothing_reaches_the_ai() {
+fn a_guest_who_writes_on_without_agreeing_is_asked_again() {
+    let config = settings("Russian", 100_000);
+    let mut house = Household::open(&config, &state_file("ask-again")).unwrap();
+    let fake = Fake::new();
+
+    let first = handle(&mut house, &fake, &config, &from_guest("раз", 1)).unwrap();
+    assert!(first.ask_consent.is_some());
+    // Solange die Bitte noch im Blick ist, kommt sie nicht wieder.
+    for mark in 2..=ASK_AGAIN_AFTER as u64 {
+        let steps = handle(&mut house, &fake, &config, &from_guest("ещё", mark)).unwrap();
+        assert_eq!(steps.ask_consent, None, "message {mark}");
+    }
+    // Danach wieder, mit demselben Wortlaut.
+    let again =
+        handle(&mut house, &fake, &config, &from_guest("и ещё", ASK_AGAIN_AFTER as u64 + 1))
+            .unwrap();
+    assert_eq!(again.ask_consent, first.ask_consent);
+    // Und nicht gleich noch einmal.
+    let next =
+        handle(&mut house, &fake, &config, &from_guest("и ещё", ASK_AGAIN_AFTER as u64 + 2))
+            .unwrap();
+    assert_eq!(next.ask_consent, None);
+    assert_eq!(fake.calls(), 0, "no word of the guest may reach the AI before consent");
+}
+
+#[test]
+fn what_others_write_also_pushes_the_request_out_of_sight() {
+    let config = settings("Russian", 100_000);
+    let mut house = Household::open(&config, &state_file("ask-pushed")).unwrap();
+    let fake = Fake::new();
+
+    assert!(handle(&mut house, &fake, &config, &from_guest("раз", 1)).unwrap().ask_consent.is_some());
+    // Der Gastgeber schreibt; seine Sätze erscheinen übersetzt am Tisch des Gasts.
+    for mark in 1..ASK_AGAIN_AFTER as u64 {
+        let steps = handle(&mut house, &fake, &config, &from_host("und noch etwas", mark));
+        assert!(steps.is_some());
+    }
+    let steps = handle(&mut house, &fake, &config, &from_guest("два", 2)).unwrap();
+    assert!(steps.ask_consent.is_some(), "the request is out of sight, the fish asks again");
+}
+
+#[test]
+fn a_guest_is_asked_at_the_first_sentence_and_until_then_nothing_reaches_the_ai() {
     let config = settings("Russian", 100_000);
     let mut house = Household::open(&config, &state_file("ask")).unwrap();
     let fake = Fake::new();
@@ -216,7 +258,7 @@ fn a_guest_is_asked_once_per_run_and_until_then_nothing_reaches_the_ai() {
 
     let second = handle(&mut house, &fake, &config, &from_guest("Ты тут?", 2)).unwrap();
     assert_eq!(second.deliveries[0].mark, Mark::Untranslated(Reason::NoConsent));
-    assert_eq!(second.ask_consent, None, "asked once per run, not under every message");
+    assert_eq!(second.ask_consent, None, "not under every message");
 
     assert_eq!(fake.calls(), 0, "no word of the guest may reach the AI before consent");
 }

@@ -22,7 +22,7 @@ use rusty_fish_room::tongue::{Tongue, known_tongue};
 use rusty_fish_room::{
     Delivery, House, Incoming, Mark, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
 };
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 
 /// Was für einen Aufruf feststeht: das Profil, der Name des KI-Dienstes und
@@ -105,12 +105,25 @@ struct Held {
 /// letzten nachgereicht, nicht alle: sonst käme ein Schwall.
 pub const HELD_PER_PERSON: usize = 5;
 
+/// Nach wie vielen weiteren Nachrichten im Gespräch der Fisch seine Bitte um
+/// Zustimmung wiederholt, wenn der Mensch weiterschreibt, ohne zugestimmt zu
+/// haben.
+///
+/// Gemessen von Nemesus am 23.11.2026 als Gast in einem Matrix-Raum: die
+/// Bitte kam einmal, er tippte das Zeichen nicht an, und danach kam sie nicht
+/// wieder. Sein Wort dazu: „Der Bot müsste den Button immer wieder anzeigen,
+/// damit ich irgendwann als Gast darauf klicken kann.“ Nicht unter jeder
+/// Nachricht, sonst stünde die Bitte öfter da als das Gespräch; sondern
+/// wieder, sobald sie aus dem Blick gerutscht ist.
+pub const ASK_AGAIN_AFTER: usize = 5;
+
 /// Alles, was sich im Lauf eines Fischs ändert.
 pub struct Household {
     store: Store,
     states: Vec<RoomState>,
-    /// Wen der Fisch in diesem Lauf schon um Zustimmung gebeten hat.
-    asked: HashSet<String>,
+    /// Wen der Fisch in diesem Lauf um Zustimmung gebeten hat: in welchem
+    /// Gespräch, und wie viele Nachrichten dort seither angekommen sind.
+    asked: HashMap<String, (usize, usize)>,
     /// Was Menschen schrieben, bevor sie zugestimmt haben, nach Kennung.
     ///
     /// Gemessen von Nemesus am 21.11.2026 mit einem Zweitkonto: der erste
@@ -132,7 +145,7 @@ impl Household {
         Ok(Household {
             store: Store::open(state_path)?,
             states: config.rooms.iter().map(|_| RoomState::default()).collect(),
-            asked: HashSet::new(),
+            asked: HashMap::new(),
             held: HashMap::new(),
         })
     }
@@ -154,6 +167,14 @@ impl Household {
         let room_index = config.room_index(msg.channel)?;
         if self.store.seen(msg.channel).is_some_and(|seen| seen >= msg.mark) {
             return None;
+        }
+
+        // Jede Nachricht in diesem Gespräch schiebt eine frühere Bitte weiter
+        // aus dem Blick.
+        for (room, since) in self.asked.values_mut() {
+            if *room == room_index {
+                *since += 1;
+            }
         }
 
         // Wer den Fisch startet, hat zugestimmt.
@@ -199,11 +220,15 @@ impl Household {
         // Die Bitte geht an den Tisch des Schreibenden, auch wenn der Fisch
         // dort sonst nichts schreibt: er übersetzt die Sätze ja für andere
         // Tische. Sie unterbleibt nur, wo er von diesem Menschen ohnehin nie
-        // etwas an die KI gäbe (siehe `Config::sends_to_ai`). Einmal je Lauf.
-        let ask_consent = if !consented
-            && config.sends_to_ai(msg.channel, msg.author)
-            && self.asked.insert(msg.author.to_owned())
-        {
+        // etwas an die KI gäbe (siehe `Config::sends_to_ai`). Beim ersten Satz
+        // eines Laufs, und wieder, sobald die Bitte aus dem Blick ist (siehe
+        // [`ASK_AGAIN_AFTER`]).
+        let due = self
+            .asked
+            .get(msg.author)
+            .is_none_or(|(_, since)| *since >= ASK_AGAIN_AFTER);
+        let ask_consent = if !consented && config.sends_to_ai(msg.channel, msg.author) && due {
+            self.asked.insert(msg.author.to_owned(), (room_index, 0));
             Some(consent_request(model, terms, msg.channel, msg.author, &mut tally).await)
         } else {
             None

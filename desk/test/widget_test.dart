@@ -21,7 +21,7 @@ Future<void> open(
 }) async {
   // Ein Fenster in der Größe eines gewöhnlichen Desktops, damit die Karten
   // so nebeneinander stehen wie im echten Programm.
-  tester.view.physicalSize = const Size(1400, 1000);
+  tester.view.physicalSize = const Size(1500, 1000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
@@ -209,7 +209,7 @@ void main() {
       await open(tester, withBot(stored: false));
       await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
       await tester.pumpAndSettle();
-      expect(find.text('Secrets'), findsOneWidget);
+      expect(find.byKey(const ValueKey('secret-row-discord')), findsOneWidget);
       expect(find.byKey(const ValueKey('copy-invite')), findsNothing);
     });
 
@@ -475,8 +475,11 @@ void main() {
       matching: what,
     );
 
+    // Jede Anzeige der Titelleiste öffnet ihren eigenen Teil: hier stehen
+    // die Schlüssel der Dienste, der Token des Bots und das Matrix-Konto nicht.
+    expect(find.byKey(const ValueKey('secret-row-discord')), findsNothing);
+    expect(find.byKey(const ValueKey('secret-row-matrix')), findsNothing);
     for (final title in [
-      'Bot token',
       'ChatGPT (OpenAI)',
       'Grok (xAI)',
       'Gemini (Google)',
@@ -487,7 +490,6 @@ void main() {
     }
     expect(inRow('openai', find.text('stored')), findsOneWidget);
     expect(inRow('xai', find.text('not stored')), findsOneWidget);
-    expect(inRow('discord', find.text('not stored')), findsOneWidget);
     // Ein eigenes Modell braucht oft keinen Schlüssel. Das steht dabei.
     expect(inRow('custom', find.textContaining('optional')), findsOneWidget);
     expect(inRow('xai', find.textContaining('optional')), findsNothing);
@@ -618,7 +620,7 @@ void main() {
     // Der Hinweis führt zu den Geheimnissen.
     await tester.tap(inCard('grok', find.text('No key stored for Grok (xAI)')));
     await tester.pumpAndSettle();
-    expect(find.text('Secrets'), findsOneWidget);
+    expect(find.byKey(const ValueKey('secret-row-xai')), findsOneWidget);
   });
 
   testWidgets('a program that cannot list the services leaves the window usable', (
@@ -998,7 +1000,7 @@ void startRequests() {
   testWidgets('the window can open straight into editing a profile', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.physicalSize = const Size(1500, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
@@ -1475,7 +1477,7 @@ void startRequests() {
 
   group('light or dark', () {
     Future<void> openWith(WidgetTester tester, ThemeChoice choice) async {
-      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.physicalSize = const Size(1500, 1000);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(

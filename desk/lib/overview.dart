@@ -98,7 +98,7 @@ class _OverviewPageState extends State<OverviewPage> {
     } else if (request.newProfile) {
       await _openEditor(ProfileDoc.blank(), isNew: true);
     } else if (request.secrets) {
-      await _secrets();
+      await _secrets(SecretsPart.aiKeys);
     }
   }
 
@@ -222,10 +222,11 @@ class _OverviewPageState extends State<OverviewPage> {
     }
   }
 
-  Future<void> _secrets() async {
+  Future<void> _secrets(SecretsPart part) async {
     await showDialog<void>(
       context: context,
       builder: (_) => SecretsDialog(
+        part: part,
         cli: widget.cli,
         providers: _state.providers,
         onChanged: _state.refresh,
@@ -320,7 +321,7 @@ class _OverviewPageState extends State<OverviewPage> {
                   key: const ValueKey('chip-ai-keys'),
                   text: _aiKeysText(keys),
                   good: _aiKeysGood(keys, list),
-                  onPressed: _secrets,
+                  onPressed: () => _secrets(SecretsPart.aiKeys),
                 ),
               ),
               Padding(
@@ -329,26 +330,35 @@ class _OverviewPageState extends State<OverviewPage> {
                   key: const ValueKey('chip-bot-token'),
                   text: '$botTokenLabel: ${keys == null ? 'checking' : (keys.discord ? 'stored' : 'not stored')}',
                   good: keys?.discord,
-                  onPressed: _secrets,
+                  onPressed: () => _secrets(SecretsPart.discord),
                 ),
               ),
-              // Das Matrix-Konto des Fischs. Die Anzeige steht nur da, wenn
-              // Matrix benutzt wird: der Fisch ist dort angemeldet, oder ein
-              // Profil hat seine Tische dort. Wer nur Discord benutzt, sieht
-              // die Titelleiste wie bisher. Gemessen am 22.11.2026: mit einer
-              // dritten Anzeige, die immer dasteht, reichte die Breite der
-              // Titelleiste nicht mehr. Anmelden kann man sich im selben
-              // Fenster, das die beiden anderen Anzeigen öffnen.
-              if (keys != null && (keys.matrix || _usesMatrix(list)))
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _SecretIndicator(
-                    key: const ValueKey('chip-matrix'),
-                    text: 'Matrix: ${keys.matrix ? 'logged in' : 'not logged in'}',
-                    good: keys.matrix,
-                    onPressed: _secrets,
-                  ),
+              // Das Matrix-Konto des Fischs. Seit jede Anzeige ihr eigenes
+              // Fenster öffnet (23.11.2026), steht diese immer da: sie ist der
+              // Weg zum Anmelden. Solange niemand Matrix benutzt, ist sie
+              // kurz und fehlt nichts; rot wird sie erst, wenn ein Profil an
+              // der Matrix-Tür steht und der Fisch dort nicht angemeldet ist.
+              // Gemessen am 22.11.2026: mit der langen Fassung für alle
+              // reichte die Breite der Titelleiste im Test nicht.
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _SecretIndicator(
+                  key: const ValueKey('chip-matrix'),
+                  text: switch (keys) {
+                    null => 'Matrix',
+                    final keys when keys.matrix => 'Matrix: logged in',
+                    _ when _usesMatrix(list) => 'Matrix: not logged in',
+                    _ => 'Matrix',
+                  },
+                  good: switch (keys) {
+                    null => null,
+                    final keys when keys.matrix => true,
+                    _ when _usesMatrix(list) => false,
+                    _ => null,
+                  },
+                  onPressed: () => _secrets(SecretsPart.matrix),
                 ),
+              ),
               // Hell oder dunkel. Das Zeichen zeigt, wohin der Klick führt.
               if (widget.theme case final choice?)
                 Builder(
@@ -445,7 +455,7 @@ class _OverviewPageState extends State<OverviewPage> {
                                 entry: entry,
                                 state: _state,
                                 today: widget.today(),
-                                onSecrets: _secrets,
+                                onSecrets: () => _secrets(SecretsPart.aiKeys),
                                 onEdit: () => _edit(entry.name),
                                 onDuplicate: () => _duplicate(entry.name),
                                 onShare: () => _shareRooms(entry),
@@ -474,7 +484,8 @@ class _SecretIndicator extends StatelessWidget {
 
   final String text;
 
-  /// Ob alles da ist, was gebraucht wird. Ohne Angabe wird noch nachgesehen.
+  /// Ob alles da ist, was gebraucht wird. Ohne Angabe wird noch nachgesehen,
+  /// oder es wird nichts gebraucht: dann fehlt auch nichts.
   final bool? good;
   final VoidCallback onPressed;
 
@@ -483,9 +494,17 @@ class _SecretIndicator extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     return ActionChip(
       avatar: Icon(
-        good == true ? Icons.check_circle_outline : Icons.error_outline,
+        switch (good) {
+          true => Icons.check_circle_outline,
+          false => Icons.error_outline,
+          null => Icons.radio_button_unchecked,
+        },
         size: 18,
-        color: good == true ? scheme.primary : scheme.error,
+        color: switch (good) {
+          true => scheme.primary,
+          false => scheme.error,
+          null => scheme.onSurfaceVariant,
+        },
       ),
       label: Text(text),
       onPressed: onPressed,

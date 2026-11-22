@@ -145,12 +145,13 @@ void main() {
     ) async {
       final fake = FakeCli(entries: [entryOf(docOf('study'))]);
       await open(tester, fake);
-      // Ohne Matrix-Profil steht keine eigene Anzeige in der Titelleiste; das
-      // Konto steht im selben Fenster wie die anderen Geheimnisse.
-      expect(find.byKey(const ValueKey('chip-matrix')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      // Das Konto hat sein eigenes Fenster, hinter seiner eigenen Anzeige.
+      // Die anderen Geheimnisse stehen dort nicht.
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
       await tester.pumpAndSettle();
       expect(find.text('Matrix account'), findsOneWidget);
+      expect(find.byKey(const ValueKey('secret-row-discord')), findsNothing);
+      expect(find.byKey(const ValueKey('secret-row-openai')), findsNothing);
       expect(find.text('not logged in'), findsOneWidget);
 
       const password = 'not-a-real-password';
@@ -185,7 +186,7 @@ void main() {
     ) async {
       final fake = FakeCli(entries: [entryOf(docOf('study'))]);
       await open(tester, fake);
-      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const ValueKey('matrix-user')));
       await tester.enterText(find.byKey(const ValueKey('matrix-user')), '@fish:example.org');
@@ -210,7 +211,7 @@ void main() {
       final fake = FakeCli(entries: [entryOf(docOf('study'))])
         ..matrixLoginError = 'the Matrix login failed: wrong password';
       await open(tester, fake);
-      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const ValueKey('matrix-user')));
       await tester.enterText(find.byKey(const ValueKey('matrix-user')), '@fish:example.org');
@@ -229,7 +230,7 @@ void main() {
     testWidgets('without a user id or a password nothing is sent', (tester) async {
       final fake = FakeCli(entries: [entryOf(docOf('study'))]);
       await open(tester, fake);
-      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const ValueKey('matrix-login')));
       await tester.tap(find.byKey(const ValueKey('matrix-login')));
@@ -268,11 +269,16 @@ void main() {
       final fake = FakeCli(entries: [entryOf(docOf('study'))])
         ..matrixUnknown = "unrecognized subcommand 'matrix'";
       await open(tester, fake);
-      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
       await tester.pumpAndSettle();
       expect(find.text('this program does not know Matrix'), findsOneWidget);
       expect(find.byKey(const ValueKey('matrix-login')), findsNothing);
       // Kein Fehler des Fensters: die anderen Geheimnisse gehen weiter.
+      expect(find.textContaining('unrecognized'), findsNothing);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
       expect(find.textContaining('unrecognized'), findsNothing);
       expect(find.byKey(const ValueKey('store-discord')), findsOneWidget);
     });
@@ -372,10 +378,18 @@ void main() {
   });
 
   group('the title bar', () {
-    testWidgets('says nothing about Matrix while nobody uses it', (tester) async {
+    // Seit dem 23.11.2026 hat jedes Geheimnis sein eigenes Fenster, und die
+    // Anzeige ist der Weg dorthin. Sie steht also immer da; solange niemand
+    // Matrix benutzt, sagt sie nicht, dass etwas fehlt.
+    testWidgets('leads to the Matrix account without warning while nobody uses it', (
+      tester,
+    ) async {
       await open(tester, FakeCli(entries: [entryOf(docOf('study'))]));
-      expect(find.byKey(const ValueKey('chip-matrix')), findsNothing);
+      expect(find.byKey(const ValueKey('chip-matrix')), findsOneWidget);
       expect(find.textContaining('Matrix:'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('matrix-login')), findsOneWidget);
     });
 
     testWidgets('warns when a profile stands at Matrix and the fish is not logged in', (

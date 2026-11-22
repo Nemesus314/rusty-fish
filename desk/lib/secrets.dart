@@ -15,6 +15,12 @@
 // wie jedes Geheimnis über die Standardeingabe an das Programm, wird dort
 // einmal gebraucht und nicht aufbewahrt. In der Ablage liegt danach der
 // Zugang dieses einen Geräts.
+//
+// Bis zum 23.11.2026 öffneten alle Anzeigen der Titelleiste dasselbe Fenster
+// mit allen Geheimnissen untereinander. Nemesus an dem Tag: „Bei allen
+// Buttons: AI Keys, Bot Token und Matrix kommt das selbe Fenster“, und: „das
+// Aufteilen der Bereiche in Buttons ist auf jeden Fall der richtige Weg.“
+// Seitdem öffnet jede Anzeige ihren eigenen Teil.
 
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
@@ -42,13 +48,34 @@ class _Entry {
   final String? note;
 }
 
+/// Welchen Teil der Geheimnisse das Fenster zeigt: je Anzeige der
+/// Titelleiste einer.
+enum SecretsPart {
+  /// Der Token des Bots bei Discord.
+  discord('Discord'),
+
+  /// Das Konto des Fischs bei Matrix.
+  matrix('Matrix'),
+
+  /// Je ein Schlüssel pro KI-Dienst.
+  aiKeys('AI keys');
+
+  const SecretsPart(this.title);
+
+  /// Die Überschrift des Fensters.
+  final String title;
+}
+
 class SecretsDialog extends StatefulWidget {
   const SecretsDialog({
     super.key,
+    required this.part,
     required this.cli,
     required this.providers,
     required this.onChanged,
   });
+
+  final SecretsPart part;
 
   final FishCli cli;
 
@@ -301,7 +328,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
     final theme = Theme.of(context);
     final error = _error;
     return AlertDialog(
-      title: const Text('Secrets'),
+      title: Text(widget.part.title),
       content: SizedBox(
         // Rechts bleibt Platz für die Bildlaufleiste. Gesehen von Nemesus am
         // 22.11.2026: ohne ihn schwebten die Knöpfe „Forget" über der Leiste,
@@ -322,22 +349,19 @@ class _SecretsDialogState extends State<SecretsDialog> {
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(error, style: TextStyle(color: theme.colorScheme.error)),
                 ),
-              for (final (index, entry) in _entries.indexed) ...[
-                // Der Token des Bots ist etwas anderes als die Schlüssel der
-                // Dienste. Dazwischen steht das Konto für die zweite Tür, und
-                // die Überschrift trennt die Schlüssel ab.
-                if (index == 1) ...[
-                  _matrixBlock(theme),
+              // Der erste Eintrag ist der Token des Bots, die übrigen sind
+              // die Schlüssel der Dienste.
+              ...switch (widget.part) {
+                SecretsPart.discord => [_block(_entries.first, theme)],
+                SecretsPart.matrix => [_matrixBlock(theme)],
+                SecretsPart.aiKeys => [
                   Padding(
-                    padding: const EdgeInsets.only(top: 24),
-                    child: Text(
-                      'AI keys, one per service',
-                      style: theme.textTheme.titleSmall,
-                    ),
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text('One key per service', style: theme.textTheme.titleSmall),
                   ),
+                  for (final entry in _entries.skip(1)) _block(entry, theme),
                 ],
-                _block(entry, theme),
-              ],
+              },
             ],
           ),
         ),
