@@ -80,8 +80,11 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
     return AlertDialog(
       title: const Text('Paste rooms'),
       content: SizedBox(
-        width: 620,
+        // Rechts bleibt Platz für die Bildlaufleiste, wie im Fenster der
+        // Geheimnisse.
+        width: 644,
         child: SingleChildScrollView(
+          padding: const EdgeInsets.only(right: 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,

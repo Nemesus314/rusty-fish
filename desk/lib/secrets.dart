@@ -203,8 +203,12 @@ class _SecretsDialogState extends State<SecretsDialog> {
     return AlertDialog(
       title: const Text('Secrets'),
       content: SizedBox(
-        width: 620,
+        // Rechts bleibt Platz für die Bildlaufleiste. Gesehen von Nemesus am
+        // 22.11.2026: ohne ihn schwebten die Knöpfe „Forget" über der Leiste,
+        // sobald das Fenster rollte.
+        width: 644,
         child: SingleChildScrollView(
+          padding: const EdgeInsets.only(right: 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
