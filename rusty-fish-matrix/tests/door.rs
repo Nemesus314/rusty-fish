@@ -8,9 +8,9 @@
 //! Raum liest, zeigt nur ein echter Lauf.
 
 use matrix_sdk::ruma::events::room::member::MembershipState;
-use matrix_sdk::ruma::{event_id, room_id, user_id};
+use matrix_sdk::ruma::{RoomVersionId, event_id, room_id, user_id};
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
-use matrix_sdk_test::JoinedRoomBuilder;
+use matrix_sdk_test::{InvitedRoomBuilder, JoinedRoomBuilder};
 use matrix_sdk_test::event_factory::EventFactory;
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_house::config::Config;
@@ -306,6 +306,245 @@ async fn a_conversation_takes_its_course_through_the_matrix_door() {
         .map(|request| format!("{} {}", request.method, request.url.path()))
         .collect();
     eprintln!("the server was asked {} times: {asked:#?}", asked.len());
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Aus dem ersten echten Lauf am 22.11.2026: der Fisch betrat zwei Räume, in
+/// die er eingeladen war, noch während des ersten Abgleichs. Was der Server
+/// ihm danach aus diesen Räumen zeigte, hielt er für neu und meldete dazu,
+/// er habe mehr als 100 Nachrichten verpasst. Was vor seinem Eintritt in
+/// einem Raum geschrieben wurde, übersetzt er nicht.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_was_written_before_the_fish_entered_a_room_is_not_translated() {
+    let server = MatrixMockServer::new().await;
+    let dir = folder("entered");
+    let german = room_id!("!deutsch:localhost");
+    let russian = room_id!("!russisch:localhost");
+    let nemo = user_id!("@nemo:localhost");
+    let me = user_id!("@fish:localhost");
+
+    server.mock_versions().ok().mount().await;
+    server.mock_upload_keys().ok().mount().await;
+    server.mock_query_keys().ok().mount().await;
+    server.mock_room_state_encryption().plain().mount().await;
+    server
+        .mock_room_send()
+        .ok(event_id!("$from-the-fish"))
+        .mount()
+        .await;
+    server.mock_room_join(german).ok().mount().await;
+    server
+        .mock_sync()
+        .ok(|_| {})
+        .with_priority(10)
+        .mount()
+        .await;
+
+    // Der erste Abgleich: in einem Raum ist der Fisch schon, in den anderen
+    // ist er eingeladen.
+    let in_german = EventFactory::new().room(german);
+    let in_russian = EventFactory::new().room(russian);
+    server
+        .mock_sync()
+        .ok(|builder| {
+            builder.add_invited_room(
+                InvitedRoomBuilder::new(german).add_state_event(
+                    in_german
+                        .member(me)
+                        .membership(MembershipState::Invite)
+                        .sender(nemo),
+                ),
+            );
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(russian)
+                    .add_state_event(in_russian.member(me).membership(MembershipState::Join)),
+            );
+        })
+        .mock_once()
+        .with_priority(1)
+        .mount()
+        .await;
+
+    let secret = serde_json::json!({
+        "h": server.uri(), "u": me, "d": "DEVICEID", "t": "1234", "p": "not-a-real-passphrase",
+    });
+    let access = Access::parse(&secret.to_string()).unwrap();
+    let fake = Fake::default();
+    let profile = Profile {
+        name: Some("tea".to_owned()),
+        config: Config::parse(PROFILE).unwrap(),
+        state_path: dir.join("tea.state.json"),
+        model: fake.clone(),
+        service: "ai.example".to_owned(),
+    };
+    let (to_door, commands) = unbounded_channel();
+    let store = dir.join("store");
+    let door = tokio::spawn(async move {
+        run(
+            &access,
+            &store,
+            vec![profile],
+            false,
+            commands,
+            Box::new(|_| {}),
+        )
+        .await
+    });
+
+    // Der Fisch bittet um Eintritt.
+    let mut joined = false;
+    for _ in 0..300 {
+        joined = server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|request| {
+                request.method.as_str() == "POST" && request.url.path().ends_with("/join")
+            });
+        if joined {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        joined,
+        "the fish joins a room of its profile it is invited to"
+    );
+
+    // Danach zeigt ihm der Server den Raum: das Letzte, was dort geschrieben
+    // wurde, und mehr davon gäbe es noch. Und eine Nachricht, die nach dem
+    // Eintritt kam.
+    let before = now_ms() - 3_600_000;
+    let soon = now_ms() + 60_000;
+    server
+        .mock_sync()
+        .ok(|builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(german)
+                    .set_timeline_limited()
+                    .add_state_event(
+                        in_german
+                            .member(nemo)
+                            .membership(MembershipState::Join)
+                            .display_name("Nemo"),
+                    )
+                    .add_state_event(in_german.member(me).membership(MembershipState::Join))
+                    .add_timeline_event(
+                        in_german
+                            .text_msg("vor einer Stunde")
+                            .sender(nemo)
+                            .server_ts(before),
+                    )
+                    .add_timeline_event(
+                        in_german
+                            .text_msg("Guten Morgen")
+                            .sender(nemo)
+                            .server_ts(soon),
+                    ),
+            );
+        })
+        .mock_once()
+        .with_priority(1)
+        .mount()
+        .await;
+
+    // Die Mitteilung an die Eingeladene und eine Übersetzung, nicht zwei.
+    let all = sent_at_least(&server, 2).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let all_later = sent(&server).await;
+    assert_eq!(all_later.len(), 2, "got {all_later:?}");
+    assert_eq!(all[1].2["body"], "Nemo: TRANSLATED");
+    let read = fake.0.lock().unwrap();
+    assert_eq!(read.len(), 1, "one call to the AI");
+    assert!(
+        read[0].user.contains("Guten Morgen"),
+        "got {:?}",
+        read[0].user
+    );
+    drop(read);
+
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Aus demselben Lauf: im Profil standen die Kennungen zweier Spaces. Der
+/// Fisch trat ein, und niemand konnte dort schreiben. Einen Space betritt er
+/// nicht.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fish_does_not_enter_a_space() {
+    let server = MatrixMockServer::new().await;
+    let dir = folder("space");
+    let german = room_id!("!deutsch:localhost");
+    let russian = room_id!("!russisch:localhost");
+    let nemo = user_id!("@nemo:localhost");
+    let me = user_id!("@fish:localhost");
+
+    server.mock_versions().ok().mount().await;
+    server.mock_upload_keys().ok().mount().await;
+    server.mock_query_keys().ok().mount().await;
+    server.mock_room_state_encryption().plain().mount().await;
+    server.mock_room_send().ok(event_id!("$from-the-fish")).mount().await;
+    // Der Server ließe ihn ein.
+    server.mock_room_join(german).ok().mount().await;
+    server.mock_sync().ok(|_| {}).with_priority(10).mount().await;
+
+    let in_german = EventFactory::new().room(german);
+    let in_russian = EventFactory::new().room(russian);
+    server
+        .mock_sync()
+        .ok(|builder| {
+            builder.add_invited_room(
+                InvitedRoomBuilder::new(german)
+                    .add_state_event(in_german.create(nemo, RoomVersionId::V11).with_space_type())
+                    .add_state_event(
+                        in_german.member(me).membership(MembershipState::Invite).sender(nemo),
+                    ),
+            );
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(russian)
+                    .add_state_event(in_russian.member(me).membership(MembershipState::Join)),
+            );
+        })
+        .mock_once()
+        .with_priority(1)
+        .mount()
+        .await;
+
+    let secret = serde_json::json!({
+        "h": server.uri(), "u": me, "d": "DEVICEID", "t": "1234", "p": "not-a-real-passphrase",
+    });
+    let access = Access::parse(&secret.to_string()).unwrap();
+    let profile = Profile {
+        name: Some("tea".to_owned()),
+        config: Config::parse(PROFILE).unwrap(),
+        state_path: dir.join("tea.state.json"),
+        model: Fake::default(),
+        service: "ai.example".to_owned(),
+    };
+    let (to_door, commands) = unbounded_channel();
+    let store = dir.join("store");
+    let door = tokio::spawn(async move {
+        run(&access, &store, vec![profile], false, commands, Box::new(|_| {})).await
+    });
+
+    // Die Mitteilung an die Eingeladene kommt, wenn die Verbindung steht und
+    // die Räume des Profils durchgesehen sind.
+    sent_at_least(&server, 1).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let asked_to_join = server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .any(|request| request.method.as_str() == "POST" && request.url.path().ends_with("/join"));
+    assert!(!asked_to_join, "the fish asked to join a space");
+
     to_door.send(Command::StopAll).unwrap();
     let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
     assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));

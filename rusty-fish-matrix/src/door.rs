@@ -179,6 +179,10 @@ struct Fish<M> {
     /// schon war. `None` vor dem ersten Abgleich einer leeren Ablage: dann
     /// kann alles, was kommt, alt sein.
     known: std::sync::Mutex<Option<HashSet<OwnedRoomId>>>,
+    /// Die Räume, die der Fisch in diesem Lauf betreten hat und die ihm der
+    /// Server seither noch nicht gezeigt hat. Was er beim ersten Zeigen
+    /// mitbringt, kann alt sein.
+    fresh: std::sync::Mutex<HashSet<OwnedRoomId>>,
     /// Die eigenen Nachrichten dieses Laufs, die etwas fragen.
     asked: Mutex<HashMap<OwnedEventId, Asked>>,
     on_change: OnChange,
@@ -217,6 +221,7 @@ where
         served: RwLock::new(Vec::new()),
         ready: watch::channel(false).0,
         known: std::sync::Mutex::new(known),
+        fresh: std::sync::Mutex::new(HashSet::new()),
         asked: Mutex::new(HashMap::new()),
         on_change,
     });
@@ -465,6 +470,9 @@ where
 
     /// Kann, was jetzt aus diesem Raum kommt, alt sein?
     fn maybe_old(&self, room: &RoomId) -> bool {
+        if self.fresh.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).contains(room) {
+            return true;
+        }
         let known = self.known.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         known.as_ref().is_none_or(|rooms| !rooms.contains(room))
     }
@@ -482,6 +490,14 @@ where
                     "more than {CATCH_UP} messages were missed in room {room}; the oldest are \
                      not caught up"
                 ));
+            }
+        }
+        // Ein eben betretener Raum ist jetzt gezeigt worden; was von nun an
+        // aus ihm kommt, ist neu.
+        {
+            let mut fresh = self.fresh.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for room in response.rooms.joined.keys() {
+                fresh.remove(room);
             }
         }
         let joined: HashSet<OwnedRoomId> =
@@ -611,7 +627,7 @@ where
             return;
         }
         match self.at(room.room_id()).await {
-            Some((served, _)) => served.enter(&room).await,
+            Some((served, _)) => served.enter(self, &room).await,
             None => eprintln!(
                 "rusty-fish: invited to room {}, which is no table of a running profile; not \
                  joining",
@@ -721,12 +737,36 @@ where
         Terms { config: &self.config, service: &self.service, today }
     }
 
+    /// Aus dem ersten echten Lauf am 22.11.2026: im Profil standen die
+    /// Kennungen zweier Spaces. Ein Space ist für Matrix auch ein Raum, der
+    /// Fisch trat ein und meldete nichts; schreiben kann dort niemand.
+    fn not_a_table(&self, room: &RoomId) {
+        self.say(format_args!(
+            "{room} is a space, not a room: nobody can write there; put the id of a room in its \
+             place"
+        ));
+    }
+
     /// Betritt einen Raum, in den der Fisch eingeladen ist. Gleich nach der
     /// Einladung kennt der Server den Raum manchmal noch nicht ganz; deshalb
     /// mehr als ein Versuch.
-    async fn enter(&self, room: &Room) {
+    async fn enter(&self, fish: &Fish<M>, room: &Room) {
+        if room.is_space() {
+            self.not_a_table(room.room_id());
+            return;
+        }
         // Vor der Bitte gemerkt: was ab jetzt geschrieben wird, gilt.
         let asked = now_ms();
+        // Bis der Server den Raum gezeigt hat, kann alles aus ihm alt sein.
+        let fresh = |is: bool| {
+            let mut fresh = fish.fresh.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if is {
+                fresh.insert(room.room_id().to_owned());
+            } else {
+                fresh.remove(room.room_id());
+            }
+        };
+        fresh(true);
         let mut wait = Duration::from_secs(1);
         for attempt in 1..=3 {
             match room.join().await {
@@ -739,6 +779,7 @@ where
                     return;
                 }
                 Err(why) if attempt == 3 => {
+                    fresh(false);
                     self.say(format_args!("cannot join room {}: {why}", room.room_id()));
                 }
                 Err(_) => {
@@ -756,8 +797,9 @@ where
         for seat in self.config.rooms.iter().flat_map(|room| room.seats.iter()) {
             let Ok(id) = RoomId::parse(&seat.channel) else { continue };
             match fish.client.get_room(&id) {
+                Some(room) if room.is_space() => self.not_a_table(room.room_id()),
                 Some(room) if room.state() == RoomState::Joined => {}
-                Some(room) if room.state() == RoomState::Invited => self.enter(&room).await,
+                Some(room) if room.state() == RoomState::Invited => self.enter(fish, &room).await,
                 _ => self.say(format_args!(
                     "the fish is not in room {}; invite {} there",
                     seat.channel, fish.me
