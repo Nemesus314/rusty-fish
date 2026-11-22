@@ -10,8 +10,8 @@
 //
 // Benannte Lücken, bis er sie füllt:
 // - Der Text über ihn und das Programm ist ein Entwurf von Fischlein.
-// - Das Repository ist noch nicht veröffentlicht; deshalb steht hier keine
-//   Adresse, sondern dass es noch keine gibt.
+// - Rusty Fish ist noch nicht veröffentlicht. Hier steht deshalb sein Profil
+//   auf GitHub und der Satz, dass der Fisch dort noch nicht liegt.
 // - Ein Bild gibt es noch nicht.
 
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -26,6 +26,10 @@ const madeBy = 'Nemesus (Christian Ermisch)';
 
 /// Seine Webseite.
 const website = 'christianermisch.com';
+
+/// Sein Profil auf GitHub. Dort liegen Cluster One, Prometheus und Lamarr;
+/// Rusty Fish selbst ist dort noch nicht veröffentlicht.
+const github = 'github.com/Nemesus314';
 
 /// Wofür das Programm gebaut ist. Entwurf, bis Nemesus seinen Text liefert.
 const purpose =
@@ -100,9 +104,21 @@ class AboutFish extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text('Source code', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Text(github),
+                    IconButton(
+                      key: const ValueKey('copy-github'),
+                      tooltip: 'Copy the address',
+                      iconSize: 18,
+                      onPressed: () => Clipboard.setData(const ClipboardData(text: github)),
+                      icon: const Icon(Icons.copy),
+                    ),
+                  ],
+                ),
                 const Text(
-                  'Not published yet. It is planned as free software '
-                  'under the GPL 3 or the AGPL 3.',
+                  'Rusty Fish itself is not published there yet. It is planned as free '
+                  'software under the GPL 3 or the AGPL 3.',
                 ),
                 const SizedBox(height: 20),
                 Align(

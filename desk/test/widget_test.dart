@@ -242,9 +242,9 @@ void main() {
       expect(find.textContaining('each in their own language'), findsOneWidget);
       expect(find.text('Nemesus (Christian Ermisch)'), findsOneWidget);
       expect(find.text('christianermisch.com'), findsOneWidget);
-      // Solange es keine Adresse gibt, steht da keine erfundene.
-      expect(find.textContaining('Not published yet'), findsOneWidget);
-      expect(find.textContaining('github.com'), findsNothing);
+      // Sein Profil steht da; dass der Fisch dort noch nicht liegt, auch.
+      expect(find.text('github.com/Nemesus314'), findsOneWidget);
+      expect(find.textContaining('not published there yet'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('copy-website')));
       await tester.pumpAndSettle();
