@@ -66,6 +66,11 @@ abstract class FishCli {
   /// braucht sie nur gegenüber einem älteren Programm, das keine Dienste nennt.
   Future<List<String>> models({String? provider, String? baseUrl});
 
+  /// Der Link, mit dem der eigene Bot auf einen Discord-Server kommt. Er
+  /// enthält die Kennung des Bots und kein Geheimnis. Ein älteres Programm
+  /// kennt den Aufruf nicht und lehnt ihn ab.
+  Future<String> inviteLink();
+
   /// Startet den Fisch mit allen gespeicherten Profilen. Eines, das sich
   /// nicht starten lässt, sagt in der Ausgabe, warum, und bleibt weg.
   Future<FishRun> runAll();
@@ -171,6 +176,9 @@ class ProcessFishCli implements FishCli {
 
   @override
   Future<String> guide() => _call(['guide']);
+
+  @override
+  Future<String> inviteLink() async => (await _call(['invite'])).trim();
 
   Future<String> _call(List<String> args, {String? input}) async {
     final Process process;

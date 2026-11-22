@@ -9,6 +9,7 @@
 // bleiben." Seitdem hat jeder Dienst seinen eigenen Schlüssel, und der Dialog
 // zeigt eine Zeile je Dienst, den das Programm nennt.
 
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
@@ -87,6 +88,31 @@ class _SecretsDialogState extends State<SecretsDialog> {
   KeyStatus? _status;
   String? _error;
   bool _busy = false;
+
+  /// Was nach dem Klick auf den Link für den Bot zu sagen ist.
+  String? _inviteNote;
+
+  /// Legt den Link in die Zwischenablage, mit dem dieser Bot auf einen Server
+  /// kommt.
+  ///
+  /// Gemessen am 22.11.2026 im ersten Lauf mit zwei Fischen: bringt jeder
+  /// seinen eigenen Fisch mit, muss der Bot des einen auf den Server des
+  /// anderen. Der Link dafür ließ sich bis dahin nur von Hand zusammensetzen.
+  Future<void> _copyInvite() async {
+    String note;
+    try {
+      final link = await widget.cli.inviteLink();
+      await Clipboard.setData(ClipboardData(text: link));
+      note =
+          'Link copied. Send it to whoever owns the server. '
+          'They open it, choose the server and see the four rights before they agree.';
+    } on CliException catch (e) {
+      note = 'Cannot make the link: ${e.message}';
+    }
+    if (mounted) {
+      setState(() => _inviteNote = note);
+    }
+  }
 
   @override
   void initState() {
@@ -289,6 +315,22 @@ class _SecretsDialogState extends State<SecretsDialog> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(entry.note!, style: theme.textTheme.bodySmall),
             ),
+          // Liegt das Token, kennt das Programm die Kennung des Bots und kann
+          // den Link nennen, mit dem er auf einen Server kommt. Der Link
+          // enthält kein Geheimnis.
+          if (entry.entry == botTokenEntry && stored == true) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                key: const ValueKey('copy-invite'),
+                onPressed: _copyInvite,
+                icon: const Icon(Icons.link, size: 18),
+                label: const Text('Copy the link that brings this bot onto a server'),
+              ),
+            ),
+            if (_inviteNote case final note?)
+              Text(note, style: theme.textTheme.bodySmall),
+          ],
         ],
       ),
     );

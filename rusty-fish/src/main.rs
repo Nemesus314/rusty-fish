@@ -7,6 +7,7 @@
 //! Fehlerausgabe, und das Programm endet dann mit Code 1.
 
 mod awake;
+mod botlink;
 mod keys;
 mod lock;
 mod profiles;
@@ -111,6 +112,9 @@ enum Command {
     },
     /// Print a description of this program for an AI assistant to explain the setup
     Guide,
+    /// Print the link that brings your bot onto a Discord server. Send it to
+    /// whoever owns the server; it contains the id of the bot and no secret
+    Invite,
 }
 
 /// Die Beschreibung des Programms, wie sie im Repository steht.
@@ -350,6 +354,22 @@ async fn run(command: Command) -> Result<(), String> {
         Command::Profile { action } => profile(action),
         Command::Guide => {
             print!("{}", guide());
+            Ok(())
+        }
+        Command::Invite => {
+            let token = keys::load(profiles::BOT)?.ok_or_else(|| {
+                format!(
+                    "{} not stored; run `rusty-fish key set {}` first",
+                    secrets::label(profiles::BOT),
+                    profiles::BOT
+                )
+            })?;
+            let id = botlink::bot_id(token.expose()).ok_or_else(|| {
+                "cannot read the id of the bot from the stored token; take the Application ID \
+                 from the Discord Developer Portal instead"
+                    .to_owned()
+            })?;
+            println!("{}", botlink::link(&id));
             Ok(())
         }
         Command::Run { config, profile, all } => {

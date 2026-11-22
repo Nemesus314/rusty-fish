@@ -106,10 +106,11 @@ account there.
 4. On the same page, create the bot token (Reset Token) and copy it. Treat it
    like a password: it goes into the program in the next section and nowhere
    else.
-5. Install the bot on your server (Installation page, guild install) with the
-   scope `bot` and these permissions: View Channels, Send Messages, Read
-   Message History, Manage Webhooks. Open the install link and choose your
-   server.
+5. Bring the bot onto the server. The easy way comes a little later: once the
+   token is stored in the program, the program makes the link for you (see
+   "Setting up the program", step 1). By hand it works too: Installation
+   page, guild install, with the scope `bot` and these permissions: View
+   Channels, Send Messages, Read Message History, Manage Webhooks.
 6. In Discord's own settings, turn on Developer Mode (Advanced). Now a right
    click on yourself, on another person or on a channel offers "Copy User ID"
    or "Copy Channel ID". These numbers are not secrets.
@@ -119,7 +120,13 @@ account there.
 1. Open the window (`rusty_fish_desk.exe`). The title bar shows "AI keys" and
    "Bot token". Click one of them, then store your API key and your bot token.
    They are kept in the Windows Credential Manager, not in a file, and the
-   window never shows them again.
+   window never shows them again. With the token stored, the same window
+   offers "Copy the link that brings this bot onto a server". Open that link
+   yourself to add the bot to your own server. To join someone else's server
+   with your own fish, send the link to whoever owns that server; they open
+   it, choose the server and see the four permissions before they agree. The
+   link contains the id of the bot and no secret. On the command line:
+   `rusty-fish invite`.
 2. Press "New profile" and fill it in:
    - General: a name for the profile, the AI service, the model ("Load models"
      lists what your key can use) and your own Discord user ID.

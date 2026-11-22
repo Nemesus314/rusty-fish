@@ -184,6 +184,50 @@ void main() {
       return copied;
     }
 
+    FakeCli withBot({required bool stored}) => FakeCli(
+      entries: [entryOf(docOf('study'))],
+      keys: KeyStatus({'openai': true, 'discord': stored}),
+    );
+
+    testWidgets('one click copies the link that brings the own bot onto a server', (tester) async {
+      final copied = clipboardOf(tester);
+      await open(tester, withBot(stored: true));
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('copy-invite')));
+      await tester.pumpAndSettle();
+      expect(copied, [
+        'https://discord.com/oauth2/authorize?client_id=42&scope=bot&permissions=536939520',
+      ]);
+      // Was mit dem Link zu tun ist, steht gleich dabei.
+      expect(find.textContaining('Send it to whoever owns the server'), findsOneWidget);
+    });
+
+    testWidgets('without a stored bot token there is no link to copy', (tester) async {
+      await open(tester, withBot(stored: false));
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
+      expect(find.text('Secrets'), findsOneWidget);
+      expect(find.byKey(const ValueKey('copy-invite')), findsNothing);
+    });
+
+    testWidgets('a program that cannot make the link says why and copies nothing', (tester) async {
+      final copied = clipboardOf(tester);
+      final fake = withBot(stored: true)
+        ..inviteError = 'cannot read the id of the bot from the stored token';
+      await open(tester, fake);
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('copy-invite')));
+      await tester.pumpAndSettle();
+      expect(copied, isEmpty);
+      expect(
+        find.text('Cannot make the link: cannot read the id of the bot from the stored token'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('the About window says what the fish is for, who made it and where to find them', (
       tester,
     ) async {

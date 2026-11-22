@@ -191,6 +191,18 @@ class FakeCli implements FishCli {
     }
     return '# Rusty Fish: what it is\n';
   }
+
+  /// Gesetzt: das Programm kann den Link nicht nennen, mit diesem Grund.
+  String? inviteError;
+
+  @override
+  Future<String> inviteLink() async {
+    final error = inviteError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return 'https://discord.com/oauth2/authorize?client_id=42&scope=bot&permissions=536939520';
+  }
 }
 
 /// Ein gültiges Profil mit zwei Plätzen.
