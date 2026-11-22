@@ -110,7 +110,7 @@ class _OverviewPageState extends State<OverviewPage> {
     }
     await Clipboard.setData(ClipboardData(text: shareRoomsText(doc)));
     _say(
-      'Rooms copied. The text holds the channels, the Discord ids and the names from '
+      'Rooms copied. The text holds the channels or rooms, the user ids and the names from '
       'this profile. No key, no token, nothing about your AI.',
     );
   }
@@ -241,6 +241,13 @@ class _OverviewPageState extends State<OverviewPage> {
       if (provider.needsKey) provider,
   ];
 
+  /// Steht ein gültiges Profil an der Matrix-Tür? Nur dann fehlt etwas,
+  /// solange der Fisch dort nicht angemeldet ist.
+  bool _usesMatrix(ProfileList? list) => [
+    for (final entry in list?.profiles ?? const <ProfileEntry>[])
+      if (entry.doc?.door == matrixDoor) entry,
+  ].isNotEmpty;
+
   /// „AI keys: 1 of 4 stored". Seit jeder Dienst seinen eigenen Schlüssel
   /// hat, passt nicht mehr jeder einzeln in die Titelleiste.
   String _aiKeysText(KeyStatus? keys) {
@@ -325,6 +332,23 @@ class _OverviewPageState extends State<OverviewPage> {
                   onPressed: _secrets,
                 ),
               ),
+              // Das Matrix-Konto des Fischs. Die Anzeige steht nur da, wenn
+              // Matrix benutzt wird: der Fisch ist dort angemeldet, oder ein
+              // Profil hat seine Tische dort. Wer nur Discord benutzt, sieht
+              // die Titelleiste wie bisher. Gemessen am 22.11.2026: mit einer
+              // dritten Anzeige, die immer dasteht, reichte die Breite der
+              // Titelleiste nicht mehr. Anmelden kann man sich im selben
+              // Fenster, das die beiden anderen Anzeigen öffnen.
+              if (keys != null && (keys.matrix || _usesMatrix(list)))
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _SecretIndicator(
+                    key: const ValueKey('chip-matrix'),
+                    text: 'Matrix: ${keys.matrix ? 'logged in' : 'not logged in'}',
+                    good: keys.matrix,
+                    onPressed: _secrets,
+                  ),
+                ),
               // Hell oder dunkel. Das Zeichen zeigt, wohin der Klick führt.
               if (widget.theme case final choice?)
                 Builder(

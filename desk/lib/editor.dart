@@ -65,15 +65,11 @@ class _SeatDraft {
     : channel = TextEditingController(text: seat.channel),
       lang = TextEditingController(text: seat.lang),
       form = _formOf(seat.gender),
-      door = seat.door,
       owner = seat.owner ?? '';
 
   final TextEditingController channel;
   final TextEditingController lang;
   _Form form;
-
-  /// Die Tür dieses Tisches. Bisher gibt es nur Discord, deshalb kein Feld.
-  final String door;
 
   /// Wem der Tisch gehört: der Name des Menschen, sonst seine Kennung (siehe
   /// [_PersonDraft.ref]). Leer: niemandem im Besonderen.
@@ -105,9 +101,10 @@ class _RoomDraft {
 }
 
 class _PersonDraft {
-  _PersonDraft(Person? person)
+  _PersonDraft(Person? person, String door)
     : name = TextEditingController(text: person?.name ?? ''),
-      id = TextEditingController(text: person?.id ?? ''),
+      id = TextEditingController(text: person?.idAt(door) ?? ''),
+      otherId = person?.idAt(door == matrixDoor ? discordDoor : matrixDoor) ?? '',
       lang = TextEditingController(text: person?.lang ?? ''),
       neutral = TextEditingController(text: person?.neutral?.join(', ') ?? ''),
       // Bis zum 20.11.2026 begann ein neuer Mensch mit der weiblichen Form,
@@ -129,7 +126,22 @@ class _PersonDraft {
   /// Namen tippt, ziehen die Tische dieses Menschen mit.
   String lastRef = '';
 
+  /// Die Kennung an der Tür des Profils. Das Feld heißt nach ihr.
   final TextEditingController id;
+
+  /// Die Kennung an der anderen Tür. Sie steht in keinem Feld, bleibt aber
+  /// erhalten: ein Mensch kann an beiden Türen eine tragen, und das bloße
+  /// Öffnen und Speichern darf keine davon verlieren.
+  String otherId;
+
+  /// Das Profil wechselt die Tür: im Feld steht jetzt die Kennung an der
+  /// neuen, und die bisherige wird die andere.
+  void showOtherDoor() {
+    final shown = id.text.trim();
+    id.text = otherId;
+    otherId = shown;
+  }
+
   final TextEditingController lang;
   final TextEditingController neutral;
   _Form form;
@@ -181,6 +193,11 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   /// Die Kennung des gewählten KI-Dienstes.
   late String _provider;
 
+  /// Die Tür, an der die Tische dieses Profils stehen. Eine Wahl für das
+  /// ganze Profil: das Programm nimmt keines an, dessen Tische an zwei Türen
+  /// stehen.
+  late String _door;
+
   /// Der Dienst wurde gewechselt, das Modell stammt aber noch vom alten. Dann
   /// steht ein Hinweis am Modellfeld, bis dort etwas Neues eingetragen ist.
   bool _modelFromOtherService = false;
@@ -197,6 +214,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     super.initState();
     final doc = widget.initial;
     _provider = doc.provider;
+    _door = doc.door;
     _choices = [
       ...widget.providers,
       if (!widget.providers.any((p) => p.id == doc.provider))
@@ -210,7 +228,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _questions = TextEditingController(text: '${doc.limits.questionsPerGuestPerDay}');
     _aiNames = [for (final name in doc.aiNames) TextEditingController(text: name)];
     _rooms = [for (final room in doc.rooms) _RoomDraft(room)];
-    _people = [for (final person in doc.people) _watched(_PersonDraft(person))];
+    _people = [for (final person in doc.people) _watched(_PersonDraft(person, _door))];
     _pointSeatsAtPeople();
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
@@ -269,12 +287,16 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       for (final person in _people) {
         person.dispose();
       }
+      // Die Tür kommt mit den Räumen: beide Fische stehen an derselben.
+      _door = pasted.shared.rooms.first.seats.first.door;
       _rooms
         ..clear()
         ..addAll([for (final room in pasted.shared.rooms) _RoomDraft(room)]);
       _people
         ..clear()
-        ..addAll([for (final person in pasted.shared.people) _watched(_PersonDraft(person))]);
+        ..addAll([
+          for (final person in pasted.shared.people) _watched(_PersonDraft(person, _door)),
+        ]);
       _pointSeatsAtPeople();
       final me = pasted.me;
       if (me != null) {
@@ -406,6 +428,21 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     ];
   }
 
+  /// Das Profil wechselt die Tür. Die Tische bleiben, wie sie sind; ihre
+  /// Kennungen gelten an der neuen Tür nicht und sind neu einzutragen. Bei
+  /// den Menschen erscheint die Kennung, die sie an der neuen Tür tragen.
+  void _chooseDoor(String door) {
+    if (door == _door) {
+      return;
+    }
+    setState(() {
+      _door = door;
+      for (final person in _people) {
+        person.showOtherDoor();
+      }
+    });
+  }
+
   void _chooseService(String id) {
     if (id == _provider) {
       return;
@@ -504,7 +541,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           seats: [
             for (final seat in room.seats)
               Seat(
-                door: seat.door,
+                door: _door,
                 channel: seat.channel.text.trim(),
                 lang: seat.lang.text.trim(),
                 gender: _genderOf(seat.form),
@@ -536,7 +573,8 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         for (final person in _people)
           if (person.ref.isNotEmpty)
             Person(
-              id: person.id.text.trim(),
+              id: _door == matrixDoor ? person.otherId : person.id.text.trim(),
+              matrix: _door == matrixDoor ? person.id.text.trim() : person.otherId,
               name: person.name.text.trim().isEmpty ? null : person.name.text.trim(),
               gender: _genderOf(person.form),
               lang: person.lang.text.trim().isEmpty ? null : person.lang.text.trim(),
@@ -826,14 +864,42 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             ),
           ),
         const SizedBox(height: 16),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Door',
+            helperText:
+                'Where the tables of this profile are: channels on Discord or rooms on Matrix. '
+                'A profile uses one of the two.',
+            helperMaxLines: 2,
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              key: const ValueKey('field-door'),
+              value: _door,
+              isDense: true,
+              isExpanded: true,
+              onChanged: (door) => _chooseDoor(door ?? _door),
+              items: [
+                const DropdownMenuItem(value: discordDoor, child: Text('Discord')),
+                const DropdownMenuItem(value: matrixDoor, child: Text('Matrix')),
+                // Eine Tür, die diese Maske nicht kennt, bleibt stehen: sonst
+                // würde ein Profil beim bloßen Öffnen und Speichern umgestellt.
+                if (_door != discordDoor && _door != matrixDoor)
+                  DropdownMenuItem(value: _door, child: Text(doorLabel(_door))),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         TextField(
           key: const ValueKey('field-host'),
           controller: _host,
-          decoration: const InputDecoration(
-            labelText: 'Your Discord user ID',
-            helperText:
-                'In Discord: right-click your own name, then Copy User ID. '
-                'Needs Developer Mode (Settings, Advanced).',
+          decoration: InputDecoration(
+            labelText: 'Your ${doorLabel(_door)} user ID',
+            helperText: _door == matrixDoor
+                ? 'Looks like @name:server. Your Matrix app shows it in your own profile.'
+                : 'In Discord: right-click your own name, then Copy User ID. '
+                      'Needs Developer Mode (Settings, Advanced).',
             helperMaxLines: 2,
           ),
         ),
@@ -938,14 +1004,21 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       children: [
         // Bis zum 20.11.2026: „Every seat is a channel with a language." Seit
         // ein Platz der Tisch eines Menschen sein kann, steht das Wort dabei.
-        const Text(
-          'A room is one conversation. Every seat is a table: a channel in one language. '
-          'What is written at one table appears at all others in their language.',
+        Text(
+          _door == matrixDoor
+              ? 'A room is one conversation. Every seat is a table: a Matrix room in one language. '
+                    'What is written at one table appears at all others in their language.'
+              : 'A room is one conversation. Every seat is a table: a channel in one language. '
+                    'What is written at one table appears at all others in their language.',
         ),
         const SizedBox(height: 4),
         Text(
-          'Channel ID: in Discord, right-click the channel, then Copy Channel ID. '
-          'Language as a word, for example German.',
+          _door == matrixDoor
+              ? 'Room ID: the internal ID of the Matrix room, which starts with ! (in Element: '
+                    'room settings, Advanced). Invite the account of the fish into each room. '
+                    'Language as a word, for example German.'
+              : 'Channel ID: in Discord, right-click the channel, then Copy Channel ID. '
+                    'Language as a word, for example German.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 4),
@@ -1119,7 +1192,9 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             child: TextField(
               key: ValueKey('seat-$r-$s-channel'),
               controller: seat.channel,
-              decoration: const InputDecoration(labelText: 'Discord channel ID'),
+              decoration: InputDecoration(
+                labelText: _door == matrixDoor ? 'Matrix room ID' : 'Discord channel ID',
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -1191,8 +1266,8 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         const SizedBox(height: 4),
         Text(
           'Name: your own label for this person, so you can see whose table is whose. '
-          'It stays in this profile; neither Discord nor the AI gets it. '
-          'The Discord user ID can follow later.',
+          'It stays in this profile; neither ${doorLabel(_door)} nor the AI gets it. '
+          'The ${doorLabel(_door)} user ID can follow later.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 4),
@@ -1207,7 +1282,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () => setState(() => _people.add(_watched(_PersonDraft(null)))),
+            onPressed: () => setState(() => _people.add(_watched(_PersonDraft(null, _door)))),
             icon: const Icon(Icons.add),
             label: const Text('Add person'),
           ),
@@ -1242,7 +1317,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             child: TextField(
               key: ValueKey('person-$index-id'),
               controller: person.id,
-              decoration: const InputDecoration(labelText: 'Discord user ID'),
+              decoration: InputDecoration(labelText: '${doorLabel(_door)} user ID'),
             ),
           ),
           const SizedBox(width: 12),

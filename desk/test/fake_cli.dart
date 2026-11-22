@@ -1,5 +1,5 @@
 // Attrappe statt des Programms `rusty-fish`. Die Tests der Maske brauchen
-// weder das Programm noch Discord noch einen Schlüssel.
+// weder das Programm noch Discord noch Matrix noch einen Schlüssel.
 
 import 'dart:async';
 
@@ -179,6 +179,50 @@ class FakeCli implements FishCli {
 
   /// Wie oft die Maske einen Fisch gestartet hat.
   int runs = 0;
+
+  /// Ob und als wer der Fisch bei Matrix angemeldet ist.
+  MatrixStatus matrix = const MatrixStatus(loggedIn: false);
+
+  /// Gesetzt: das Programm kennt die Aufrufe zu Matrix nicht (älterer Stand).
+  String? matrixUnknown;
+
+  /// Gesetzt: das Programm lehnt die Anmeldung ab, mit diesem Grund.
+  String? matrixLoginError;
+
+  /// Womit die Maske den Fisch angemeldet hat. Das Passwort steht hier nur,
+  /// damit ein Test sehen kann, dass es ankam; es ist keines.
+  final matrixLogins = <({String user, String password})>[];
+  int matrixLogouts = 0;
+
+  @override
+  Future<MatrixStatus> matrixStatus() async {
+    final unknown = matrixUnknown;
+    if (unknown != null) {
+      throw CliException(unknown);
+    }
+    return matrix;
+  }
+
+  @override
+  Future<String> matrixLogin(String user, String password) async {
+    final error = matrixLoginError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    matrixLogins.add((user: user, password: password));
+    matrix = MatrixStatus(loggedIn: true, user: user, homeserver: 'https://matrix.example.org/');
+    keys = KeyStatus({...keys.stored, matrixEntry: true});
+    return 'Logged in to Matrix as $user at https://matrix.example.org/.\n'
+        'Note: the device could not be cross-signed (not allowed).\n';
+  }
+
+  @override
+  Future<String> matrixLogout() async {
+    matrixLogouts++;
+    matrix = const MatrixStatus(loggedIn: false);
+    keys = KeyStatus({...keys.stored, matrixEntry: false});
+    return 'Logged out of Matrix. The device store is empty.\n';
+  }
 
   /// Gesetzt: das Programm kennt den Aufruf `guide` nicht (älterer Stand).
   String? guideError;

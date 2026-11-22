@@ -31,10 +31,10 @@ class Seat {
     this.served = true,
   });
 
-  /// Die Tür, zu der dieser Tisch gehört. Bisher gibt es nur Discord.
+  /// Die Tür, zu der dieser Tisch gehört: Discord oder Matrix.
   final String door;
 
-  /// Die Kennung des Kanals an dieser Tür.
+  /// Die Kennung des Kanals an dieser Tür; bei Matrix die des Raums.
   final String channel;
 
   /// Die Sprache des Platzes. Sie gilt, solange der Besitzer keine
@@ -43,7 +43,7 @@ class Seat {
   final Gender? gender;
 
   /// Der Mensch, dessen Tisch das ist: sein Name, wie unter den Menschen des
-  /// Profils, oder seine Discord-Kennung (siehe [Person.ref]). Ohne Angabe
+  /// Profils, oder seine Kennung an der Tür (siehe [Person.ref]). Ohne Angabe
   /// gehört der Platz niemandem im Besonderen, wie vor dem 20.11.2026.
   final String? owner;
 
@@ -108,6 +108,7 @@ class Room {
 class Person {
   const Person({
     this.id = '',
+    this.matrix = '',
     this.name,
     this.gender,
     this.lang,
@@ -119,6 +120,13 @@ class Person {
   /// ein Tisch lässt sich schon vorher für jemanden bauen.
   final String id;
 
+  /// Die Kennung an der Matrix-Tür, etwa „@robin:example.org". Leer, wenn es
+  /// keine gibt. Ein Mensch kann an beiden Türen eine tragen.
+  final String matrix;
+
+  /// Die Kennung dieses Menschen an dieser Tür.
+  String idAt(String door) => door == matrixDoor ? matrix : id;
+
   /// Der Name, den der Gastgeber diesem Menschen gibt. Er steht nur im Profil
   /// und in der Maske; weder Discord noch die KI bekommen ihn.
   ///
@@ -128,7 +136,11 @@ class Person {
 
   /// Womit das Profil auf diesen Menschen zeigt (an einem Tisch, als
   /// Gastgeber): mit seinem Namen, sonst mit seiner Kennung.
-  String get ref => name ?? id;
+  String get ref => name ?? (id.isNotEmpty ? id : matrix);
+
+  /// Zeigt dieser Name oder diese Kennung auf diesen Menschen?
+  bool answersTo(String ref) =>
+      ref.isNotEmpty && (name == ref || id == ref || matrix == ref);
 
   /// Die grammatische Form. Bis zum 20.11.2026 Pflicht, seitdem freiwillig:
   /// wer nur seine Muttersprache nennen will, muss keine Form angeben.
@@ -152,6 +164,7 @@ class Person {
     return Person(
       // Bis zum 21.11.2026 hieß die Kennung im Austausch `id`.
       id: _text(json['discord']) ?? _text(json['id']) ?? '',
+      matrix: _text(json['matrix']) ?? '',
       name: _text(json['name']),
       // Bis zum 20.11.2026 stand hier „?? Gender.female": eine fehlende Form
       // wurde still zur weiblichen. Seit die Form freiwillig ist, bleibt eine
@@ -167,6 +180,9 @@ class Person {
   Map<String, dynamic> toJson() => {
     'name': ?name,
     if (id.isNotEmpty) 'discord': id,
+    // Ein älteres Programm kennt das Feld nicht und lehnt es ab. Es geht nur
+    // hinaus, wenn es etwas trägt.
+    if (matrix.isNotEmpty) 'matrix': matrix,
     'gender': genderToJson(gender),
     'lang': ?lang,
     'neutral': ?neutral,
@@ -215,18 +231,21 @@ String servesText(ProfileDoc doc) {
   return open == 0 ? forWhom : '$forWhom, and at $tables without an owner';
 }
 
-/// Die Tür, die es bisher gibt.
+/// Die Tür, die gilt, wenn keine genannt ist.
 const discordDoor = 'discord';
+
+/// Die zweite Tür, seit dem 22.11.2026.
+const matrixDoor = 'matrix';
 
 /// Wie eine Tür in der Maske heißt.
 String doorLabel(String door) => switch (door) {
   discordDoor => 'Discord',
-  'matrix' => 'Matrix',
+  matrixDoor => 'Matrix',
   _ => door,
 };
 
 /// Kann diese Tür Ende zu Ende verschlüsseln? Discord kann es nicht.
-bool doorCanEncrypt(String door) => door == 'matrix';
+bool doorCanEncrypt(String door) => door == matrixDoor;
 
 /// Über welche Türen ein Raum läuft, und was das für die Verschlüsselung
 /// heißt: etwa "Discord ⇄ Discord · not end-to-end encrypted".
@@ -505,16 +524,27 @@ class ProfileDoc {
       return null;
     }
     for (final person in people) {
-      if (person.name == ref || person.id == ref) {
+      if (person.answersTo(ref)) {
         return person;
       }
     }
     return null;
   }
 
+  /// Die Tür, an der die Tische dieses Profils stehen: die des ersten. Das
+  /// Programm nimmt ein Profil nur an, wenn alle an derselben stehen.
+  String get door {
+    for (final room in rooms) {
+      for (final seat in room.seats) {
+        return seat.door;
+      }
+    }
+    return discordDoor;
+  }
+
   /// Ist dieser Mensch der Gastgeber? Das Profil nennt den Gastgeber mit
   /// seinem Namen oder mit seiner Kennung.
-  bool isHost(Person person) => host.isNotEmpty && (person.id == host || person.name == host);
+  bool isHost(Person person) => person.answersTo(host);
 
   /// Gehört dieser Tisch dem Gastgeber?
   bool ownedByHost(Seat seat) {
@@ -619,6 +649,26 @@ const String botTokenEntry = 'discord';
 /// So heißt der Token des Bots in der Oberfläche.
 const String botTokenLabel = 'Bot token';
 
+/// Der Eintrag der Ablage, unter dem der Zugang zum Matrix-Konto des Fischs
+/// liegt. Er entsteht beim Anmelden und wird nie eingefügt.
+const String matrixEntry = 'matrix';
+
+/// Ob und als wer der Fisch bei Matrix angemeldet ist (`matrix status --json`).
+/// Die Kennung des Kontos und die Adresse des Servers sind keine Geheimnisse.
+class MatrixStatus {
+  const MatrixStatus({required this.loggedIn, this.user, this.homeserver});
+
+  final bool loggedIn;
+  final String? user;
+  final String? homeserver;
+
+  factory MatrixStatus.fromJson(Map<String, dynamic> json) => MatrixStatus(
+    loggedIn: json['logged_in'] == true,
+    user: _text(json['user']),
+    homeserver: _text(json['homeserver']),
+  );
+}
+
 /// Welche Geheimnisse in der Ablage des Systems liegen. Die Werte selbst
 /// kommen nie in die Oberfläche zurück.
 ///
@@ -634,6 +684,10 @@ class KeyStatus {
   bool has(String entry) => stored[entry] == true;
 
   bool get discord => has(botTokenEntry);
+
+  /// Ob der Fisch an seinem Matrix-Konto angemeldet ist. Ein älteres Programm
+  /// nennt den Eintrag nicht: dann gilt er als nicht angemeldet.
+  bool get matrix => has(matrixEntry);
 
   factory KeyStatus.fromJson(Map<String, dynamic> json) =>
       KeyStatus({for (final item in json.entries) item.key: item.value == true});

@@ -3,7 +3,8 @@
 //
 // Gemessen am 22.11.2026 im ersten Lauf mit zwei Fischen in einem Raum: beide
 // müssen denselben Raum eintragen, zwei Kanal-Kennungen, zwei
-// Benutzer-Kennungen, wer welchen Tisch hat. Ein Zahlendreher, und nichts
+// Benutzer-Kennungen, wer welchen Tisch hat. Seit dem 22.11.2026 gilt
+// dasselbe für Räume bei Matrix; die Tür jedes Tisches steht im Text. Ein Zahlendreher, und nichts
 // passt zusammen, ohne dass irgendetwas es sagt. Nemesus dazu: „Ja, bauen."
 //
 // Weitergegeben wird, was beide gleich eintragen müssen: die Tische mit ihren
@@ -60,6 +61,7 @@ String shareRoomsText(ProfileDoc doc) {
         // Wen der Gastgeber eingeladen hat, ist seine Sache und geht nicht mit.
         Person(
           id: person.id,
+          matrix: person.matrix,
           name: person.name,
           gender: person.gender,
           lang: person.lang,
@@ -135,6 +137,7 @@ SharedRooms? readSharedRooms(String text) {
 /// sein Gastgeber, nicht der Text eines anderen.
 Person _uninvited(Person person) => Person(
   id: person.id,
+  matrix: person.matrix,
   name: person.name,
   gender: person.gender,
   lang: person.lang,

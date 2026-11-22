@@ -57,7 +57,7 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
   String _table(SharedRooms shared, Seat seat) {
     Person? owner;
     for (final person in shared.people) {
-      if (seat.owner != null && (person.name == seat.owner || person.id == seat.owner)) {
+      if (seat.owner != null && person.answersTo(seat.owner!)) {
         owner = person;
         break;
       }
@@ -75,7 +75,7 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
     // Der Gastgeber braucht eine Kennung: an ihr erkennt der Fisch ihn.
     final candidates = [
       for (final person in read?.people ?? const <Person>[])
-        if (person.id.isNotEmpty) person,
+        if (person.id.isNotEmpty || person.matrix.isNotEmpty) person,
     ];
     return AlertDialog(
       title: const Text('Paste rooms'),
@@ -131,12 +131,12 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
                       items: [
                         const DropdownMenuItem(
                           value: '',
-                          child: Text('none of them; I will enter my own Discord user ID'),
+                          child: Text('none of them; I will enter my own user ID'),
                         ),
                         for (final person in candidates)
                           DropdownMenuItem(
                             value: person.ref,
-                            child: Text(person.name ?? person.id, overflow: TextOverflow.ellipsis),
+                            child: Text(person.ref, overflow: TextOverflow.ellipsis),
                           ),
                       ],
                     ),

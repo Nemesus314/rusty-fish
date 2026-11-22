@@ -71,6 +71,18 @@ abstract class FishCli {
   /// kennt den Aufruf nicht und lehnt ihn ab.
   Future<String> inviteLink();
 
+  /// Ob und als wer der Fisch bei Matrix angemeldet ist. Ein älteres
+  /// Programm kennt den Aufruf nicht und lehnt ihn ab.
+  Future<MatrixStatus> matrixStatus();
+
+  /// Meldet den Fisch an seinem Matrix-Konto an. Das Passwort geht über die
+  /// Standardeingabe hinein und wird vom Programm nicht aufbewahrt. Zurück
+  /// kommt, was das Programm dazu sagt.
+  Future<String> matrixLogin(String user, String password);
+
+  /// Meldet den Fisch bei Matrix ab und leert seine Geräteschlüssel.
+  Future<String> matrixLogout();
+
   /// Startet den Fisch mit allen gespeicherten Profilen. Eines, das sich
   /// nicht starten lässt, sagt in der Ausgabe, warum, und bleibt weg.
   Future<FishRun> runAll();
@@ -173,6 +185,21 @@ class ProcessFishCli implements FishCli {
     }
     return _ProcessRun(process);
   }
+
+  @override
+  Future<MatrixStatus> matrixStatus() async {
+    final out = await _call(['matrix', 'status', '--json']);
+    return MatrixStatus.fromJson(_object(out));
+  }
+
+  // Die Kennung des Kontos ist kein Geheimnis und darf ein Argument sein.
+  // Das Passwort nicht: es geht über die Standardeingabe.
+  @override
+  Future<String> matrixLogin(String user, String password) =>
+      _call(['matrix', 'login', '--user', user, '--stdin'], input: '$password\n');
+
+  @override
+  Future<String> matrixLogout() => _call(['matrix', 'logout']);
 
   @override
   Future<String> guide() => _call(['guide']);

@@ -1,4 +1,5 @@
-// Die Geheimnisse: der Token des Bots und je ein Schlüssel pro KI-Dienst.
+// Die Geheimnisse: der Token des Bots, das Matrix-Konto des Fischs und je ein
+// Schlüssel pro KI-Dienst.
 //
 // Die Maske zeigt nur, ob sie liegen. Ein Wert geht vom Eingabefeld über die
 // Standardeingabe an das Programm und von dort in die Ablage des Systems.
@@ -8,6 +9,12 @@
 // „Die Möglichkeit, die KIs im Profil zu wechseln sollte jedoch erhalten
 // bleiben." Seitdem hat jeder Dienst seinen eigenen Schlüssel, und der Dialog
 // zeigt eine Zeile je Dienst, den das Programm nennt.
+//
+// Seit dem 22.11.2026 steht hier auch das Matrix-Konto des Fischs. Es ist
+// kein Geheimnis, das man einfügt: man meldet den Fisch an. Das Passwort geht
+// wie jedes Geheimnis über die Standardeingabe an das Programm, wird dort
+// einmal gebraucht und nicht aufbewahrt. In der Ablage liegt danach der
+// Zugang dieses einen Geräts.
 
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
@@ -89,6 +96,18 @@ class _SecretsDialogState extends State<SecretsDialog> {
   String? _error;
   bool _busy = false;
 
+  final _matrixUser = TextEditingController();
+  final _matrixPassword = TextEditingController();
+
+  /// Ob und als wer der Fisch bei Matrix angemeldet ist.
+  MatrixStatus? _matrix;
+
+  /// Das Programm kennt Matrix nicht (ein älterer Stand).
+  bool _matrixUnknown = false;
+
+  /// Was das Programm nach dem An- oder Abmelden angemerkt hat.
+  String? _matrixNote;
+
   /// Was nach dem Klick auf den Link für den Bot zu sagen ist.
   String? _inviteNote;
 
@@ -127,6 +146,9 @@ class _SecretsDialogState extends State<SecretsDialog> {
       field.clear();
       field.dispose();
     }
+    _matrixPassword.clear();
+    _matrixPassword.dispose();
+    _matrixUser.dispose();
     super.dispose();
   }
 
@@ -140,6 +162,77 @@ class _SecretsDialogState extends State<SecretsDialog> {
       if (mounted) {
         setState(() => _error = e.message);
       }
+    }
+    try {
+      final matrix = await widget.cli.matrixStatus();
+      if (mounted) {
+        setState(() {
+          _matrix = matrix;
+          _matrixUnknown = false;
+        });
+      }
+    } on CliException {
+      // Ein älteres Programm kennt den Aufruf nicht. Das ist kein Fehler des
+      // Fensters; der Block sagt es an seiner Stelle.
+      if (mounted) {
+        setState(() => _matrixUnknown = true);
+      }
+    }
+  }
+
+  /// Was das Programm nach dem Anmelden anmerkt, steht in Zeilen mit „Note:".
+  String? _notesOf(String said) {
+    final notes = [
+      for (final line in said.split('\n'))
+        if (line.trim().startsWith('Note: ')) line.trim().substring('Note: '.length),
+    ];
+    return notes.isEmpty ? null : notes.join(' ');
+  }
+
+  Future<void> _matrixLogin() async {
+    final user = _matrixUser.text.trim();
+    // Ein Passwort darf mit einem Leerzeichen enden; abgeschnitten wird nichts.
+    final password = _matrixPassword.text;
+    if (user.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Enter the user ID of the fish and its password.');
+      return;
+    }
+    // Das Feld wird geleert, bevor irgendetwas anderes geschieht. Danach
+    // steht das Passwort nirgends mehr im Fenster.
+    _matrixPassword.clear();
+    _matrixNote = null;
+    await _act(() async {
+      _matrixNote = _notesOf(await widget.cli.matrixLogin(user, password));
+      _matrixUser.clear();
+    });
+  }
+
+  Future<void> _matrixLogout() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Log the fish out of Matrix?'),
+        content: const Text(
+          'Its device keys on this PC are removed. After a new login the fish is a new '
+          'device: in encrypted rooms it cannot read what was written before.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (sure == true) {
+      _matrixNote = null;
+      await _act(() async {
+        _matrixNote = _notesOf(await widget.cli.matrixLogout());
+      });
     }
   }
 
@@ -224,8 +317,10 @@ class _SecretsDialogState extends State<SecretsDialog> {
                 ),
               for (final (index, entry) in _entries.indexed) ...[
                 // Der Token des Bots ist etwas anderes als die Schlüssel der
-                // Dienste. Die Überschrift trennt beides.
-                if (index == 1)
+                // Dienste. Dazwischen steht das Konto für die zweite Tür, und
+                // die Überschrift trennt die Schlüssel ab.
+                if (index == 1) ...[
+                  _matrixBlock(theme),
                   Padding(
                     padding: const EdgeInsets.only(top: 24),
                     child: Text(
@@ -233,6 +328,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
                       style: theme.textTheme.titleSmall,
                     ),
                   ),
+                ],
                 _block(entry, theme),
               ],
             ],
@@ -245,6 +341,113 @@ class _SecretsDialogState extends State<SecretsDialog> {
           child: const Text('Close'),
         ),
       ],
+    );
+  }
+
+  /// Das Matrix-Konto des Fischs: anmelden, oder sehen, als wer er angemeldet
+  /// ist, und abmelden.
+  Widget _matrixBlock(ThemeData theme) {
+    final status = _matrix;
+    final loggedIn = _matrixUnknown ? null : status?.loggedIn;
+    final String state;
+    if (_matrixUnknown) {
+      state = 'this program does not know Matrix';
+    } else if (status == null) {
+      state = 'checking';
+    } else if (status.loggedIn) {
+      state = 'logged in as ${status.user ?? 'the fish'}';
+    } else {
+      state = 'not logged in';
+    }
+    return Padding(
+      key: const ValueKey('secret-row-matrix'),
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Matrix account', style: theme.textTheme.titleMedium),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  state,
+                  key: const ValueKey('matrix-state'),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: loggedIn == true
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (loggedIn == false)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    key: const ValueKey('matrix-user'),
+                    controller: _matrixUser,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'User ID of the fish',
+                      hintText: '@name:server',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    key: const ValueKey('matrix-password'),
+                    controller: _matrixPassword,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: const InputDecoration(labelText: 'Its password'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                FilledButton(
+                  key: const ValueKey('matrix-login'),
+                  onPressed: _busy ? null : _matrixLogin,
+                  child: const Text('Log in'),
+                ),
+                // Derselbe Platz wie neben den anderen Zeilen, damit die
+                // Felder untereinander stehen.
+                const SizedBox(width: 116),
+              ],
+            ),
+          if (loggedIn == true)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: OutlinedButton(
+                key: const ValueKey('matrix-logout'),
+                onPressed: _busy ? null : _matrixLogout,
+                child: const Text('Log out'),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'An ordinary Matrix account of its own for the fish, not yours. The password is '
+              'used once to log in and is not kept; what is stored is the access of this one '
+              'device. Switch the fish off before you log in or out.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          if (_matrixNote case final note?)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(note, style: theme.textTheme.bodySmall),
+            ),
+        ],
+      ),
     );
   }
 

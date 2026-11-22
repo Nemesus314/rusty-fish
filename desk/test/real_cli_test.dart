@@ -325,6 +325,121 @@ void main() {
     await cli.deleteProfile(name);
   }, skip: skip);
 
+  // Die zweite Tür, seit dem 22.11.2026. Ein älteres Programm kennt sie nicht
+  // und wird erkannt, wie bei den Diensten oben.
+  Future<MatrixStatus?> matrixStatus(ProcessFishCli cli) async {
+    try {
+      return await cli.matrixStatus();
+    } on CliException {
+      return null;
+    }
+  }
+
+  test('the program says whether the fish is logged in to Matrix, and no secret', () async {
+    final cli = ProcessFishCli(exe!);
+    final status = await matrixStatus(cli);
+    if (status == null) {
+      markTestSkipped('this rusty-fish does not know Matrix yet');
+      return;
+    }
+    // Ob er angemeldet ist, hängt am Rechner. Gewiss ist nur die Form: ohne
+    // Anmeldung nennt das Programm niemanden, mit ihr eine Kennung.
+    if (status.loggedIn) {
+      expect(status.user, startsWith('@'));
+    } else {
+      expect(status.user, isNull);
+      expect(status.homeserver, isNull);
+    }
+    // Derselbe Stand steht in der Auskunft über die Geheimnisse.
+    final keys = await cli.keyStatus();
+    expect(keys.stored.keys, contains(matrixEntry));
+    expect(keys.matrix, status.loggedIn);
+  }, skip: skip);
+
+  test('a profile at the Matrix door goes through the real program and back', () async {
+    final cli = ProcessFishCli(exe!);
+    if (await matrixStatus(cli) == null) {
+      markTestSkipped('this rusty-fish does not know Matrix yet');
+      return;
+    }
+    const name = 'desk-probe-matrix';
+    const doc = ProfileDoc(
+      name: name,
+      model: 'some-model',
+      baseUrl: null,
+      host: 'Nemo',
+      aiNames: ['Fish'],
+      limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+      rooms: [
+        Room(
+          passThrough: ['English'],
+          contextLines: 4,
+          seats: [
+            Seat(door: matrixDoor, channel: '!deutsch:example.org', lang: 'German', owner: 'Nemo'),
+            Seat(
+              door: matrixDoor,
+              channel: '!russisch:example.org',
+              lang: 'Russian',
+              owner: 'Robin',
+            ),
+          ],
+        ),
+      ],
+      people: [
+        Person(name: 'Nemo', matrix: '@nemo:example.org'),
+        // An beiden Türen eine Kennung: keine geht auf dem Weg verloren.
+        Person(name: 'Robin', matrix: '@robin:example.org', id: '7', invited: true),
+      ],
+    );
+    try {
+      await cli.saveProfile(doc);
+      final shown = await cli.showProfile(name);
+      expect(shown.toJson(), doc.toJson());
+      expect(shown.door, matrixDoor);
+      final listed = (await cli.listProfiles()).profiles.firstWhere(
+        (entry) => entry.name == name,
+      );
+      expect(listed.ok, isTrue);
+      // Beide Tische werden bedient: der eigene und der der Eingeladenen.
+      expect(listed.doc!.rooms.single.seats.map((seat) => seat.served), [true, true]);
+
+      // Ein Tisch an der anderen Tür: das Programm sagt, was stattdessen geht.
+      const mixed = ProfileDoc(
+        name: name,
+        model: 'some-model',
+        baseUrl: null,
+        host: '@nemo:example.org',
+        aiNames: [],
+        limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+        rooms: [
+          Room(
+            passThrough: [],
+            contextLines: 4,
+            seats: [
+              Seat(door: matrixDoor, channel: '!deutsch:example.org', lang: 'German'),
+              Seat(channel: '8', lang: 'Russian'),
+            ],
+          ),
+        ],
+        people: [],
+      );
+      await expectLater(
+        cli.saveProfile(mixed),
+        throwsA(
+          isA<CliException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('one door'), contains('second profile')),
+          ),
+        ),
+      );
+      // Das abgelehnte Profil hat das gespeicherte nicht ersetzt.
+      expect((await cli.showProfile(name)).toJson(), doc.toJson());
+    } finally {
+      await cli.deleteProfile(name);
+    }
+  }, skip: skip);
+
   test('a fish with no profile to serve says why and ends', () async {
     final cli = ProcessFishCli(exe!);
     // Nur in einem leeren Ordner: mit einem gültigen Profil würde sich der
