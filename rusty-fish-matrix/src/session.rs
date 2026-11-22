@@ -18,13 +18,17 @@
 //! - Es gibt keine Sicherung der Geräteschlüssel, mit Absicht. Geht die
 //!   Ablage verloren, meldet man den Fisch neu an; er ist dann ein neues
 //!   Gerät und liest, was ab da geschrieben wird.
-//! - Das Gerät des Fischs ist von niemandem geprüft. Manche Programme zeigen
-//!   deshalb einen Hinweis an seinen Nachrichten.
+//! - Das Gerät des Fischs zeichnet das Konto selbst gegen: bei einem neuen
+//!   Konto legt der Fisch die Schlüssel dafür an, bei einem Konto, das sie
+//!   schon hat, weist er sich mit dem Wiederherstellungsschlüssel aus. Ohne
+//!   beides zeigen manche Programme einen Hinweis an seinen Nachrichten.
 //! - Anmelden geht nur mit Passwort. Ein Server, der nur die Anmeldung über
 //!   den Browser anbietet, wird nicht bedient.
 
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::encryption::secret_storage::SecretStorageError;
 use matrix_sdk::ruma::api::client::uiaa::{AuthData, Password, UserIdentifier};
+use matrix_sdk::ruma::events::secret::request::SecretName;
 use matrix_sdk::ruma::{OwnedUserId, UserId};
 use matrix_sdk::store::RoomLoadSettings;
 use matrix_sdk::{Client, SessionMeta, SessionTokens};
@@ -123,11 +127,16 @@ pub fn user_id(typed: &str) -> Result<OwnedUserId, String> {
 ///
 /// Ohne `homeserver` wird der Server aus der Kennung gefunden, so wie es die
 /// Programme für Menschen tun.
+///
+/// `recovery` ist der Wiederherstellungsschlüssel des Kontos, wenn es einen
+/// hat. Mit ihm weist sich das neue Gerät als Gerät dieses Kontos aus. Er
+/// wird einmal gebraucht und nirgends aufbewahrt.
 pub async fn login(
     store: &Path,
     user: &str,
     password: &str,
     homeserver: Option<&str>,
+    recovery: Option<&str>,
 ) -> Result<LoggedIn, String> {
     let user = user_id(user)?;
     if password.is_empty() {
@@ -184,6 +193,23 @@ pub async fn login(
         ));
     }
 
+    // Hat das Konto seine Schlüssel schon, etwa weil ein Mensch sich mit einem
+    // anderen Programm angemeldet hat, kann nur der Wiederherstellungsschlüssel
+    // das neue Gerät ausweisen. Scheitert es, läuft der Fisch trotzdem.
+    if let Some(key) = recovery.map(str::trim).filter(|key| !key.is_empty()) {
+        match prove(&client, &session.meta.user_id, key).await {
+            Ok(()) => notes.push(
+                "the account's recovery key has signed this device; apps show the fish as a \
+                 verified device of its account"
+                    .to_owned(),
+            ),
+            Err(why) => notes.push(format!(
+                "the recovery key did not verify the device ({why}); the fish works all the \
+                 same, some apps show a warning at its messages"
+            )),
+        }
+    }
+
     let access = Access {
         homeserver: client.homeserver().to_string(),
         user_id: session.meta.user_id,
@@ -210,6 +236,75 @@ async fn cross_sign(client: &Client, user: &UserId, password: &str) -> Result<()
         .bootstrap_cross_signing_if_needed(Some(AuthData::Password(auth)))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Weist das Gerät mit dem Wiederherstellungsschlüssel des Kontos aus: holt
+/// damit die Schlüssel, mit denen das Konto seine Geräte gegenzeichnet, und
+/// zeichnet dieses Gerät.
+///
+/// Nur diese Schlüssel. Die Sicherung der Raumschlüssel, die derselbe
+/// Wiederherstellungsschlüssel öffnen würde, bleibt unberührt: der Fisch
+/// nimmt an ihr nicht teil.
+///
+/// Stand 22.11.2026: gegen einen echten Server noch nicht gelaufen.
+async fn prove(client: &Client, user: &UserId, key: &str) -> Result<(), String> {
+    let encryption = client.encryption();
+    let secrets =
+        encryption.secret_storage().open_secret_store(key).await.map_err(|e| match e {
+            SecretStorageError::MissingKeyInfo { .. } => {
+                "this account has no recovery set up; set it up in a Matrix app first".to_owned()
+            }
+            SecretStorageError::SecretStorageKey(_) => {
+                "the recovery key does not fit this account".to_owned()
+            }
+            other => other.to_string(),
+        })?;
+
+    let mut held = Vec::new();
+    for name in [
+        SecretName::CrossSigningMasterKey,
+        SecretName::CrossSigningSelfSigningKey,
+        SecretName::CrossSigningUserSigningKey,
+    ] {
+        let secret = secrets
+            .get_secret(name)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("the recovery of this account holds no signing keys")?;
+        held.push(secret);
+    }
+    // Ein Fehler hier darf nichts von dem zeigen, was in dem Bündel steht.
+    let bundle = serde_json::from_value(serde_json::json!({
+        "cross_signing": {
+            "master_key": held[0],
+            "self_signing_key": held[1],
+            "user_signing_key": held[2],
+        },
+        "backup": null,
+    }))
+    .map_err(|_| "the signing keys from the recovery cannot be read".to_owned())?;
+    encryption.import_secrets_bundle(&bundle).await.map_err(|e| e.to_string())?;
+
+    // Das eigene Gerät vom Server holen, zeichnen, und nachsehen, ob der
+    // Server es danach als gegengezeichnet zeigt.
+    encryption.request_user_identity(user).await.map_err(|e| e.to_string())?;
+    let own = encryption
+        .get_own_device()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("the server does not show the fish's own device yet")?;
+    own.verify().await.map_err(|e| e.to_string())?;
+    encryption.request_user_identity(user).await.map_err(|e| e.to_string())?;
+    let own = encryption
+        .get_own_device()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("the server does not show the fish's own device")?;
+    if own.is_cross_signed_by_owner() {
+        Ok(())
+    } else {
+        Err("the device was signed, but the server does not show it as verified".to_owned())
+    }
 }
 
 /// Nimmt die Sitzung wieder auf: öffnet die Ablage des Geräts und stellt den

@@ -161,6 +161,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(fake.matrixLogins, [(user: '@fish:example.org', password: password)]);
+      // Ohne Wiederherstellungsschlüssel geht keiner mit.
+      expect(fake.matrixRecoveries, ['']);
       expect(find.text('logged in as @fish:example.org'), findsOneWidget);
       // Das Passwort steht danach nirgends mehr im Fenster.
       expect(find.textContaining('not-a-real'), findsNothing);
@@ -176,6 +178,32 @@ void main() {
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('Matrix: logged in'), findsOneWidget);
+    });
+
+    testWidgets('a recovery key goes along with the login once and is shown nowhere', (
+      tester,
+    ) async {
+      final fake = FakeCli(entries: [entryOf(docOf('study'))]);
+      await open(tester, fake);
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('matrix-user')));
+      await tester.enterText(find.byKey(const ValueKey('matrix-user')), '@fish:example.org');
+      await tester.enterText(find.byKey(const ValueKey('matrix-password')), 'not-a-real-password');
+      await tester.enterText(find.byKey(const ValueKey('matrix-recovery')), ' not a real key ');
+      // Verdeckt wie das Passwort.
+      expect(
+        tester.widget<TextField>(find.byKey(const ValueKey('matrix-recovery'))).obscureText,
+        isTrue,
+      );
+      await tester.tap(find.byKey(const ValueKey('matrix-login')));
+      await tester.pumpAndSettle();
+
+      expect(fake.matrixRecoveries, ['not a real key']);
+      expect(find.textContaining('not a real key'), findsNothing);
+      for (final field in tester.widgetList<EditableText>(find.byType(EditableText))) {
+        expect(field.controller.text, isNot(contains('not a real')));
+      }
     });
 
     testWidgets('a login the program refuses says why and stores nothing', (tester) async {

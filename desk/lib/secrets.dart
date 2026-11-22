@@ -98,6 +98,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
 
   final _matrixUser = TextEditingController();
   final _matrixPassword = TextEditingController();
+  final _matrixRecovery = TextEditingController();
 
   /// Ob und als wer der Fisch bei Matrix angemeldet ist.
   MatrixStatus? _matrix;
@@ -148,6 +149,8 @@ class _SecretsDialogState extends State<SecretsDialog> {
     }
     _matrixPassword.clear();
     _matrixPassword.dispose();
+    _matrixRecovery.clear();
+    _matrixRecovery.dispose();
     _matrixUser.dispose();
     super.dispose();
   }
@@ -197,12 +200,16 @@ class _SecretsDialogState extends State<SecretsDialog> {
       setState(() => _error = 'Enter the user ID of the fish and its password.');
       return;
     }
-    // Das Feld wird geleert, bevor irgendetwas anderes geschieht. Danach
-    // steht das Passwort nirgends mehr im Fenster.
+    final recovery = _matrixRecovery.text.trim();
+    // Die Felder werden geleert, bevor irgendetwas anderes geschieht. Danach
+    // stehen Passwort und Wiederherstellungsschlüssel nirgends mehr im Fenster.
     _matrixPassword.clear();
+    _matrixRecovery.clear();
     _matrixNote = null;
     await _act(() async {
-      _matrixNote = _notesOf(await widget.cli.matrixLogin(user, password));
+      _matrixNote = _notesOf(
+        await widget.cli.matrixLogin(user, password, recovery: recovery),
+      );
       _matrixUser.clear();
     });
   }
@@ -422,6 +429,27 @@ class _SecretsDialogState extends State<SecretsDialog> {
                 // Felder untereinander stehen.
                 const SizedBox(width: 116),
               ],
+            ),
+          // Gewünscht von Nemesus am 22.11.2026, nachdem ein Matrix-Programm
+          // das Gerät des Fischs als unsicher gezeigt hatte: „wäre es schön,
+          // wenn auch der Fishbot sicher wäre“.
+          if (loggedIn == false)
+            Padding(
+              padding: const EdgeInsets.only(right: 116),
+              child: TextField(
+                key: const ValueKey('matrix-recovery'),
+                controller: _matrixRecovery,
+                obscureText: true,
+                enableSuggestions: false,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Recovery key of the account (optional)',
+                  helperText:
+                      'Only if the account has one, from a Matrix app. It makes the fish a '
+                      'verified device. Used once, not kept.',
+                  helperMaxLines: 2,
+                ),
+              ),
             ),
           if (loggedIn == true)
             Padding(

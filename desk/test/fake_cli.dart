@@ -192,6 +192,9 @@ class FakeCli implements FishCli {
   /// Womit die Maske den Fisch angemeldet hat. Das Passwort steht hier nur,
   /// damit ein Test sehen kann, dass es ankam; es ist keines.
   final matrixLogins = <({String user, String password})>[];
+
+  /// Der Wiederherstellungsschlüssel jeder Anmeldung, leer, wenn keiner kam.
+  final matrixRecoveries = <String>[];
   int matrixLogouts = 0;
 
   @override
@@ -204,12 +207,13 @@ class FakeCli implements FishCli {
   }
 
   @override
-  Future<String> matrixLogin(String user, String password) async {
+  Future<String> matrixLogin(String user, String password, {String recovery = ''}) async {
     final error = matrixLoginError;
     if (error != null) {
       throw CliException(error);
     }
     matrixLogins.add((user: user, password: password));
+    matrixRecoveries.add(recovery);
     matrix = MatrixStatus(loggedIn: true, user: user, homeserver: 'https://matrix.example.org/');
     keys = KeyStatus({...keys.stored, matrixEntry: true});
     return 'Logged in to Matrix as $user at https://matrix.example.org/.\n'

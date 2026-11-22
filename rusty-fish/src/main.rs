@@ -171,9 +171,14 @@ enum MatrixAction {
         /// The address of the Matrix server, if it cannot be found from the user id
         #[arg(long)]
         homeserver: Option<String>,
-        /// Read the password as one line from standard input instead of asking
+        /// Read the password as one line from standard input instead of asking;
+        /// a second line, if there is one, is the recovery key
         #[arg(long)]
         stdin: bool,
+        /// Also ask for the recovery key of the account, to verify the fish's
+        /// device. For an account that a person has also used with a Matrix app
+        #[arg(long)]
+        recovery_key: bool,
     },
     /// Tell whether the fish is logged in, and as whom
     Status {
@@ -492,7 +497,7 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
     let home = home()?;
     let store = doors::matrix_store(&home);
     match action {
-        MatrixAction::Login { user, homeserver, stdin } => {
+        MatrixAction::Login { user, homeserver, stdin, recovery_key } => {
             // Die Ablage der Geräteschlüssel wird neu angelegt; ein laufender
             // Fisch hielte sie offen.
             if doors::fish_is_running(&home) {
@@ -516,11 +521,28 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
             if password.is_empty() {
                 return Err("nothing entered, nothing done".to_owned());
             }
+            // Der Wiederherstellungsschlüssel ist ein Geheimnis wie das
+            // Passwort: derselbe Weg hinein, einmal gebraucht, nie aufbewahrt.
+            let recovery = if stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| format!("cannot read from standard input: {e}"))?;
+                line
+            } else if recovery_key {
+                rpassword::prompt_password(format!(
+                    "Recovery key of {user} (input stays hidden, empty to skip): "
+                ))
+                .map_err(|e| format!("cannot read from the terminal: {e}"))?
+            } else {
+                String::new()
+            };
             let logged_in = rusty_fish_matrix::session::login(
                 &store,
                 user.as_str(),
                 password,
                 homeserver.as_deref(),
+                Some(recovery.trim()),
             )
             .await?;
             keys::store(secrets::MATRIX, &logged_in.access.to_secret())?;

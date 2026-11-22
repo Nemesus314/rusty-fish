@@ -78,7 +78,11 @@ abstract class FishCli {
   /// Meldet den Fisch an seinem Matrix-Konto an. Das Passwort geht über die
   /// Standardeingabe hinein und wird vom Programm nicht aufbewahrt. Zurück
   /// kommt, was das Programm dazu sagt.
-  Future<String> matrixLogin(String user, String password);
+  ///
+  /// [recovery] ist der Wiederherstellungsschlüssel des Kontos, wenn es einen
+  /// hat: mit ihm weist sich das Gerät des Fischs aus. Er geht denselben Weg
+  /// wie das Passwort und wird ebenso wenig aufbewahrt.
+  Future<String> matrixLogin(String user, String password, {String recovery = ''});
 
   /// Meldet den Fisch bei Matrix ab und leert seine Geräteschlüssel.
   Future<String> matrixLogout();
@@ -195,8 +199,13 @@ class ProcessFishCli implements FishCli {
   // Die Kennung des Kontos ist kein Geheimnis und darf ein Argument sein.
   // Das Passwort nicht: es geht über die Standardeingabe.
   @override
-  Future<String> matrixLogin(String user, String password) =>
-      _call(['matrix', 'login', '--user', user, '--stdin'], input: '$password\n');
+  Future<String> matrixLogin(String user, String password, {String recovery = ''}) => _call([
+    'matrix',
+    'login',
+    '--user',
+    user,
+    '--stdin',
+  ], input: '$password\n$recovery\n');
 
   @override
   Future<String> matrixLogout() => _call(['matrix', 'logout']);

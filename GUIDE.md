@@ -186,9 +186,15 @@ your own.
    profiles). On the command line: `rusty-fish matrix login --user
    @name:server`, and `rusty-fish matrix status` and `rusty-fish matrix
    logout`. Log in and out only while the fish is switched off.
+   The field "Recovery key of the account" is for an account that you have
+   also opened in a Matrix app and that has a recovery key from there. With
+   it the fish shows itself as a verified device of its account. The key is
+   used once and not kept. On the command line: add `--recovery-key`. A new
+   account that only the fish uses needs none: the fish signs its own device.
 2. Create one Matrix room per language and invite the account of the fish
    into each. It joins by itself as soon as a running profile names the room,
-   and it joins no other room.
+   and it joins no other room. A space is not a room: nobody can write
+   there, and the fish does not join one.
 3. In the profile, under General, choose the door "Matrix". A seat then asks
    for the Matrix room ID: the internal ID of the room, which starts with `!`
    (in Element: room settings, Advanced), not its #alias. You and the other
@@ -217,8 +223,9 @@ AI service the host chose; the translation goes into the other rooms of the
 conversation. So the Matrix servers cannot read an encrypted room, but the
 host's AI service reads every sentence the fish translates. The request for
 agreement says that before anything of a guest is sent. Only with a model on
-the host's own PC do the sentences stay there. The device of the fish is
-verified by nobody; some apps show a warning at its messages.
+the host's own PC do the sentences stay there. If the device of the fish is
+not verified by its account, some apps show a warning at its messages; the
+translation works all the same.
 
 Limits of the Matrix door:
 
@@ -229,7 +236,13 @@ Limits of the Matrix door:
   stopped and the fish went on for others is not caught up.
 - After a new login the fish is a new device. In an encrypted room it cannot
   read what was written before that. There is no backup of its device keys,
-  on purpose.
+  on purpose; the recovery key verifies the device and brings nothing back.
+- If the output says "the Matrix server no longer accepts the stored
+  access", the server has ended the fish's session: log out and log in
+  again. On 22 November 2026 this happened after the account of the fish had
+  also been opened and confirmed in a Matrix app. Whether that was the cause
+  is not known.
+- The login with a recovery key has not run against a real server yet.
 - A message the fish cannot decrypt does not appear at the other tables; the
   output of the program says so.
 - The login needs a server that accepts a password. A server that only
