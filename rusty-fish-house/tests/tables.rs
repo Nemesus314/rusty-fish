@@ -238,29 +238,34 @@ fn the_fish_asks_for_consent_only_where_it_would_hand_words_to_the_ai() {
     // Was an 333 geschrieben wird, übersetzt dieser Fisch für 111 und 222:
     // dort bittet er um Zustimmung, obwohl er an 333 sonst nichts schreibt.
     assert!(!c.serves("333"));
-    assert!(c.sends_to_ai("333"));
-    assert!(c.sends_to_ai("111") && c.sends_to_ai("222"));
-    assert!(!c.sends_to_ai("999"), "a channel outside every room");
+    assert!(c.sends_to_ai("333", "5"));
+    assert!(c.sends_to_ai("111", "5") && c.sends_to_ai("222", "5"));
+    assert!(!c.sends_to_ai("999", "5"), "a channel outside every room");
 
     // Bedient der Fisch nur den Tisch, an dem geschrieben wird, liest die KI
     // nichts davon: es gibt niemanden, für den er es übersetzen würde.
     let c = Config::parse(&three("", ["100", "777", "888"])).unwrap();
     assert!(c.serves("111") && !c.serves("222") && !c.serves("333"));
-    assert!(!c.sends_to_ai("111"), "nothing written here goes to the AI");
-    assert!(c.sends_to_ai("222") && c.sends_to_ai("333"), "it is translated for table 111");
+    assert!(!c.sends_to_ai("111", "5"), "nothing written here goes to the AI");
+    assert!(c.sends_to_ai("222", "5") && c.sends_to_ai("333", "5"), "it is translated for table 111");
 
-    // Mit einer ansprechbaren KI kann am bedienten Tisch eine Frage an sie gehen.
+    // Mit einer ansprechbaren KI kann am bedienten Tisch eine Frage an sie
+    // gehen, aber nur von jemandem, für den dieser Fisch da ist. Ein Fremder
+    // am Tisch des Gastgebers darf sie seit dem 22.11.2026 nicht ansprechen;
+    // von ihm liest die KI hier also nichts, und er wird nicht gefragt.
     let named = three("", ["100", "777", "888"]).replace("host = \"100\"", "host = \"100\"\nai_name = \"Fish\"");
     let c = Config::parse(&named).unwrap();
-    assert!(c.sends_to_ai("111"));
+    assert!(c.may_ask("100", "111"));
+    assert!(!c.may_ask("5", "111"));
+    assert!(!c.sends_to_ai("111", "5"));
 
     // Ein Fisch, der gar keinen Tisch bedient, gibt nichts an die KI.
     let c = Config::parse(&named.replace("host = \"100\"", "host = \"555\"")).unwrap();
-    assert!(["111", "222", "333"].iter().all(|ch| !c.serves(ch) && !c.sends_to_ai(ch)));
+    assert!(["111", "222", "333"].iter().all(|ch| !c.serves(ch) && !c.sends_to_ai(ch, "5")));
 
     // Alte Profile: jeder Tisch ist bedient, an jedem wird gefragt.
     let c = Config::parse(&three("", ["", "", ""])).unwrap();
-    assert!(["111", "222", "333"].iter().all(|ch| c.sends_to_ai(ch)));
+    assert!(["111", "222", "333"].iter().all(|ch| c.sends_to_ai(ch, "5")));
 }
 
 // --- Das Dokument für die Maske ----------------------------------------------

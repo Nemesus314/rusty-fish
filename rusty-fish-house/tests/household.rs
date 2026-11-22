@@ -481,6 +481,161 @@ fn what_was_held_is_never_written_to_the_state_file() {
     assert_eq!(fake.calls(), 0);
 }
 
+// --- Wer die KI ansprechen darf ------------------------------------------------
+
+/// Zwei Fische in einem Raum, gesehen vom Fisch des Menschen `host`: 100 hat
+/// den Tisch 111, 7 hat den Tisch 222, und keiner hat den anderen eingeladen.
+fn own_fish_each(host: &str) -> Config {
+    Config::parse(&format!(
+        r#"
+model = "some-model"
+host = "{host}"
+ai_name = "Fish"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "111"
+  lang = "German"
+  owner = "100"
+
+  [[room.seat]]
+  discord = "222"
+  lang = "Russian"
+  owner = "7"
+
+[[person]]
+discord = "100"
+
+[[person]]
+discord = "7"
+"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_fish_answers_its_host_and_nobody_who_brought_a_fish_of_their_own() {
+    // Der Fisch von 7. Er bedient nur den Tisch 222.
+    let config = own_fish_each("7");
+    assert!(config.may_ask("7", "222"));
+    assert!(!config.may_ask("100", "222"), "100 has a fish of their own");
+    assert!(!config.may_ask("7", "111") && !config.may_ask("100", "111"), "not this fish's table");
+
+    let mut house = Household::open(&config, &state_file("own-fish")).unwrap();
+    let fake = Fake::new();
+    // 100 schreibt am Tisch von 7 und nennt den Rufnamen. Das ist für diesen
+    // Fisch eine gewöhnliche Nachricht: keine Frage, kein Wort an die KI, und
+    // deshalb auch keine Bitte um Zustimmung.
+    let visitor = Arrived { channel: "222", author: "100", text: "Fish, wer bist du?", mark: 1 };
+    let steps = handle(&mut house, &fake, &config, &visitor).unwrap();
+    assert!(steps.deliveries.is_empty(), "got {:?}", steps.deliveries);
+    assert_eq!(steps.ask_consent, None);
+    assert_eq!(fake.calls(), 0, "the visitor must not spend the host's tokens");
+
+    // Der Gastgeber selbst wird an seinem Tisch gehört.
+    let host = Arrived { channel: "222", author: "7", text: "Fish, wer bist du?", mark: 2 };
+    let steps = handle(&mut house, &fake, &config, &host).unwrap();
+    assert_eq!(steps.deliveries.len(), 1);
+    assert_eq!(steps.deliveries[0].from, Sender::Assistant);
+    assert_eq!(steps.deliveries[0].channel, "222");
+    assert_eq!(fake.calls(), 1);
+}
+
+#[test]
+fn an_invited_guest_may_ask_the_hosts_fish_at_every_table_it_serves() {
+    // So ist das Profil für einen eingeladenen Gast: der Gastgeber zahlt.
+    let config = Config::parse(&format!(
+        "ai_name = \"Fish\"\n{}",
+        r#"
+model = "some-model"
+host = "100"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "111"
+  lang = "German"
+  owner = "100"
+
+  [[room.seat]]
+  discord = "222"
+  lang = "Russian"
+  owner = "7"
+
+[[person]]
+discord = "7"
+invited = true
+"#
+    ))
+    .unwrap();
+    assert!(config.may_ask("7", "222") && config.may_ask("7", "111"));
+    assert!(config.may_ask("100", "111") && config.may_ask("100", "222"));
+    // Ein Dritter, der nur mitschreibt, gehört nicht dazu.
+    assert!(!config.may_ask("999", "111") && !config.may_ask("999", "222"));
+}
+
+#[test]
+fn where_the_fish_cannot_tell_people_apart_everyone_at_the_table_may_ask() {
+    // Ein Profil ohne Besitzer an den Tischen, wie vor dem 20.11.2026.
+    let old = Config::parse(
+        r#"
+model = "some-model"
+host = "100"
+ai_name = "Fish"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "111"
+  lang = "German"
+
+  [[room.seat]]
+  discord = "222"
+  lang = "Russian"
+"#,
+    )
+    .unwrap();
+    assert!(old.may_ask("999", "111") && old.may_ask("999", "222"));
+
+    // Ein Tisch für einen Eingeladenen, dessen Kennung noch fehlt: wer dort
+    // schreibt, ist vermutlich er.
+    let no_id = Config::parse(
+        r#"
+model = "some-model"
+host = "100"
+ai_name = "Fish"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "111"
+  lang = "German"
+  owner = "100"
+
+  [[room.seat]]
+  discord = "222"
+  lang = "Russian"
+  owner = "robin"
+
+[[person]]
+name = "robin"
+invited = true
+"#,
+    )
+    .unwrap();
+    assert!(no_id.may_ask("999", "222"), "at robin's own table");
+    assert!(!no_id.may_ask("999", "111"), "but not at the host's");
+
+    // Ohne Rufnamen ist die KI für niemanden ansprechbar, auch nicht für den Gastgeber.
+    assert!(!own_fish_each("7").may_ask("7", "111"));
+    let silent = Config::parse(
+        "model = \"m\"\nhost = \"100\"\n[[room]]\n[[room.seat]]\ndiscord = \"111\"\nlang = \"German\"\n[[room.seat]]\ndiscord = \"222\"\nlang = \"Russian\"\n",
+    )
+    .unwrap();
+    assert!(!silent.may_ask("100", "111"));
+}
+
 // --- Die Namen des Gastgebers bleiben im Profil -------------------------------
 
 #[test]

@@ -164,7 +164,7 @@ impl Household {
         let consented = is_host || self.store.has_consented(msg.author, terms.service);
         if consented {
             self.store.settle_service(msg.author, terms.service);
-        } else if config.sends_to_ai(msg.channel) {
+        } else if config.sends_to_ai(msg.channel, msg.author) {
             // Bereithalten für den Augenblick der Zustimmung (siehe
             // [`Household::held_back`]). Nur dort, wo der Fisch auch um
             // Zustimmung bittet.
@@ -174,7 +174,7 @@ impl Household {
                 held.pop_front();
             }
         }
-        let names: Vec<&str> = config.ai_names.iter().map(String::as_str).collect();
+        let names = call_names(config, msg.author, msg.channel);
         let incoming = Incoming {
             channel: msg.channel,
             author: msg.author,
@@ -202,7 +202,7 @@ impl Household {
         // Tische. Sie unterbleibt nur, wo er von diesem Menschen ohnehin nie
         // etwas an die KI gäbe (siehe `Config::sends_to_ai`). Einmal je Lauf.
         let ask_consent = if !consented
-            && config.sends_to_ai(msg.channel)
+            && config.sends_to_ai(msg.channel, msg.author)
             && self.asked.insert(msg.author.to_owned())
         {
             Some(consent_request(model, terms, msg.channel, msg.author, &mut tally).await)
@@ -279,14 +279,14 @@ impl Household {
         }
         let Some(held) = self.held.remove(user) else { return Vec::new() };
         let config = terms.config;
-        let names: Vec<&str> = config.ai_names.iter().map(String::as_str).collect();
-        let house = House { limits: &config.limits, ai_names: &names, today: terms.today };
         let mut tally = self.store.tally();
         let mut out = Vec::new();
         for item in &held {
             // Das Profil kann sich seit dem Satz nicht geändert haben, aber
             // ein Kanal ohne Raum wäre hier trotzdem kein Grund zu scheitern.
             let Some(room_index) = config.room_index(&item.channel) else { continue };
+            let names = call_names(config, user, &item.channel);
+            let house = House { limits: &config.limits, ai_names: &names, today: terms.today };
             let incoming = Incoming {
                 channel: &item.channel,
                 author: user,
@@ -360,6 +360,19 @@ impl Household {
         told.extend(reached.iter().cloned());
         self.store.set_told(told);
         self.store.save()
+    }
+}
+
+/// Die Rufnamen, unter denen dieser Mensch an diesem Kanal die KI ansprechen
+/// kann. Für jemanden, für den dieser Fisch nicht da ist, sind es keine (siehe
+/// [`Config::may_ask`]): was er schreibt, ist dann eine gewöhnliche
+/// Nachricht, auch wenn sie mit dem Rufnamen beginnt. Es geht keine Frage an
+/// die KI, und es wird keine gezählt.
+fn call_names<'a>(config: &'a Config, user: &str, channel: &str) -> Vec<&'a str> {
+    if config.may_ask(user, channel) {
+        config.ai_names.iter().map(String::as_str).collect()
+    } else {
+        Vec::new()
     }
 }
 

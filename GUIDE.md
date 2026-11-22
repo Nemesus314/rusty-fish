@@ -26,12 +26,19 @@ Discord shows the tag "APP" next to such a mirrored message.
   of address carry over.
 - The AI outputs only the translation, without notes. A play on words or a dry
   remark can lose its edge on the way without anyone noticing. The original
-  stays readable in the channel it was written in, and anyone can ask the AI
-  by its call name how something was meant; it sees the same earlier messages.
+  stays readable in the channel it was written in, and the host and invited
+  guests can ask the AI by its call name how something was meant; it sees the
+  same earlier messages.
 - A neutral language, for example English, can be set to stay untranslated.
 - The AI can have call names, for example "Fish". A message that starts with a
   call name, or with an @-mention of the bot, is a question to the AI. The
-  answer appears in every channel in that channel's language.
+  answer appears at every table this fish writes at, in that table's
+  language. Without a call name the AI answers nobody and only translates.
+- A fish answers the people it is there for: its host and the guests the host
+  invited. Someone who brought a fish of their own talks to their own AI, at
+  their own table; they cannot question the other person's AI and so cannot
+  spend the other person's tokens. Give two fish in one room different call
+  names.
 - A channel can be the table of one person. The fish then translates into that
   person's mother tongue there. It writes at tables without an owner, at the
   host's own table and at the tables of people the host has invited. An

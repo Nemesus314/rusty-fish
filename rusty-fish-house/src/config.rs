@@ -449,22 +449,60 @@ impl Config {
         self.people.get(key).and_then(|p| p.name.as_deref())
     }
 
-    /// Gäbe dieser Fisch an die KI, was an diesem Kanal geschrieben wird?
+    /// Darf dieser Mensch an diesem Kanal die KI dieses Fischs ansprechen?
     ///
-    /// Nur dann bittet er dort um Zustimmung. Das ist der Fall, wenn er im
-    /// selben Raum einen anderen Tisch bedient (für den übersetzt er es) oder
-    /// wenn er diesen Tisch bedient und die KI ansprechbar ist (dann kann hier
-    /// eine Frage an sie gehen).
+    /// Nemesus am 22.11.2026, nach dem ersten Lauf mit zwei Fischen in einem
+    /// Raum: „eigentlich sollte es ja nicht sein, dass ich als Nemesus den
+    /// russischen Pesce Fisch ansprechen kann. Genau so wenig, sollte Nemitest
+    /// den Fisch im deutschen Kanal ansprechen können."
+    ///
+    /// Jeder bringt seine eigene KI mit und bezahlt sie. Ansprechen dürfen
+    /// sie deshalb die, für die dieser Fisch da ist: der Gastgeber und wen er
+    /// eingeladen hat. Bis dahin durfte jeder, der an einem bedienten Tisch
+    /// schrieb; im Lauf mit zwei Fischen verbrauchte so der eine die Tokens
+    /// des anderen.
+    ///
+    /// Zwei Fälle, in denen der Fisch die Menschen nicht auseinanderhalten
+    /// kann und deshalb weiter jeden fragen lässt, der an diesem Tisch
+    /// schreibt (das Fragenlimit je Gast gilt):
+    /// - Der Tisch hat keinen Besitzer. So sind Profile von vor dem 20.11.2026.
+    /// - Der Tisch gehört einem Eingeladenen, dessen Kennung noch fehlt. Wer
+    ///   dort schreibt, ist vermutlich er; wissen kann es der Fisch nicht.
+    pub fn may_ask(&self, user: &str, channel: &str) -> bool {
+        if self.ai_names.is_empty() {
+            return false;
+        }
+        // Nur an einem Tisch, an den dieser Fisch schreibt: sonst könnte der
+        // Fragende die Antwort dort nie lesen.
+        if !self.seat_of(channel).is_some_and(|seat| seat.served) {
+            return false;
+        }
+        if user == self.host || self.people.get(user).is_some_and(|person| person.invited) {
+            return true;
+        }
+        match self.owner_of(channel) {
+            None => true,
+            Some(owner) => {
+                self.people.get(owner).is_some_and(|p| p.invited && p.discord.is_none())
+            }
+        }
+    }
+
+    /// Gäbe dieser Fisch an die KI, was dieser Mensch an diesem Kanal schreibt?
+    ///
+    /// Nur dann bittet er ihn dort um Zustimmung. Das ist der Fall, wenn er
+    /// im selben Raum einen anderen Tisch bedient (für den übersetzt er es)
+    /// oder wenn dieser Mensch hier die KI ansprechen darf (dann kann eine
+    /// Frage an sie gehen, siehe [`Config::may_ask`]).
     ///
     /// Warum nicht einfach an jedem Tisch: bringt jeder seinen eigenen Fisch
     /// mit, bedient jeder Fisch nur den Tisch seines Gastgebers. Wer dort als
     /// Gast schreibt, bekäme sonst von diesem Fisch eine Bitte um Zustimmung
     /// für eine KI, die von ihm nie ein Wort liest.
-    pub fn sends_to_ai(&self, channel: &str) -> bool {
+    pub fn sends_to_ai(&self, channel: &str, user: &str) -> bool {
         let Some(room) = self.room_index(channel).map(|n| &self.rooms[n]) else { return false };
-        room.seats.iter().any(|seat| {
-            seat.served && (seat.channel != channel || !self.ai_names.is_empty())
-        })
+        room.seats.iter().any(|seat| seat.served && seat.channel != channel)
+            || self.may_ask(user, channel)
     }
 }
 

@@ -805,9 +805,14 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       title: 'AI',
       children: [
         Text(
+          // Gemessen von Nemesus am 22.11.2026: ein Fisch ohne Rufnamen
+          // schwieg auf jede Ansprache, und nichts sagte, warum.
           _aiNames.isEmpty
-              ? 'No name: the AI only translates.'
-              : 'People talk to the AI by starting a message with one of these names.',
+              ? 'No call name: the AI only translates and answers nobody. '
+                    'Add a name if you want to talk to it.'
+              : 'You and the people you invited talk to the AI by starting a message '
+                    'with one of these names. Someone who brought a fish of their own '
+                    'talks to their own AI; give two fish in one room different names.',
         ),
         const SizedBox(height: 8),
         for (final (index, name) in _aiNames.indexed)
