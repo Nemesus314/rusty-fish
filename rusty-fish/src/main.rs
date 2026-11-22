@@ -1,6 +1,6 @@
 //! Rusty Fish, das Programm: Schlüssel verwalten, einen Text zur Probe
-//! übersetzen, Profile verwalten, die Discord-Tür öffnen. Weitere Türen kommen
-//! als Befehle dazu.
+//! übersetzen, Profile verwalten, den Fisch an Matrix anmelden, die Türen
+//! öffnen (Discord und Matrix, siehe `doors`).
 //!
 //! Eine Oberfläche spricht nur über diese Befehle mit dem Programm. Wo sie
 //! etwas weiterverarbeitet, gibt es `--json`; Fehler stehen als Text auf der
@@ -8,6 +8,7 @@
 
 mod awake;
 mod botlink;
+mod doors;
 mod keys;
 mod lock;
 mod profiles;
@@ -17,9 +18,8 @@ mod stop;
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
 use rusty_fish_core::{Gender, Outcome, Request, Secret, translate};
-use rusty_fish_discord::door::{Command as DoorCommand, OnChange, Profile as DoorProfile};
 use rusty_fish_house::config::Config;
-use stop::Input;
+use rusty_fish_house::served::Profile as DoorProfile;
 use rusty_fish_providers::{AnyModel, Provider, catalog, connect};
 use serde_json::json;
 use std::io::Read;
@@ -93,7 +93,12 @@ enum Command {
         #[command(subcommand)]
         action: ProfileAction,
     },
-    /// Open the Discord door and translate between the configured channels
+    /// Manage the fish's own Matrix account
+    Matrix {
+        #[command(subcommand)]
+        action: MatrixAction,
+    },
+    /// Open the doors (Discord, Matrix) and translate between the configured channels
     Run {
         /// Settings file; see rusty-fish.example.toml [default: rusty-fish.toml]
         #[arg(long, conflicts_with = "profile")]
@@ -152,6 +157,32 @@ enum KeyAction {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
     },
+}
+
+#[derive(Subcommand)]
+enum MatrixAction {
+    /// Log the fish in to its Matrix account; asks for the password with
+    /// hidden input unless --stdin is given. The password is used once and
+    /// not kept
+    Login {
+        /// The user id of the fish's account, like @name:server
+        #[arg(long)]
+        user: String,
+        /// The address of the Matrix server, if it cannot be found from the user id
+        #[arg(long)]
+        homeserver: Option<String>,
+        /// Read the password as one line from standard input instead of asking
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Tell whether the fish is logged in, and as whom
+    Status {
+        /// Print the status as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Log the fish out and empty its device store
+    Logout,
 }
 
 #[derive(Subcommand)]
@@ -352,6 +383,7 @@ async fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Profile { action } => profile(action),
+        Command::Matrix { action } => matrix(action).await,
         Command::Guide => {
             print!("{}", guide());
             Ok(())
@@ -417,18 +449,12 @@ async fn run(command: Command) -> Result<(), String> {
                     })?);
                 }
             }
-            let token = keys::load(profiles::BOT)?.ok_or_else(|| {
-                format!(
-                    "{} not stored; run `rusty-fish key set {}` first",
-                    secrets::label(profiles::BOT),
-                    profiles::BOT
-                )
-            })?;
-
-            // Ein Bot, ein Fisch: die Sperre gilt bis zum Ende dieses Laufs,
-            // auch für einen Start mit --config, denn der Bot ist derselbe.
-            // Seit dem 21.11.2026 bedient dieser eine Fisch mehrere Profile;
-            // welche, steht in der Notiz zur Sperre, und die Maske liest sie.
+            // Ein Fisch je Rechner: die Sperre gilt bis zum Ende dieses Laufs,
+            // auch für einen Start mit --config, denn Bot und Matrix-Konto sind
+            // dieselben. Seit dem 21.11.2026 bedient dieser eine Fisch mehrere
+            // Profile; welche, steht in der Notiz zur Sperre, und die Maske
+            // liest sie. Die Sperre heißt weiter nach dem Bot-Eintrag, damit
+            // ein älteres Programm sie achtet.
             let who =
                 lock::Running { profiles: profile.clone(), pid: std::process::id(), started: now() };
             let held = match &folder {
@@ -437,7 +463,7 @@ async fn run(command: Command) -> Result<(), String> {
                 // schon Pflicht. Lieber ohne Sperre laufen als gar nicht.
                 Err(why) => {
                     eprintln!("rusty-fish: warning: {why}");
-                    eprintln!("rusty-fish: warning: running without the one-fish-per-bot lock");
+                    eprintln!("rusty-fish: warning: running without the one-fish lock");
                     None
                 }
             };
@@ -448,52 +474,116 @@ async fn run(command: Command) -> Result<(), String> {
                 eprintln!("rusty-fish: keeping this PC from going to sleep by itself while the fish is on");
             }
 
-            let on_change: OnChange = Box::new(move |names: &[String]| {
-                if let Some(held) = &held
-                    && let Err(why) = held.set_profiles(names)
-                {
-                    eprintln!("rusty-fish: warning: {why}");
-                }
-            });
+            // Ein Profil, das im Lauf dazukommt oder sich ändert, wird so
+            // nachgeladen. Welche Tür es bedient, sagen seine Tische.
+            let load = move |name: &str| folder.clone().and_then(|f| load_profile(&f, name));
+            doors::run(first, all, load, held, home()?).await
+        }
+    }
+}
 
-            // Was dem laufenden Fisch gesagt wird, wird hier zu dem, was die
-            // Tür versteht. Ein Profil, das sich nicht laden lässt, hält die
-            // laufenden nicht auf: der Grund steht in der Ausgabe.
-            let (to_door, commands) = tokio::sync::mpsc::unbounded_channel();
-            let mut said = stop::listen();
-            tokio::spawn(async move {
-                while let Some(input) = said.recv().await {
-                    let command = match input {
-                        Input::StopAll => DoorCommand::StopAll,
-                        Input::Stop(name) => DoorCommand::Stop(name),
-                        Input::Start(name) => match folder.clone().and_then(|f| load_profile(&f, &name)) {
-                            Ok(profile) => DoorCommand::Start(Box::new(profile)),
-                            Err(why) => {
-                                eprintln!("rusty-fish: [{name}] cannot start: {why}");
-                                continue;
-                            }
-                        },
-                        // Lässt sich das geänderte Profil nicht laden, läuft
-                        // das bisherige weiter: lieber der alte Stand als keiner.
-                        Input::Restart(name) => match folder.clone().and_then(|f| load_profile(&f, &name)) {
-                            Ok(profile) => DoorCommand::Restart(Box::new(profile)),
-                            Err(why) => {
-                                eprintln!("rusty-fish: [{name}] cannot restart: {why}");
-                                continue;
-                            }
-                        },
-                    };
-                    if to_door.send(command).is_err() {
-                        break;
-                    }
-                }
-                // Der Sender bleibt am Leben: endet dieser Kreis, soll die Tür
-                // das nicht für ein Signal halten.
-                std::future::pending::<()>().await;
-                drop(to_door);
-            });
+/// Der Ordner, in dem der Fisch seine Dinge ablegt.
+fn home() -> Result<PathBuf, String> {
+    profiles::home(&|key| std::env::var(key).ok(), profiles::this_os())
+}
 
-            rusty_fish_discord::door::run(token.expose(), first, all, commands, on_change).await
+/// Die Befehle rund um das Matrix-Konto des Fischs.
+async fn matrix(action: MatrixAction) -> Result<(), String> {
+    let home = home()?;
+    let store = doors::matrix_store(&home);
+    match action {
+        MatrixAction::Login { user, homeserver, stdin } => {
+            // Die Ablage der Geräteschlüssel wird neu angelegt; ein laufender
+            // Fisch hielte sie offen.
+            if doors::fish_is_running(&home) {
+                return Err("the fish is running; switch it off before logging in to Matrix".to_owned());
+            }
+            // Erst die Kennung prüfen, dann nach dem Passwort fragen.
+            let user = rusty_fish_matrix::session::user_id(&user)?;
+            // Das Passwort steht in keinem Argument, keiner Datei und keiner
+            // Ausgabe, wie jedes Geheimnis hier. Es wird einmal gebraucht.
+            let typed = if stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| format!("cannot read from standard input: {e}"))?;
+                line.trim_start_matches('\u{feff}').to_owned()
+            } else {
+                rpassword::prompt_password(format!("Password of {user} (input stays hidden): "))
+                    .map_err(|e| format!("cannot read from the terminal: {e}"))?
+            };
+            let password = typed.trim_end_matches(['\r', '\n']);
+            if password.is_empty() {
+                return Err("nothing entered, nothing done".to_owned());
+            }
+            let logged_in = rusty_fish_matrix::session::login(
+                &store,
+                user.as_str(),
+                password,
+                homeserver.as_deref(),
+            )
+            .await?;
+            keys::store(secrets::MATRIX, &logged_in.access.to_secret())?;
+            println!(
+                "Logged in to Matrix as {} at {}.",
+                logged_in.access.user_id(),
+                logged_in.access.homeserver()
+            );
+            println!(
+                "The access is in this system's credential store, the device keys are in {}.",
+                store.display()
+            );
+            for note in logged_in.notes {
+                println!("Note: {note}.");
+            }
+            Ok(())
+        }
+        MatrixAction::Status { json } => {
+            let access = match keys::load(secrets::MATRIX)? {
+                Some(secret) => Some(rusty_fish_matrix::session::Access::parse(secret.expose())?),
+                None => None,
+            };
+            if json {
+                println!(
+                    "{}",
+                    pretty(&json!({
+                        "logged_in": access.is_some(),
+                        "user": access.as_ref().map(|a| a.user_id().to_string()),
+                        "homeserver": access.as_ref().map(|a| a.homeserver().to_owned()),
+                    }))
+                );
+                return Ok(());
+            }
+            match access {
+                Some(access) => {
+                    println!("Matrix: logged in as {} at {}.", access.user_id(), access.homeserver())
+                }
+                None => println!("Matrix: not logged in."),
+            }
+            Ok(())
+        }
+        MatrixAction::Logout => {
+            if doors::fish_is_running(&home) {
+                return Err("the fish is running; switch it off before logging out of Matrix".to_owned());
+            }
+            let Some(secret) = keys::load(secrets::MATRIX)? else {
+                println!("Matrix: nothing to log out of.");
+                return Ok(());
+            };
+            // Ein Zugang, der sich nicht lesen lässt, wird trotzdem vergessen.
+            let told = match rusty_fish_matrix::session::Access::parse(secret.expose()) {
+                Ok(access) => rusty_fish_matrix::session::logout(&access, &store).await?,
+                Err(_) => {
+                    rusty_fish_matrix::session::clear(&store)?;
+                    None
+                }
+            };
+            keys::forget(secrets::MATRIX)?;
+            println!("Logged out of Matrix. The device store is empty.");
+            if let Some(note) = told {
+                println!("Note: {note}.");
+            }
+            Ok(())
         }
     }
 }
@@ -566,8 +656,7 @@ fn profile(action: ProfileAction) -> Result<(), String> {
 
 /// Der Profilordner dieses Rechners.
 fn folder() -> Result<Folder, String> {
-    let home = profiles::home(&|key| std::env::var(key).ok(), profiles::this_os())?;
-    Ok(Folder::at(home.join("profiles")))
+    Ok(Folder::at(home()?.join("profiles")))
 }
 
 /// Lädt ein gespeichertes Profil so weit, dass die Tür es bedienen kann.
@@ -661,6 +750,18 @@ mod tests {
             .max()
             .unwrap_or(0);
         assert!(longest < 10, "the guide contains a number of {longest} digits");
+    }
+
+    /// Nemesus am 22.11.2026 zum Auftrag der Matrix-Tür: ehrlich schreiben,
+    /// dass die Verschlüsselung von Matrix nur bis zum Fisch reicht und der
+    /// Satz danach an den KI-Dienst des Gastgebers geht.
+    #[test]
+    fn the_guide_says_how_far_the_encryption_of_matrix_reaches() {
+        // Der Leitfaden ist umbrochen; verglichen wird ohne die Umbrüche.
+        let text = guide().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains("That encryption reaches only as far as the fish."));
+        assert!(text.contains("the host's AI service reads every sentence the fish translates"));
+        assert!(text.contains("rusty-fish matrix login --user @name:server"));
     }
 
     #[test]

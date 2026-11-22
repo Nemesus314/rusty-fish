@@ -13,12 +13,12 @@
 //! Diese Schicht kennt kein Netz. Eine Tür reicht herein, was ankam, und
 //! setzt ab, was hier herauskommt (siehe [`household`]).
 //!
-//! Benannte Grenzen, die noch von der ersten Tür stammen:
-//! - Menschen und Kanäle sind im Profil Discord-Kennungen, also Zahlen
-//!   (siehe `config`). Für eine zweite Tür braucht die Person eine eigene
-//!   Identität.
+//! Seit dem 22.11.2026 gibt es zwei Türen, Discord und Matrix. Benannte
+//! Grenzen:
+//! - Ein Profil steht an genau einer Tür (siehe `config`).
 //! - Die Lesemarke je Kanal ist eine Zahl, die wächst (siehe `state`). Das
-//!   stimmt bei Discord, nicht bei jeder Tür.
+//!   stimmt bei Discord. Matrix zählt Nachrichten nicht; seine Tür vergibt
+//!   die Zahl selbst.
 
 pub mod clock;
 pub mod config;
@@ -26,5 +26,6 @@ pub mod document;
 pub mod household;
 pub mod invite;
 pub mod place;
+pub mod served;
 pub mod state;
 pub mod texts;

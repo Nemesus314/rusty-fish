@@ -7,8 +7,8 @@ If you are a person: give this whole text to an AI assistant you trust and ask
 it, in your own language, to walk you through it.
 
 If you are that assistant: go one step at a time and wait for the person after
-each step. Where this text names screens of Discord or of an AI service, check
-their current names yourself; those services rename things. Do not ask the
+each step. Where this text names screens of Discord, of a Matrix app or of an
+AI service, check their current names yourself; those services rename things. Do not ask the
 person to show you a key or a token. Those are secrets and go only into the
 program.
 
@@ -19,6 +19,10 @@ server gets one text channel per language. Everyone writes in the channel of
 their language. What is written in one channel appears in the others,
 translated by an AI, under the name and picture of the person who wrote it.
 Discord shows the tag "APP" next to such a mirrored message.
+
+The same works in Matrix rooms in place of Discord channels. What is
+different there, and what Matrix's encryption does and does not cover, is in
+"The Matrix door" below. Everything else in this text holds for both.
 
 - No message is translated on its own. The AI gets the last messages of the
   conversation with it (ten unless the host changed it), in their original
@@ -161,10 +165,84 @@ openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 `rusty-fish run --profile NAME` serves only that one; give `--profile` several
 times for several. `rusty-fish --help` lists everything.
 
+## The Matrix door
+
+Rusty Fish can also work in Matrix rooms instead of Discord channels. A
+profile stands at one of the two doors; profiles at Discord and profiles at
+Matrix run side by side in the same fish. One conversation with tables at
+both doors is not built.
+
+The fish needs a Matrix account of its own, separate from yours. It is an
+ordinary account at any Matrix server that accepts a login with a password;
+there is no developer portal and no bot token. Create it the way you created
+your own.
+
+1. In the window, click "AI keys" or "Bot token" in the title bar. The same
+   window has a block "Matrix account". Enter the user ID of the fish (it
+   looks like @name:server) and its password, then press "Log in". The
+   password is used once and not kept. Kept are the access of this one
+   device, in the Windows Credential Manager, and the fish's device keys, in
+   the fish's own folder on this PC (the folder `matrix` next to the
+   profiles). On the command line: `rusty-fish matrix login --user
+   @name:server`, and `rusty-fish matrix status` and `rusty-fish matrix
+   logout`. Log in and out only while the fish is switched off.
+2. Create one Matrix room per language and invite the account of the fish
+   into each. It joins by itself as soon as a running profile names the room,
+   and it joins no other room.
+3. In the profile, under General, choose the door "Matrix". A seat then asks
+   for the Matrix room ID: the internal ID of the room, which starts with `!`
+   (in Element: room settings, Advanced), not its #alias. You and the other
+   people are entered with their Matrix user IDs. In a settings file it is
+   `matrix = "..."` where a Discord profile says `discord = "..."`.
+
+What is different from Discord:
+
+- The fish cannot write under someone else's name there. A translation is a
+  message from the account of the fish, with the name of the writer in front.
+- Matrix has no buttons. Under its request for agreement the fish sets a
+  small sign "OK"; tapping it is the agreement, and the request says so. The
+  host answers the budget notice the same way. That notice comes in a room of
+  its own between the fish and the host, to which the fish invites the host.
+- The fish sends "notices", the kind of message Matrix has for bots, and
+  passes over every notice it reads. That is how it tells its own mirrored
+  messages and other bots from people. Two fish in one room pass over each
+  other, as on Discord.
+- Mentioning the fish at the start of a message counts like its call name.
+
+About encryption, said plainly: a Matrix room can be end-to-end encrypted,
+and the fish reads and writes there as a member with a device of its own.
+That encryption reaches only as far as the fish. The fish decrypts a message
+on the host's PC and then sends it, like every message it translates, to the
+AI service the host chose; the translation goes into the other rooms of the
+conversation. So the Matrix servers cannot read an encrypted room, but the
+host's AI service reads every sentence the fish translates. The request for
+agreement says that before anything of a guest is sent. Only with a model on
+the host's own PC do the sentences stay there. The device of the fish is
+verified by nobody; some apps show a warning at its messages.
+
+Limits of the Matrix door:
+
+- Pictures, files, voice messages, edits and deletions are not mirrored.
+  Reactions of people stay where they are.
+- After a pause the fish catches up on what the server hands it, at most the
+  last 100 messages per room. What was written while only one profile was
+  stopped and the fish went on for others is not caught up.
+- After a new login the fish is a new device. In an encrypted room it cannot
+  read what was written before that. There is no backup of its device keys,
+  on purpose.
+- A message the fish cannot decrypt does not appear at the other tables; the
+  output of the program says so.
+- The login needs a server that accepts a password. A server that only
+  offers a login through the browser is not served.
+- As of 22 November 2026 the Matrix door has been tested against a simulated
+  server only. A run in real rooms, encrypted ones included, is still to
+  come.
+
 ## Limits
 
-- Nothing here is end-to-end encrypted. Discord can read what is written in
-  its channels, and the AI service reads every message it translates. The
+- On Discord nothing is end-to-end encrypted: Discord can read what is
+  written in its channels. At either door the AI service reads every message
+  it translates; for Matrix see "The Matrix door". The
   window says for each room over which service it runs, and for each profile
   where its AI reads: on this PC, in your own network or at an outside
   service. It judges by the address alone. With a model on your own PC

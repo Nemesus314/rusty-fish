@@ -8,6 +8,7 @@ members = [
     "rusty-fish-anthropic",
     "rusty-fish-providers",
     "rusty-fish-discord",
+    "rusty-fish-matrix",
     "rusty-fish",
 ]
 
@@ -15,3 +16,19 @@ members = [
 version = "0.2.0"
 edition = "2024"
 publish = false
+
+# Die Ablage der Matrix-Geräteschlüssel ist mit einem Kennwort verschlossen;
+# daraus den Schlüssel abzuleiten kostet absichtlich viele Rechenschritte.
+# Unoptimiert dauert das beim Start des Fischs etwa 15 Sekunden (gemessen am
+# 22.11.2026), optimiert einen Augenblick. Deshalb sind diese Bausteine auch
+# im Entwicklungsbau optimiert.
+[profile.dev.package.matrix-sdk-store-encryption]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3

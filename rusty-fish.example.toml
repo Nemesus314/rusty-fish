@@ -1,9 +1,12 @@
-# Rusty Fish, settings for the Discord door.
+# Rusty Fish, settings for one profile. This example stands at the Discord
+# door; what a profile at the Matrix door says instead is noted at each place.
 # Copy this file to rusty-fish.toml, fill it in, then: rusty-fish run
 #
 # Secrets do not belong here. Store them once with:
 #   rusty-fish key set openai      (or xai, google, anthropic, custom)
 #   rusty-fish key set discord
+# For the Matrix door the fish logs in to a Matrix account of its own:
+#   rusty-fish matrix login --user @name:server
 
 # The AI service that translates: "openai" (ChatGPT), "xai" (Grok), "google"
 # (Gemini), "anthropic" (Claude) or "custom" (your own model). Each service
@@ -25,6 +28,7 @@ model = "put-a-model-name-here"
 # has agreed to the AI reading along; everyone else is asked once in their
 # channel.
 # In Discord: Settings -> Advanced -> Developer Mode, then right-click yourself -> Copy User ID.
+# At the Matrix door: your Matrix user id, like "@name:server", or your name below.
 host = "000000000000000000"
 
 # Optional: a name for the AI. With a name, you and the people you invited can
@@ -58,8 +62,11 @@ pass_through = ["English"]
 # How many earlier messages the AI sees for context. Each one costs with every translation.
 context_lines = 10
 
-  # A seat names its door and its channel there. Discord is the only door so
-  # far: right-click a channel -> Copy Channel ID.
+  # A seat names its door and its channel there.
+  # Discord: right-click a channel -> Copy Channel ID.
+  # Matrix: `matrix = "!..."` instead, the internal id of the room (in Element:
+  # room settings -> Advanced), not its #alias. Invite the fish's account into
+  # the room. All seats of one profile stand at the same door.
   [[room.seat]]
   discord = "000000000000000001"
   lang = "German"
@@ -88,6 +95,9 @@ context_lines = 10
 # can leave it out until you have it: the table, the language and the
 # invitation work without. A name or an id is required.
 # discord = "000000000000000003"
+# The person's Matrix user id, for a profile at the Matrix door. A person may
+# carry both; the one at the door of the profile counts.
+# matrix = "@robin:example.org"
 # The same grammar hint as at a seat. A person's own entry goes before the
 # gender of the seat, so people keep their own forms at someone else's seat.
 # gender = "male"

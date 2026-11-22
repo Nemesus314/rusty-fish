@@ -68,6 +68,7 @@ use rusty_fish_core::Model;
 use rusty_fish_house::clock::today;
 use rusty_fish_house::config::Config;
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
+use rusty_fish_house::served::{label_of, title_of};
 use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation};
 use rusty_fish_room::{Delivery, Sender};
 use serenity::all::{
@@ -78,49 +79,20 @@ use serenity::all::{
 };
 use serenity::async_trait;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, RwLock};
+
+// Was der Aufrufer übergibt und sagen kann, gilt für jede Tür und steht
+// seit dem 22.11.2026 im Haus. Unter diesen Namen bleibt es hier erreichbar.
+pub use rusty_fish_house::served::{Command, OnChange, Profile};
 
 const WEBHOOK_NAME: &str = "Rusty Fish";
 
 /// Die Antwort auf einen Klick, zu dem gerade kein Profil läuft: der Knopf
 /// stammt von einem Profil, das inzwischen angehalten wurde.
 const NOT_RUNNING: &str = "The profile this button belongs to is not running right now.";
-
-/// Ein Profil, wie der Aufrufer es der Tür übergibt: fertig geprüft, mit der
-/// KI, die für es übersetzt.
-pub struct Profile<M> {
-    /// Der Name des Profils. `None`, wenn der Fisch mit einer einzelnen
-    /// Einstellungsdatei gestartet wurde.
-    pub name: Option<String>,
-    pub config: Config,
-    pub state_path: PathBuf,
-    pub model: M,
-    /// Der Name des KI-Dienstes, zu dem `model` spricht. Er kommt vom
-    /// Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
-    pub service: String,
-}
-
-/// Was der Aufrufer dem laufenden Fisch sagen kann.
-pub enum Command<M> {
-    /// Ein weiteres Profil bedienen, ohne die laufenden zu stören.
-    Start(Box<Profile<M>>),
-    /// Ein Profil neu aufnehmen, etwa nachdem es geändert wurde: das laufende
-    /// gleichen Namens geht, dieses kommt. Der Fisch hält dabei nie an, auch
-    /// wenn es sein einziges Profil ist.
-    Restart(Box<Profile<M>>),
-    /// Ein Profil nicht mehr bedienen. War es das letzte, hält der Fisch an.
-    Stop(String),
-    /// Anhalten.
-    StopAll,
-}
-
-/// Wird gerufen, wenn sich ändert, welche Profile der Fisch bedient, mit
-/// deren Namen. So kann der Aufrufer es anderen sagen, etwa der Maske.
-pub type OnChange = Box<dyn Fn(&[String]) + Send + Sync>;
 
 /// Ein Profil im Lauf: seine Einstellungen, seine KI und alles, was sich
 /// ändert.
@@ -256,12 +228,6 @@ where
         Err(_) if stopping.load(Ordering::Relaxed) => Ok(()),
         Err(e) => Err(format!("the Discord connection ended: {e}")),
     }
-}
-
-/// Wie ein Profil in der Programmausgabe heißt: `[tea-time] ` vor der Zeile,
-/// oder nichts, wenn es keinen Namen hat.
-fn label_of(name: Option<&str>) -> String {
-    name.map(|name| format!("[{name}] ")).unwrap_or_default()
 }
 
 impl<M> Fish<M>
@@ -442,10 +408,7 @@ where
 {
     /// Wie dieses Profil in einer Fehlermeldung heißt.
     fn title(&self) -> String {
-        match &self.name {
-            Some(name) => format!("profile \"{name}\""),
-            None => "the running settings file".to_owned(),
-        }
+        title_of(self.name.as_deref())
     }
 
     /// Eine Zeile in die Programmausgabe, mit dem Namen des Profils davor.

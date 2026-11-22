@@ -8,12 +8,18 @@
 //! Namen auf einen Menschen; die Discord-Kennung an derselben Stelle gilt
 //! weiter, so wie Profile bis dahin geschrieben waren.
 //!
+//! Seit dem 22.11.2026 gibt es zwei Türen, Discord und Matrix. Ein Tisch nennt
+//! seine Tür (`discord = "..."` oder `matrix = "..."`), ein Mensch kann an
+//! jeder eine Kennung tragen.
+//!
 //! Benannte Grenzen:
-//! - Es gibt eine Tür, Discord. Ein Tisch nennt sie schon (`discord = "..."`),
-//!   damit ein Raum später Tische aus mehreren Türen haben kann.
-//! - Innen steht ein Mensch unter einem Schlüssel: seiner Discord-Kennung,
-//!   sonst seinem Namen. Mit einer zweiten Tür braucht es dafür eine Adresse
-//!   aus Tür und Kennung.
+//! - Ein Profil hat Tische an genau einer Tür. Der Haushalt eines Profils
+//!   gehört der Tür, die es bedient; für einen Raum mit Tischen an beiden
+//!   müssten zwei Türen sich einen Haushalt teilen und einander Zustellungen
+//!   zureichen. Das ist nicht gebaut.
+//! - Innen steht ein Mensch unter einem Schlüssel: seiner Kennung an der Tür
+//!   des Profils, sonst seinem Namen. Eine Kennung an der anderen Tür steht
+//!   nur dabei.
 //! - Zustimmung, Fragenzähler und Lesemarken hängen an der Kennung, nicht am
 //!   Namen. Dass zwei Kennungen derselbe Mensch sind, behauptet nur der
 //!   Gastgeber; darauf darf keine Zustimmung ruhen.
@@ -37,7 +43,10 @@ pub struct Config {
     /// Eine eigene Adresse statt der des Dienstes. Bei einem selbst gehosteten
     /// Modell („custom") ist sie Pflicht, sonst eine Überschreibung.
     pub base_url: Option<String>,
-    /// Discord-Kennung des Gastgebers. Wer den Fisch startet, hat zugestimmt.
+    /// Die Tür, an der alle Tische dieses Profils stehen.
+    pub door: Door,
+    /// Die Kennung des Gastgebers an dieser Tür. Wer den Fisch startet, hat
+    /// zugestimmt.
     pub host: String,
     /// Der Gastgeber, wie er im Profil steht: sein Name oder seine Kennung.
     /// Die Maske zeigt und speichert das Eingetragene.
@@ -55,9 +64,10 @@ pub struct Config {
     /// schon, was dort gilt (siehe [`Written`] für das, was eingetragen wurde).
     pub rooms: Vec<Room>,
     /// Was der Gastgeber über einzelne Menschen eingetragen hat. Freiwillig.
-    /// Der Schlüssel ist die Discord-Kennung des Menschen; hat er noch keine,
-    /// sein Name. Die beiden können nicht zusammenfallen: eine Kennung besteht
-    /// nur aus Ziffern, ein Name nie.
+    /// Der Schlüssel ist die Kennung des Menschen an der Tür des Profils; hat
+    /// er dort noch keine, sein Name. Die beiden können nicht zusammenfallen:
+    /// eine Discord-Kennung besteht nur aus Ziffern, eine Matrix-Kennung
+    /// beginnt mit `@`, ein Name tut keines von beiden.
     ///
     /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
     /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
@@ -92,6 +102,9 @@ pub struct Person {
     /// Dann gilt an seinem Tisch schon alles, nur seine eigenen Formen als
     /// Schreibender kennt der Fisch erst mit der Kennung.
     pub discord: Option<String>,
+    /// Die Kennung dieses Menschen an der Matrix-Tür, etwa `@robin:example.org`.
+    /// Sie darf fehlen wie die an der Discord-Tür.
+    pub matrix: Option<String>,
     /// Grammatisches Geschlecht, als Hinweis für die Grammatik.
     pub gender: Option<Gender>,
     /// Die Muttersprache: in sie wird an seinem Tisch übersetzt.
@@ -120,8 +133,67 @@ pub struct Written {
     pub owner_written: Option<String>,
 }
 
+impl Person {
+    /// Die Kennung dieses Menschen an dieser Tür, wenn er dort eine hat.
+    pub fn id_at(&self, door: Door) -> Option<&str> {
+        match door {
+            Door::Discord => self.discord.as_deref(),
+            Door::Matrix => self.matrix.as_deref(),
+        }
+    }
+}
+
 /// Die Türen, die dieser Fisch kennt. Ein Tisch gehört zu genau einer.
-pub const DOORS: [&str; 1] = ["discord"];
+pub const DOORS: [&str; 2] = ["discord", "matrix"];
+
+/// Eine Tür: der Dienst, über den Menschen mit dem Fisch schreiben.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Door {
+    Discord,
+    Matrix,
+}
+
+impl Door {
+    /// Das Wort, unter dem die Tür im Profil steht.
+    pub fn id(self) -> &'static str {
+        match self {
+            Door::Discord => "discord",
+            Door::Matrix => "matrix",
+        }
+    }
+
+    /// Wie die Tür in Meldungen heißt.
+    pub fn label(self) -> &'static str {
+        match self {
+            Door::Discord => "Discord",
+            Door::Matrix => "Matrix",
+        }
+    }
+
+    /// Liest eine Kennung eines Menschen an dieser Tür.
+    fn user_id(self, value: &str, field: &str) -> Result<String, String> {
+        match self {
+            Door::Discord => discord_id(value, field),
+            Door::Matrix => matrix_user_id(value, field),
+        }
+    }
+
+    /// Sieht dieser Text aus wie die Kennung eines Menschen an dieser Tür?
+    fn is_user_id(self, value: &str) -> bool {
+        match self {
+            Door::Discord => is_id(value),
+            Door::Matrix => value.starts_with('@'),
+        }
+    }
+
+    /// Wie eine Kennung eines Menschen an dieser Tür aussieht, für Meldungen.
+    fn user_id_shape(self) -> &'static str {
+        match self {
+            Door::Discord => "digits only, not zero",
+            Door::Matrix => "like @name:server",
+        }
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -146,6 +218,7 @@ struct RawPerson {
     discord: Option<String>,
     /// Das alte Wort für `discord`, aus Profilen von vor dem 21.11.2026.
     id: Option<String>,
+    matrix: Option<String>,
     gender: Option<String>,
     lang: Option<String>,
     neutral: Option<Vec<String>>,
@@ -187,9 +260,25 @@ struct RawSeat {
     discord: Option<String>,
     /// Das alte Wort für `discord`, aus Profilen von vor dem 21.11.2026.
     channel: Option<String>,
+    /// Der Raum dieses Tisches an der Matrix-Tür: seine interne Kennung, die
+    /// mit `!` beginnt.
+    matrix: Option<String>,
     lang: String,
     gender: Option<String>,
     owner: Option<String>,
+}
+
+impl RawSeat {
+    /// Die Tür, die dieser Tisch nennt, wenn er eine nennt.
+    fn door(&self) -> Option<Door> {
+        if filled(self.matrix.as_deref()).is_some() {
+            Some(Door::Matrix)
+        } else if filled(self.discord.as_deref()).or(filled(self.channel.as_deref())).is_some() {
+            Some(Door::Discord)
+        } else {
+            None
+        }
+    }
 }
 
 fn default_context_lines() -> usize {
@@ -205,6 +294,16 @@ impl Config {
         if model.is_empty() {
             return Err("configuration: `model` is empty".to_owned());
         }
+        // Die Tür des Profils: die des ersten Tisches. Sie entscheidet, unter
+        // welcher Kennung ein Mensch innen steht. Dass alle Tische an ihr
+        // stehen, prüft die Schleife über die Tische weiter unten.
+        let door = raw
+            .rooms
+            .iter()
+            .flat_map(|room| room.seats.iter())
+            .find_map(RawSeat::door)
+            .unwrap_or(Door::Discord);
+
         // Die Menschen zuerst: `host` und `owner` zeigen mit Namen auf sie, und
         // was an einem Tisch gilt, hängt an seinem Besitzer.
         let mut people = BTreeMap::new();
@@ -225,12 +324,21 @@ impl Config {
                 (None, Some(id)) => Some(discord_id(id, "id")?),
                 (None, None) => None,
             };
-            // Die Kennung, sonst der Name. Eines von beiden muss da sein,
-            // sonst wäre der Eintrag über niemanden.
-            let Some(key) = discord.clone().or_else(|| name.clone()) else {
+            let matrix = match filled(person.matrix.as_deref()) {
+                Some(id) => Some(matrix_user_id(id, "matrix")?),
+                None => None,
+            };
+            // Die Kennung an der Tür des Profils, sonst der Name. Eines von
+            // beiden muss da sein, sonst wäre der Eintrag über niemanden.
+            let here = match door {
+                Door::Discord => discord.clone(),
+                Door::Matrix => matrix.clone(),
+            };
+            let Some(key) = here.or_else(|| name.clone()) else {
                 return Err(format!(
-                    "configuration: person {} needs a `name` or a `discord` id",
-                    n + 1
+                    "configuration: person {} needs a `name` or a `{}` id",
+                    n + 1,
+                    door.id()
                 ));
             };
             let entry = Person {
@@ -243,6 +351,7 @@ impl Config {
                 invited: person.invited,
                 name: name.clone(),
                 discord,
+                matrix,
             };
             // Zwei Einträge zur selben Person wären ein Versehen oder ein Widerspruch.
             if people.insert(key.clone(), entry).is_some() {
@@ -260,11 +369,13 @@ impl Config {
         // Kennung braucht der Fisch in jedem Fall: an ihr erkennt er an der
         // Tür, wer der Gastgeber ist, und an sie schickt er dessen Hinweise.
         let host_written = raw.host.trim().to_owned();
-        let host = points_at(&host_written, "host", &names)?;
-        if !is_id(&host) {
+        let host = points_at(&host_written, "host", door, &names)?;
+        if !door.is_user_id(&host) {
             return Err(format!(
-                "configuration: the host {host_written:?} needs a Discord id: add \
-                 `discord = \"...\"` to that `[[person]]`"
+                "configuration: the host {host_written:?} needs a {} id: add \
+                 `{} = \"...\"` to that `[[person]]`",
+                door.label(),
+                door.id()
             ));
         }
         if raw.rooms.is_empty() {
@@ -279,25 +390,49 @@ impl Config {
             }
             let mut seats = Vec::new();
             for seat in room.seats {
-                let channel = match (filled(seat.discord.as_deref()), filled(seat.channel.as_deref()))
-                {
+                let at_discord =
+                    match (filled(seat.discord.as_deref()), filled(seat.channel.as_deref())) {
+                        (Some(_), Some(_)) => {
+                            return Err(format!(
+                                "configuration: a seat in room {} has both `discord` and \
+                                 `channel`; `channel` is the old word for `discord`, give one of \
+                                 them",
+                                n + 1
+                            ));
+                        }
+                        (Some(id), None) => Some((id, "discord")),
+                        (None, Some(id)) => Some((id, "channel")),
+                        (None, None) => None,
+                    };
+                let (seat_door, channel) = match (at_discord, filled(seat.matrix.as_deref())) {
                     (Some(_), Some(_)) => {
                         return Err(format!(
-                            "configuration: a seat in room {} has both `discord` and `channel`; \
-                             `channel` is the old word for `discord`, give one of them",
+                            "configuration: a seat in room {} has both `discord` and `matrix`; a \
+                             seat stands at one door",
                             n + 1
                         ));
                     }
-                    (Some(id), None) => discord_id(id, "discord")?,
-                    (None, Some(id)) => discord_id(id, "channel")?,
+                    (Some((id, field)), None) => (Door::Discord, discord_id(id, field)?),
+                    (None, Some(id)) => (Door::Matrix, matrix_room_id(id, "matrix")?),
                     (None, None) => {
                         return Err(format!(
                             "configuration: a seat in room {} needs `discord`, the id of its \
-                             Discord channel",
+                             Discord channel, or `matrix`, the id of its Matrix room",
                             n + 1
                         ));
                     }
                 };
+                // Ein Profil, eine Tür (siehe die benannten Grenzen oben).
+                if seat_door != door {
+                    return Err(format!(
+                        "configuration: room {} has a seat at {}, but the first seat of this \
+                         profile is at {}; a profile serves one door so far, make a second \
+                         profile for the other door",
+                        n + 1,
+                        seat_door.label(),
+                        door.label()
+                    ));
+                }
                 let lang = seat.lang.trim().to_owned();
                 if lang.is_empty() {
                     return Err(format!("configuration: `lang` is empty for channel {channel}"));
@@ -311,7 +446,7 @@ impl Config {
                 let owner_written = filled(seat.owner.as_deref()).map(str::to_owned);
                 let owner = match &owner_written {
                     None => None,
-                    Some(who) => Some(points_at(who, "owner", &names)?),
+                    Some(who) => Some(points_at(who, "owner", door, &names)?),
                 };
                 seats.push(at_the_table(&channel, &lang, gender, owner.as_deref(), &host, &people));
                 written.insert(channel, Written { lang, gender, owner, owner_written });
@@ -352,6 +487,7 @@ impl Config {
             provider,
             model,
             base_url,
+            door,
             host,
             host_written,
             ai_names,
@@ -483,7 +619,7 @@ impl Config {
         match self.owner_of(channel) {
             None => true,
             Some(owner) => {
-                self.people.get(owner).is_some_and(|p| p.invited && p.discord.is_none())
+                self.people.get(owner).is_some_and(|p| p.invited && p.id_at(self.door).is_none())
             }
         }
     }
@@ -617,31 +753,74 @@ fn read_person_name(value: Option<&str>) -> Result<Option<String>, String> {
              an id"
         ));
     }
+    // Dasselbe für die Kennung an der Matrix-Tür: sie beginnt mit `@`.
+    if name.starts_with('@') {
+        return Err(format!(
+            "configuration: the name {name:?} starts with @; that would be taken for a Matrix id"
+        ));
+    }
     // In einer Zeile: der Name steht in Listen und Auswahlfeldern der Maske.
     Ok(Some(name.split_whitespace().collect::<Vec<_>>().join(" ")))
 }
 
 /// Auf wen `host` oder `owner` zeigt: der Schlüssel des Menschen.
 ///
-/// Ziffern sind eine Discord-Kennung, wie von Anfang an; dieser Mensch muss
-/// nicht unter `[[person]]` stehen. Alles andere ist ein Name und muss dort
-/// stehen, sonst wäre ein Tippfehler ein Tisch für niemanden.
+/// Eine Kennung an der Tür des Profils gilt, wie von Anfang an die Ziffern
+/// von Discord; dieser Mensch muss nicht unter `[[person]]` stehen. Alles
+/// andere ist ein Name und muss dort stehen, sonst wäre ein Tippfehler ein
+/// Tisch für niemanden.
 fn points_at(
     value: &str,
     field: &str,
+    door: Door,
     names: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     let value = value.trim();
-    if is_id(value) {
-        return discord_id(value, field);
+    if door.is_user_id(value) {
+        return door.user_id(value, field);
     }
     let name = value.split_whitespace().collect::<Vec<_>>().join(" ");
     names.get(&name).cloned().ok_or_else(|| {
         format!(
-            "configuration: `{field}` must be the name of a `[[person]]` or a Discord id (digits \
-             only, not zero), got {value:?}"
+            "configuration: `{field}` must be the name of a `[[person]]` or a {} id ({}), got \
+             {value:?}",
+            door.label(),
+            door.user_id_shape()
         )
     })
+}
+
+/// Die Kennung eines Menschen bei Matrix: `@name:server`. Geprüft wird die
+/// Form, nicht, ob es das Konto gibt.
+fn matrix_user_id(value: &str, field: &str) -> Result<String, String> {
+    let value = value.trim();
+    let shaped = value
+        .strip_prefix('@')
+        .and_then(|rest| rest.split_once(':'))
+        .is_some_and(|(name, server)| !name.is_empty() && !server.is_empty());
+    if shaped && !value.chars().any(char::is_whitespace) {
+        Ok(value.to_owned())
+    } else {
+        Err(format!(
+            "configuration: `{field}` must be a Matrix user id like @name:server, got {value:?}"
+        ))
+    }
+}
+
+/// Die Kennung eines Raums bei Matrix: sie beginnt mit `!`. Neuere Räume
+/// tragen dahinter keinen Servernamen mehr, deshalb wird keiner verlangt. Ein
+/// Alias (`#name:server`) ist keine Kennung: er kann morgen auf einen anderen
+/// Raum zeigen.
+fn matrix_room_id(value: &str, field: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.len() > 1 && value.starts_with('!') && !value.chars().any(char::is_whitespace) {
+        Ok(value.to_owned())
+    } else {
+        Err(format!(
+            "configuration: `{field}` must be the internal id of a Matrix room, which starts \
+             with ! (not its #alias), got {value:?}"
+        ))
+    }
 }
 
 /// Discord-Kennungen sind Zahlen. Ein Kanalname wie "#general" ist keine.

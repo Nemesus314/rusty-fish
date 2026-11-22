@@ -72,8 +72,8 @@ pub struct DocRoom {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DocSeat {
-    /// Die Tür, zu der dieser Tisch gehört. Bisher gibt es nur "discord";
-    /// fehlt die Angabe, gilt sie.
+    /// Die Tür, zu der dieser Tisch gehört: "discord" oder "matrix". Fehlt
+    /// die Angabe, gilt "discord".
     #[serde(default = "default_door")]
     pub door: String,
     /// Die Kennung des Kanals an dieser Tür.
@@ -83,7 +83,8 @@ pub struct DocSeat {
     #[serde(default)]
     pub gender: Option<String>,
     /// Der Mensch, dessen Tisch das ist: sein Name, wie unter `people`, oder
-    /// seine Discord-Kennung. `null`, wenn der Tisch niemandem gehört.
+    /// seine Kennung an der Tür des Profils. `null`, wenn der Tisch niemandem
+    /// gehört.
     #[serde(default)]
     pub owner: Option<String>,
     /// Schreibt dieser Fisch an diesen Tisch? Berechnet, nicht eingestellt:
@@ -105,6 +106,9 @@ pub struct DocPerson {
     /// das Feld `id`; so wird es weiter angenommen.
     #[serde(default, alias = "id")]
     pub discord: Option<String>,
+    /// Die Kennung an der Matrix-Tür, etwa "@robin:example.org", oder `null`.
+    #[serde(default)]
+    pub matrix: Option<String>,
     /// `null`, "female" oder "male".
     #[serde(default)]
     pub gender: Option<String>,
@@ -126,6 +130,7 @@ impl DocPerson {
         DocPerson {
             name: None,
             discord: Some(id.to_owned()),
+            matrix: None,
             gender: None,
             lang: None,
             neutral: None,
@@ -203,7 +208,7 @@ impl From<&Config> for Document {
                             // "German" stehen hat, soll das wiederfinden.
                             let written = config.written.get(&seat.channel);
                             DocSeat {
-                                door: default_door(),
+                                door: config.door.id().to_owned(),
                                 channel: seat.channel.clone(),
                                 lang: written.map_or_else(|| seat.lang.clone(), |w| w.lang.clone()),
                                 gender: written
@@ -225,6 +230,7 @@ impl From<&Config> for Document {
                 .map(|person| DocPerson {
                     name: person.name.clone(),
                     discord: person.discord.clone(),
+                    matrix: person.matrix.clone(),
                     gender: person.gender.map(|g| gender_word(g).to_owned()),
                     lang: person.lang.clone(),
                     neutral: person.neutral.clone(),
@@ -301,6 +307,9 @@ impl Document {
             }
             if let Some(id) = person.discord.as_deref().filter(|d| !d.trim().is_empty()) {
                 out.push_str(&format!("discord = {}\n", quote(id)));
+            }
+            if let Some(id) = person.matrix.as_deref().filter(|m| !m.trim().is_empty()) {
+                out.push_str(&format!("matrix = {}\n", quote(id)));
             }
             if let Some(gender) = &person.gender {
                 out.push_str(&format!("gender = {}\n", quote(gender)));

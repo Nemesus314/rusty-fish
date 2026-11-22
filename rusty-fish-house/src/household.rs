@@ -15,11 +15,10 @@ use crate::config::Config;
 use crate::invite::{Due, due};
 use crate::state::Store;
 use crate::texts::{
-    KEEP_LABEL, budget_notice, consent_text, consent_text_in, nothing_to_raise, raise_label,
-    raised_notice,
+    KEEP_LABEL, budget_notice, consent_text_at, nothing_to_raise, raise_label, raised_notice,
 };
 use rusty_fish_core::{Model, Outcome, Request, translate};
-use rusty_fish_room::tongue::known_tongue;
+use rusty_fish_room::tongue::{Tongue, known_tongue};
 use rusty_fish_room::{
     Delivery, House, Incoming, Mark, Metered, RoomState, Sender, Tally, budget_ran_out, converse,
 };
@@ -391,10 +390,12 @@ async fn consent_request<M: Model + Sync>(
 ) -> String {
     let config = terms.config;
     let lang = config.lang_of(channel).unwrap_or("English");
+    // Der Wortlaut hängt an der Tür: bei Matrix ist der Tisch ein Raum, und
+    // der Server gehört nicht dem Gastgeber.
     if let Some(tongue) = known_tongue(lang) {
-        return consent_text_in(tongue, terms.service);
+        return consent_text_at(config.door, tongue, terms.service);
     }
-    let base = consent_text(terms.service);
+    let base = consent_text_at(config.door, Tongue::English, terms.service);
     let request = Request {
         speaker: "fish",
         text: &base,

@@ -694,9 +694,9 @@ mod tests {
         assert_eq!(
             tea["people"],
             json!([
-                {"name": null, "discord": "42", "gender": "male", "lang": "German", "neutral": null, "invited": false},
-                {"name": null, "discord": "9", "gender": null, "lang": "Русский", "neutral": ["English"], "invited": true},
-                {"name": null, "discord": "11", "gender": null, "lang": "Korean", "neutral": null, "invited": false},
+                {"name": null, "discord": "42", "matrix": null, "gender": "male", "lang": "German", "neutral": null, "invited": false},
+                {"name": null, "discord": "9", "matrix": null, "gender": null, "lang": "Русский", "neutral": ["English"], "invited": true},
+                {"name": null, "discord": "11", "matrix": null, "gender": null, "lang": "Korean", "neutral": null, "invited": false},
             ])
         );
         clean(&f);
@@ -763,7 +763,7 @@ mod tests {
         }
         assert_eq!(
             tea["people"],
-            json!([{"name": null, "discord": "100", "gender": "male", "lang": null, "neutral": null, "invited": false}])
+            json!([{"name": null, "discord": "100", "matrix": null, "gender": "male", "lang": null, "neutral": null, "invited": false}])
         );
 
         let doc = f.show("tea").unwrap();

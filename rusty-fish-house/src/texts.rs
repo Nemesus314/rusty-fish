@@ -3,6 +3,7 @@
 //! Wie ein Text an einer Tür aussieht (eine graue Zeile, ein Knopf, die
 //! Länge einer Nachricht), entscheidet die Tür. Hier steht nur der Wortlaut.
 
+use crate::config::Door;
 use rusty_fish_room::tongue::Tongue;
 use rusty_fish_room::{BUDGET_USED_UP, Mark, Reason};
 
@@ -92,16 +93,66 @@ pub fn service_name(base_url: &str) -> String {
 /// dass der Gastgeber den KI-Dienst gewählt hat, und nennt ihn. Wer zustimmt,
 /// soll wissen, wohin seine Sätze gehen.
 pub fn consent_text(service: &str) -> String {
-    // Bis zum 19.11.2026 hieß es nur „an AI translates in between. To do
-    // that, the AI reads what you write here", ohne zu sagen, wessen KI.
-    format!(
-        "Hello! I am Rusty Fish, a translation bot. In this channel everyone writes in their \
-         own language, and an AI translates in between. The AI is an outside service chosen by \
-         the host of this server ({service}). To translate, it reads what you write here. \
-         Nothing you write is sent to it before you agree. Press OK to agree. Until then your \
-         messages are passed on untranslated; once you agree, the last of them are translated \
-         after all."
-    )
+    consent_text_at(Door::Discord, Tongue::English, service)
+}
+
+/// Die Wörter, in denen sich die festen Texte je Tür unterscheiden.
+///
+/// Seit dem 22.11.2026, mit der Matrix-Tür. Bei Discord steht ein Tisch in
+/// einem Kanal auf dem Server des Gastgebers. Bei Matrix ist er ein Raum, und
+/// der Server gehört meist jemand anderem: „der Gastgeber dieses Servers"
+/// würde dort auf den Falschen zeigen. Der Knopf „OK" ist bei Matrix ein
+/// Zeichen unter der Nachricht, das man antippt.
+struct Words {
+    /// „In diesem Kanal", am Satzanfang.
+    here: &'static str,
+    /// Wer den KI-Dienst gewählt hat, eingepasst in den Satz der Sprache.
+    chosen_by: &'static str,
+    /// „Drücke OK".
+    press: &'static str,
+    /// „dieses Kanals", als Genitiv hinter „Sprache".
+    of_here: &'static str,
+}
+
+fn words(door: Door, tongue: Tongue) -> Words {
+    match (door, tongue) {
+        (Door::Discord, Tongue::English) => Words {
+            here: "In this channel",
+            chosen_by: "the host of this server",
+            press: "Press OK",
+            of_here: "of this channel",
+        },
+        (Door::Matrix, Tongue::English) => Words {
+            here: "In this room",
+            chosen_by: "the host who runs this bot",
+            press: "Press OK below this message",
+            of_here: "of this room",
+        },
+        (Door::Discord, Tongue::German) => Words {
+            here: "In diesem Kanal",
+            chosen_by: "den der Gastgeber dieses Servers gewählt hat",
+            press: "Drücke OK",
+            of_here: "dieses Kanals",
+        },
+        (Door::Matrix, Tongue::German) => Words {
+            here: "In diesem Raum",
+            chosen_by: "den der Gastgeber gewählt hat, der diesen Bot betreibt",
+            press: "Drücke OK unter dieser Nachricht",
+            of_here: "dieses Raums",
+        },
+        (Door::Discord, Tongue::Russian) => Words {
+            here: "В этом канале",
+            chosen_by: "хозяин этого сервера",
+            press: "Нажми OK",
+            of_here: "этого канала",
+        },
+        (Door::Matrix, Tongue::Russian) => Words {
+            here: "В этой комнате",
+            chosen_by: "хозяин этого бота",
+            press: "Нажми OK под этим сообщением",
+            of_here: "этой комнаты",
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,22 +235,38 @@ fn budget_used_up(tongue: Tongue) -> Option<&'static str> {
 /// Im Russischen ohne Vergangenheitsform des Schreibens: die hätte ein
 /// Geschlecht, und der Fisch weiß nicht, wer liest.
 pub fn consent_text_in(tongue: Tongue, service: &str) -> String {
+    consent_text_at(Door::Discord, tongue, service)
+}
+
+/// Die Bitte um Zustimmung, wie sie an dieser Tür lautet. Für Discord ist es
+/// Wort für Wort [`consent_text_in`]; die Unterschiede stehen in [`Words`].
+pub fn consent_text_at(door: Door, tongue: Tongue, service: &str) -> String {
+    let Words { here, chosen_by, press, .. } = words(door, tongue);
     match tongue {
-        Tongue::English => consent_text(service),
+        // Bis zum 19.11.2026 hieß es nur „an AI translates in between. To do
+        // that, the AI reads what you write here", ohne zu sagen, wessen KI.
+        Tongue::English => format!(
+            "Hello! I am Rusty Fish, a translation bot. {here} everyone writes in their \
+             own language, and an AI translates in between. The AI is an outside service chosen \
+             by {chosen_by} ({service}). To translate, it reads what you write here. \
+             Nothing you write is sent to it before you agree. {press} to agree. Until then \
+             your messages are passed on untranslated; once you agree, the last of them are \
+             translated after all."
+        ),
         Tongue::German => format!(
-            "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. In diesem Kanal schreibt jeder in \
+            "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. {here} schreibt jeder in \
              seiner eigenen Sprache, und eine KI übersetzt dazwischen. Die KI ist ein fremder \
-             Dienst, den der Gastgeber dieses Servers gewählt hat ({service}). Zum Übersetzen \
+             Dienst, {chosen_by} ({service}). Zum Übersetzen \
              liest sie, was du hier schreibst. Nichts von dem, was du schreibst, geht an sie, \
-             bevor du zustimmst. Drücke OK, um zuzustimmen. Bis dahin werden deine Nachrichten \
+             bevor du zustimmst. {press}, um zuzustimmen. Bis dahin werden deine Nachrichten \
              unübersetzt weitergegeben; nach deiner Zustimmung werden die letzten nachträglich \
              übersetzt."
         ),
         Tongue::Russian => format!(
-            "Привет! Я Rusty Fish, бот-переводчик. В этом канале каждый пишет на своём языке, а \
-             ИИ переводит. ИИ — это внешний сервис, который выбрал хозяин этого сервера \
+            "Привет! Я Rusty Fish, бот-переводчик. {here} каждый пишет на своём языке, а \
+             ИИ переводит. ИИ — это внешний сервис, который выбрал {chosen_by} \
              ({service}). Чтобы переводить, он читает то, что ты здесь пишешь. Ничего из того, \
-             что ты пишешь, не отправляется ему, пока ты не согласишься. Нажми OK, чтобы \
+             что ты пишешь, не отправляется ему, пока ты не согласишься. {press}, чтобы \
              согласиться. До тех пор твои сообщения передаются без перевода; после твоего \
              согласия последние из них будут переведены."
         ),
@@ -221,35 +288,45 @@ pub fn consent_text_in(tongue: Tongue, service: &str) -> String {
 /// Im Russischen steht deshalb mit Namen die Gegenwart („приглашает"), ohne
 /// Namen die unpersönliche Form („тебя пригласили").
 pub fn invitation(tongue: Tongue, host: Option<&str>) -> String {
-    // Für den, der es liest, ist sein Tisch ein Kanal; so nennt ihn auch die
-    // Bitte um Zustimmung.
+    invitation_at(Door::Discord, tongue, host)
+}
+
+/// Die Mitteilung an einen Eingeladenen, wie sie an dieser Tür lautet. Für
+/// Discord ist es Wort für Wort [`invitation`].
+pub fn invitation_at(door: Door, tongue: Tongue, host: Option<&str>) -> String {
+    // Für den, der es liest, ist sein Tisch ein Kanal oder ein Raum; so nennt
+    // ihn auch die Bitte um Zustimmung.
+    let of_here = words(door, tongue).of_here;
     match (tongue, shown_name(host)) {
         (Tongue::German, Some(host)) => format!(
             "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. {host} hat dich eingeladen: Ab jetzt \
-             erscheint hier, was die anderen schreiben, in der Sprache dieses Kanals. Die Kosten \
+             erscheint hier, was die anderen schreiben, in der Sprache {of_here}. Die Kosten \
              der Übersetzung trägt {host}."
         ),
-        (Tongue::German, None) => "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. Du bist \
-             eingeladen: Ab jetzt erscheint hier, was die anderen schreiben, in der Sprache dieses \
-             Kanals. Die Kosten der Übersetzung trägt, wer dich eingeladen hat."
-            .to_owned(),
+        (Tongue::German, None) => format!(
+            "Hallo! Ich bin Rusty Fish, ein Übersetzungsbot. Du bist \
+             eingeladen: Ab jetzt erscheint hier, was die anderen schreiben, in der Sprache \
+             {of_here}. Die Kosten der Übersetzung trägt, wer dich eingeladen hat."
+        ),
         (Tongue::English, Some(host)) => format!(
             "Hello! I am Rusty Fish, a translation bot. {host} has invited you: from now on, what \
-             the others write appears here in the language of this channel. The translation is \
+             the others write appears here in the language {of_here}. The translation is \
              paid for by {host}."
         ),
-        (Tongue::English, None) => "Hello! I am Rusty Fish, a translation bot. You have been \
-             invited: from now on, what the others write appears here in the language of this \
-             channel. The translation is paid for by the person who invited you."
-            .to_owned(),
+        (Tongue::English, None) => format!(
+            "Hello! I am Rusty Fish, a translation bot. You have been \
+             invited: from now on, what the others write appears here in the language \
+             {of_here}. The translation is paid for by the person who invited you."
+        ),
         (Tongue::Russian, Some(host)) => format!(
             "Привет! Я Rusty Fish, бот-переводчик. {host} приглашает тебя: теперь всё, что пишут \
-             остальные, появляется здесь на языке этого канала. Перевод оплачивает {host}."
+             остальные, появляется здесь на языке {of_here}. Перевод оплачивает {host}."
         ),
-        (Tongue::Russian, None) => "Привет! Я Rusty Fish, бот-переводчик. Тебя пригласили: теперь \
-             всё, что пишут остальные, появляется здесь на языке этого канала. Перевод оплачивает \
+        (Tongue::Russian, None) => format!(
+            "Привет! Я Rusty Fish, бот-переводчик. Тебя пригласили: теперь \
+             всё, что пишут остальные, появляется здесь на языке {of_here}. Перевод оплачивает \
              тот, кто тебя пригласил."
-            .to_owned(),
+        ),
     }
 }
 
@@ -265,4 +342,33 @@ fn shown_name(name: Option<&str>) -> Option<String> {
         return None;
     }
     Some(one_line.chars().take(80).collect())
+}
+
+/// Teilt einen Text in Stücke von höchstens `limit` Zeichen, so lang, wie
+/// eine Tür sie annimmt. Nichts geht verloren.
+pub fn chunks(text: &str, limit: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let rest = chars.len() - start;
+        let mut len = rest.min(limit);
+        if rest > limit {
+            // Lieber an einem Zeilenende oder Leerzeichen trennen als mitten im
+            // Wort, solange das Stück dadurch nicht winzig wird.
+            let window = &chars[start..start + limit];
+            let cut = window
+                .iter()
+                .rposition(|c| *c == '\n')
+                .or_else(|| window.iter().rposition(|c| *c == ' '));
+            if let Some(i) = cut {
+                if i + 1 >= limit / 2 {
+                    len = i + 1;
+                }
+            }
+        }
+        parts.push(chars[start..start + len].iter().collect());
+        start += len;
+    }
+    parts
 }

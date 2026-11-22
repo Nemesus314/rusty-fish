@@ -4,6 +4,11 @@
 //! Dienstes, dazu der Token des Discord-Bots. Die Namen kommen aus der Liste
 //! der Dienste und werden hier nicht noch einmal abgetippt.
 //!
+//! Seit dem 22.11.2026 liegt dort auch der Zugang zum Matrix-Konto des Fischs.
+//! Er ist kein Geheimnis, das man einfügt: er entsteht bei der Anmeldung
+//! (`rusty-fish matrix login`) und vergeht bei der Abmeldung. Deshalb steht er
+//! nicht unter den Einträgen von `key set`, wohl aber in der Auskunft, was liegt.
+//!
 //! Entschieden von Nemesus am 20.11.2026: „Die Möglichkeit, die KIs im Profil
 //! zu wechseln sollte jedoch erhalten bleiben." Mit nur einem Eintrag für den
 //! KI-Schlüssel hätte jeder Wechsel den Schlüssel des vorigen Dienstes ersetzt.
@@ -12,7 +17,11 @@ use crate::profiles::BOT;
 use rusty_fish_providers::Provider;
 use serde_json::Value;
 
-/// Alle Einträge: erst der Bot, dann die Dienste in der Reihenfolge der Liste.
+/// Der Eintrag, unter dem der Zugang zum Matrix-Konto des Fischs liegt.
+pub const MATRIX: &str = "matrix";
+
+/// Die Einträge, die man einfügt: erst der Bot, dann die Dienste in der
+/// Reihenfolge der Liste.
 pub fn entries() -> Vec<&'static str> {
     std::iter::once(BOT).chain(Provider::ALL.iter().map(|p| p.id())).collect()
 }
@@ -21,6 +30,9 @@ pub fn entries() -> Vec<&'static str> {
 pub fn label(entry: &str) -> String {
     if entry == BOT {
         return "Discord bot token".to_owned();
+    }
+    if entry == MATRIX {
+        return "Matrix account".to_owned();
     }
     match Provider::parse(entry) {
         Ok(provider) => format!("{} API key", provider.label()),
@@ -34,7 +46,7 @@ pub fn label(entry: &str) -> String {
 /// fragt die Ablage; als Parameter, damit die Tests sie nicht anfassen.
 pub fn status(stored: &dyn Fn(&str) -> Result<bool, String>) -> Result<Value, String> {
     let mut status = serde_json::Map::new();
-    for entry in entries() {
+    for entry in entries().into_iter().chain([MATRIX]) {
         status.insert(entry.to_owned(), Value::Bool(stored(entry)?));
     }
     Ok(Value::Object(status))
@@ -72,18 +84,28 @@ mod tests {
         assert_eq!(label("openai"), "ChatGPT (OpenAI) API key");
         assert_eq!(label("anthropic"), "Claude (Anthropic) API key");
         assert_eq!(label("custom"), "Own model or other service API key");
+        assert_eq!(label("matrix"), "Matrix account");
     }
 
     #[test]
     fn the_status_names_every_entry() {
         let status = status(&|entry| Ok(entry == "openai" || entry == "discord")).unwrap();
         let object = status.as_object().unwrap();
-        assert_eq!(object.len(), 6);
+        // Sechs, die man einfügt, und der Zugang zu Matrix.
+        assert_eq!(object.len(), 7);
         assert_eq!(status["openai"], true);
         assert_eq!(status["discord"], true);
-        for empty in ["xai", "google", "anthropic", "custom"] {
+        for empty in ["xai", "google", "anthropic", "custom", "matrix"] {
             assert_eq!(status[empty], false, "{empty}");
         }
+    }
+
+    #[test]
+    fn the_matrix_access_is_reported_but_never_pasted() {
+        // Er entsteht bei der Anmeldung; `key set` kennt ihn nicht.
+        assert!(!entries().contains(&MATRIX));
+        let status = status(&|entry| Ok(entry == MATRIX)).unwrap();
+        assert_eq!(status[MATRIX], true);
     }
 
     #[test]

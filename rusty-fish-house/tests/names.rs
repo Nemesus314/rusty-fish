@@ -229,8 +229,9 @@ fn a_form_may_still_say_id_and_must_not_name_a_door_that_is_not_built() {
     assert_eq!(doc.rooms[0].seats[0].door, "discord", "without a door, Discord is meant");
     doc.check().unwrap();
 
+    // Bis zum 22.11.2026 stand hier "matrix"; seitdem ist diese Tür gebaut.
     let mut elsewhere = doc.clone();
-    elsewhere.rooms[0].seats[1].door = "matrix".to_owned();
+    elsewhere.rooms[0].seats[1].door = "signal".to_owned();
     let err = elsewhere.check().unwrap_err();
-    assert!(err.contains("matrix") && err.contains("discord"), "got {err}");
+    assert!(err.contains("signal") && err.contains("discord, matrix"), "got {err}");
 }
