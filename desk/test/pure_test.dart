@@ -10,6 +10,7 @@ import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/desk_state.dart';
 import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/model.dart';
+import 'package:rusty_fish_desk/share.dart';
 import 'package:rusty_fish_desk/theme_choice.dart';
 
 void main() {
@@ -562,6 +563,101 @@ void main() {
         'Matrix ⇄ Matrix · end-to-end encrypted up to the fish',
       );
       expect(connectionHint, contains('AI service reads every message'));
+    });
+  });
+
+  group('rooms shared as text', () {
+    // Nemo ist der Gastgeber und hat Robin eingeladen.
+    ProfileDoc hosted() => const ProfileDoc(
+      name: 'tea',
+      provider: 'anthropic',
+      model: 'some-secret-choice',
+      baseUrl: null,
+      host: 'Nemo',
+      aiNames: ['Fish'],
+      limits: Limits(translationTokensPerDay: 777, questionsPerGuestPerDay: 3),
+      rooms: [
+        Room(
+          passThrough: ['English'],
+          contextLines: 4,
+          seats: [
+            Seat(channel: '111', lang: 'German', owner: 'Nemo', served: true),
+            Seat(channel: '222', lang: 'English', owner: 'Robin', gender: Gender.female),
+          ],
+        ),
+      ],
+      people: [
+        Person(id: '100', name: 'Nemo', lang: 'German', gender: Gender.male),
+        Person(id: '200', name: 'Robin', lang: 'Russian', neutral: ['English'], invited: true),
+      ],
+    );
+
+    test('what both fish must agree on goes out and comes back the same', () {
+      final shared = readSharedRooms(shareRoomsText(hosted()))!;
+      final seats = shared.rooms.single.seats;
+      expect(seats.map((s) => s.channel), ['111', '222']);
+      expect(seats.map((s) => s.lang), ['German', 'English']);
+      expect(seats.map((s) => s.owner), ['Nemo', 'Robin']);
+      expect(seats.map((s) => s.door), ['discord', 'discord']);
+      expect(seats[1].gender, Gender.female);
+      expect(shared.rooms.single.passThrough, ['English']);
+      expect(shared.people.map((p) => p.name), ['Nemo', 'Robin']);
+      expect(shared.people.map((p) => p.id), ['100', '200']);
+      expect(shared.people[1].lang, 'Russian');
+      expect(shared.people[1].neutral, ['English']);
+    });
+
+    test('what belongs to each fish alone stays at home', () {
+      final text = shareRoomsText(hosted());
+      // Wer eingeladen ist, wer der Gastgeber ist, welche KI, welche Grenzen.
+      for (final private in [
+        'invited',
+        'host',
+        'anthropic',
+        'some-secret-choice',
+        'Fish',
+        '777',
+        'context_lines',
+        'served',
+      ]) {
+        expect(text, isNot(contains(private)), reason: private);
+      }
+      final shared = readSharedRooms(text)!;
+      expect(shared.people.every((p) => !p.invited), isTrue);
+      // Wie viel Kontext die KI sieht, kostet und gehört jedem Fisch selbst.
+      expect(shared.rooms.single.contextLines, 10);
+    });
+
+    test('an invitation in a text someone else wrote is not taken over', () {
+      final forged = shareRoomsText(hosted()).replaceFirst(
+        '"name": "Robin",',
+        '"name": "Robin", "invited": true,',
+      );
+      expect(forged, contains('"invited": true'));
+      expect(readSharedRooms(forged)!.people.every((p) => !p.invited), isTrue);
+    });
+
+    test('the text is still read with a greeting around it or inside a code block', () {
+      final text = shareRoomsText(hosted());
+      expect(readSharedRooms('Here you go:\n```\n$text\n```\nSee you!'), isNotNull);
+      expect(readSharedRooms('   \n$text\n\n'), isNotNull);
+    });
+
+    test('what is no room text is refused instead of half read', () {
+      expect(readSharedRooms(''), isNull);
+      expect(readSharedRooms('hello'), isNull);
+      expect(readSharedRooms('{}'), isNull);
+      expect(readSharedRooms('{"rusty_fish_rooms": 1, "rooms": []}'), isNull);
+      expect(readSharedRooms('{"rusty_fish_rooms": 2, "rooms": [{"seats": []}]}'), isNull);
+      // Ein Raum mit einem einzigen Tisch ist kein Gespräch.
+      expect(
+        readSharedRooms(
+          '{"rusty_fish_rooms": 1, "rooms": [{"seats": [{"channel": "1", "lang": "German"}]}]}',
+        ),
+        isNull,
+      );
+      // Ein Programm hat die Anführungszeichen verschönert.
+      expect(readSharedRooms(shareRoomsText(hosted()).replaceAll('"', '“')), isNull);
     });
   });
 

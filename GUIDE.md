@@ -146,6 +146,15 @@ account there.
    Discord. "Switch off", or closing the window, takes it offline. A profile
    that is saved while the fish is on is taken up at once.
 
+4. To join a room that someone else has already set up, with a fish of your
+   own, do not type their numbers. Ask them to press "Share rooms" on the
+   card of their profile and to send you the text. In your new profile, under
+   "Rooms", press "Paste rooms someone shared with you", paste the text and
+   say which of the people you are. That fills in the tables and the people.
+   The text holds the channels, the Discord ids and the names from their
+   profile; no key, no token, and nothing about their AI. You still choose
+   your own AI service, your own model and your own call name.
+
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 `rusty-fish run --all`, which serves every profile as the window does.

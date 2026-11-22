@@ -14,6 +14,7 @@ import 'editor.dart';
 import 'log_file.dart';
 import 'model.dart';
 import 'secrets.dart';
+import 'share.dart';
 import 'start.dart';
 import 'theme_choice.dart';
 
@@ -99,6 +100,19 @@ class _OverviewPageState extends State<OverviewPage> {
     } else if (request.secrets) {
       await _secrets();
     }
+  }
+
+  /// Legt die Räume eines Profils als Text in die Zwischenablage.
+  Future<void> _shareRooms(ProfileEntry entry) async {
+    final doc = entry.doc;
+    if (doc == null) {
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: shareRoomsText(doc)));
+    _say(
+      'Rooms copied. The text holds the channels, the Discord ids and the names from '
+      'this profile. No key, no token, nothing about your AI.',
+    );
   }
 
   void _say(String message) {
@@ -410,6 +424,7 @@ class _OverviewPageState extends State<OverviewPage> {
                                 onSecrets: _secrets,
                                 onEdit: () => _edit(entry.name),
                                 onDuplicate: () => _duplicate(entry.name),
+                                onShare: () => _shareRooms(entry),
                                 onDelete: () => _delete(entry.name),
                               ),
                           ],
@@ -496,8 +511,13 @@ class _ProfileCard extends StatelessWidget {
     required this.onSecrets,
     required this.onEdit,
     required this.onDuplicate,
+    required this.onShare,
     required this.onDelete,
   });
+
+  /// Legt die Räume dieses Profils als Text in die Zwischenablage, für
+  /// jemanden, der seinen eigenen Fisch mitbringt.
+  final VoidCallback onShare;
 
   final ProfileEntry entry;
   final DeskState state;
@@ -668,6 +688,16 @@ class _ProfileCard extends StatelessWidget {
                   OutlinedButton(
                     onPressed: onDuplicate,
                     child: const Text('Duplicate'),
+                  ),
+                  Tooltip(
+                    message:
+                        'Copies the rooms of this profile as text, for someone who brings '
+                        'a fish of their own. They paste it into a new profile.',
+                    child: OutlinedButton(
+                      key: ValueKey('share-${entry.name}'),
+                      onPressed: onShare,
+                      child: const Text('Share rooms'),
+                    ),
                   ),
                 ],
                 Tooltip(

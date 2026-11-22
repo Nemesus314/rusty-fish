@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
 import 'model.dart';
+import 'paste_rooms.dart';
 
 class ProfileEditorPage extends StatefulWidget {
   const ProfileEditorPage({
@@ -210,18 +211,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _aiNames = [for (final name in doc.aiNames) TextEditingController(text: name)];
     _rooms = [for (final room in doc.rooms) _RoomDraft(room)];
     _people = [for (final person in doc.people) _watched(_PersonDraft(person))];
-    // Ein Profil kann mit dem Namen oder mit der Kennung auf einen Menschen
-    // zeigen. Im Formular zeigt jeder Tisch einheitlich mit [_PersonDraft.ref]
-    // auf seinen Besitzer, damit die Auswahl ihn findet.
-    for (final seat in _rooms.expand((room) => room.seats)) {
-      for (final person in _people) {
-        final owner = seat.owner;
-        if (owner.isNotEmpty && (owner == person.name.text.trim() || owner == person.id.text.trim())) {
-          seat.owner = person.ref;
-          break;
-        }
-      }
-    }
+    _pointSeatsAtPeople();
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
     // Die Auswahl „Whose table" nennt den Gastgeber mit seiner Kennung, und
@@ -240,6 +230,57 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     if (_modelFromOtherService && mounted) {
       setState(() => _modelFromOtherService = false);
     }
+  }
+
+  /// Ein Profil kann mit dem Namen oder mit der Kennung auf einen Menschen
+  /// zeigen. Im Formular zeigt jeder Tisch einheitlich mit [_PersonDraft.ref]
+  /// auf seinen Besitzer, damit die Auswahl ihn findet.
+  void _pointSeatsAtPeople() {
+    for (final seat in _rooms.expand((room) => room.seats)) {
+      for (final person in _people) {
+        final owner = seat.owner;
+        if (owner.isNotEmpty &&
+            (owner == person.name.text.trim() || owner == person.id.text.trim())) {
+          seat.owner = person.ref;
+          break;
+        }
+      }
+    }
+  }
+
+  /// Setzt Räume ein, die jemand weitergegeben hat, samt den Menschen an
+  /// ihren Tischen. Was bis dahin im Formular an Räumen und Menschen stand,
+  /// wird ersetzt: zwei Fische in einem Raum müssen denselben Raum eintragen.
+  ///
+  /// Niemand ist danach eingeladen, und wer der Gastgeber ist, hat der
+  /// Einfügende im Dialog selbst gesagt.
+  Future<void> _pasteRooms() async {
+    final pasted = await showDialog<PastedRooms>(
+      context: context,
+      builder: (_) => const PasteRoomsDialog(),
+    );
+    if (pasted == null || !mounted) {
+      return;
+    }
+    setState(() {
+      for (final room in _rooms) {
+        room.dispose();
+      }
+      for (final person in _people) {
+        person.dispose();
+      }
+      _rooms
+        ..clear()
+        ..addAll([for (final room in pasted.shared.rooms) _RoomDraft(room)]);
+      _people
+        ..clear()
+        ..addAll([for (final person in pasted.shared.people) _watched(_PersonDraft(person))]);
+      _pointSeatsAtPeople();
+      final me = pasted.me;
+      if (me != null) {
+        _host.text = me;
+      }
+    });
   }
 
   final _roomsKey = GlobalKey();
@@ -914,7 +955,19 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           'those of people you invited.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
-        const SizedBox(height: 12),
+        // Wer mit dem eigenen Fisch in den Raum eines anderen kommt, muss
+        // denselben Raum eintragen. Abtippen heißt: ein Zahlendreher, und
+        // nichts passt, ohne dass etwas es sagt. Deshalb einfügen.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            key: const ValueKey('paste-rooms'),
+            onPressed: _pasteRooms,
+            icon: const Icon(Icons.content_paste, size: 18),
+            label: const Text('Paste rooms someone shared with you'),
+          ),
+        ),
+        const SizedBox(height: 4),
         for (final (r, room) in _rooms.indexed) _room(r, room),
         Align(
           alignment: Alignment.centerLeft,

@@ -8,6 +8,7 @@ import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/main.dart';
 import 'package:rusty_fish_desk/model.dart';
+import 'package:rusty_fish_desk/share.dart';
 
 import 'fake_cli.dart';
 
@@ -1347,6 +1348,128 @@ void startRequests() {
       expect(inCard('home', find.text('AI runs on this PC · localhost:11434')), findsOneWidget);
       expect(inCard('old', find.textContaining('AI runs')), findsNothing);
       expect(inCard('old', find.textContaining('AI reads')), findsNothing);
+    });
+  });
+
+  group('rooms shared with someone who brings a fish of their own', () {
+    // Nemo ist der Gastgeber und hat Robin eingeladen.
+    FakeCli hosted() => FakeCli(
+      entries: [
+        entryOf(
+          docOf(
+            'tea',
+            people: const [
+              Person(id: '100', name: 'Nemo', lang: 'German'),
+              Person(id: '200', name: 'Robin', lang: 'Russian', invited: true),
+            ],
+            seats: const [
+              Seat(channel: '111', lang: 'German', owner: 'Nemo'),
+              Seat(channel: '222', lang: 'English', owner: 'Robin'),
+            ],
+          ),
+        ),
+        entryOf(docOf('study')),
+      ],
+    );
+
+    /// Fängt ab, was die Maske in die Zwischenablage legt.
+    List<String> clipboardOf(WidgetTester tester) {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add('${(call.arguments as Map)['text']}');
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      return copied;
+    }
+
+    testWidgets('one click on the card copies the rooms as text', (tester) async {
+      final copied = clipboardOf(tester);
+      await open(tester, hosted());
+      await tester.tap(find.byKey(const ValueKey('share-tea')));
+      await tester.pumpAndSettle();
+
+      final shared = readSharedRooms(copied.single)!;
+      expect(shared.rooms.single.seats.map((s) => s.channel), ['111', '222']);
+      expect(shared.people.map((p) => p.name), ['Nemo', 'Robin']);
+      // Was im Text steht und was nicht, sagt die Maske dazu.
+      expect(find.textContaining('No key, no token'), findsOneWidget);
+    });
+
+    testWidgets('the other person pastes them and says who they are', (tester) async {
+      final copied = clipboardOf(tester);
+      final fake = hosted();
+      await open(tester, fake);
+      await tester.tap(find.byKey(const ValueKey('share-tea')));
+      await tester.pumpAndSettle();
+      final text = copied.single;
+
+      // Robin, am eigenen Rechner, trägt den Raum in ein eigenes Profil ein.
+      await tester.tap(inCard('study', find.text('Edit')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('shared-rooms-text')), text);
+      await tester.tap(find.byKey(const ValueKey('read-shared-rooms')));
+      await tester.pumpAndSettle();
+      expect(find.text('Found one room:'), findsOneWidget);
+      expect(find.text('Nemo · German ⇄ Robin · Russian'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('shared-me')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Robin').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('use-shared-rooms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      // Derselbe Raum, ohne einen einzigen abgetippten Buchstaben.
+      final seats = saved.rooms.single.seats;
+      expect(seats.map((s) => s.channel), ['111', '222']);
+      expect(seats.map((s) => s.owner), ['Nemo', 'Robin']);
+      expect(saved.people.map((p) => p.id), ['100', '200']);
+      // Robin ist hier der Gastgeber, und niemand ist eingeladen.
+      expect(saved.host, 'Robin');
+      expect(saved.people.every((p) => !p.invited), isTrue);
+    });
+
+    testWidgets('a text that is no room text says so and changes nothing', (tester) async {
+      final fake = hosted();
+      await open(tester, fake);
+      await tester.tap(inCard('study', find.text('Edit')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('shared-rooms-text')), 'hello there');
+      await tester.tap(find.byKey(const ValueKey('read-shared-rooms')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('This is not a room text'), findsOneWidget);
+      expect(find.byKey(const ValueKey('use-shared-rooms')), findsNothing);
+
+      // Der Knopf des Fensters, nicht der des Formulars dahinter.
+      await tester.tap(find.text('Cancel').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      // Das Profil ist geblieben, wie es war.
+      expect(fake.saved.single.rooms.single.seats.map((s) => s.channel), ['111', '222']);
+      expect(fake.saved.single.host, '100');
     });
   });
 
