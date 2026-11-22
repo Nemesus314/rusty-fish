@@ -234,9 +234,10 @@ Limits of the Matrix door:
   output of the program says so.
 - The login needs a server that accepts a password. A server that only
   offers a login through the browser is not served.
-- As of 22 November 2026 the Matrix door has been tested against a simulated
-  server only. A run in real rooms, encrypted ones included, is still to
-  come.
+- On 22 November 2026 the Matrix door translated between German and English
+  in two real, encrypted rooms at matrix.org. Not yet seen in a real room:
+  the request for agreement with its sign "OK", and the budget notice. Those
+  two have run against a simulated server only.
 
 ## Limits
 
