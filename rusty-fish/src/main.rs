@@ -17,7 +17,9 @@ mod stop;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
-use rusty_fish_core::{Gender, Outcome, Request, Secret, translate};
+use rusty_fish_core::{
+    Gender, Model, Outcome, Request, Secret, build_prompt, read_reply, translate,
+};
 use rusty_fish_house::config::Config;
 use rusty_fish_house::served::Profile as DoorProfile;
 use rusty_fish_providers::{AnyModel, Provider, catalog, connect};
@@ -85,6 +87,14 @@ enum Command {
         /// Address the reader informally, the way friends do
         #[arg(long)]
         informal: bool,
+        /// For measuring only: one more sentence for the AI, after the fish's
+        /// own instructions. So a hint can be tried with a real model before
+        /// it is built into a profile.
+        #[arg(long, hide = true)]
+        hint: Option<String>,
+        /// For measuring only: say on the error output what the call used.
+        #[arg(long, hide = true)]
+        tokens: bool,
         /// The text to translate
         text: String,
     },
@@ -390,6 +400,8 @@ async fn run(command: Command) -> Result<(), String> {
             writer,
             reader,
             informal,
+            hint,
+            tokens,
             text,
         } => {
             let fish = service(&provider, base_url.as_deref(), &model)?;
@@ -404,7 +416,25 @@ async fn run(command: Command) -> Result<(), String> {
                 reader_gender: reader.map(Who::gender),
                 informal,
             };
-            match translate(&fish, &request).await.map_err(|e| e.to_string())? {
+            // Zum Messen: derselbe Weg wie im Kern, Schritt für Schritt, mit
+            // einem Satz mehr im Auftrag. Seit dem 23.11.2026, für die Frage,
+            // ob ein Hinweis zur Anrede eine Übersetzung verlässlich ändert.
+            let outcome = if hint.is_some() || tokens {
+                let mut prompt = build_prompt(&request);
+                if let Some(hint) = hint.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
+                    prompt.system.push(' ');
+                    prompt.system.push_str(hint);
+                }
+                let reply = fish.complete(&prompt).await.map_err(|e| e.0)?;
+                if tokens {
+                    let used = reply.tokens.map_or_else(|| "?".to_owned(), |n| n.to_string());
+                    eprintln!("tokens: {used}");
+                }
+                read_reply(&reply.text, &request).map_err(|e| e.to_string())?
+            } else {
+                translate(&fish, &request).await.map_err(|e| e.to_string())?
+            };
+            match outcome {
                 Outcome::Translated(translation) => println!("{translation}"),
                 Outcome::Skip => println!("(nothing to translate)"),
             }
