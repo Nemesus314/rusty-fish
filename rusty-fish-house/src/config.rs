@@ -31,7 +31,7 @@
 
 use rusty_fish_providers::Provider;
 use rusty_fish_room::tongue::{Tongue, tongue_of};
-use rusty_fish_room::{Gender, Limits, Room, Seat};
+use rusty_fish_room::{Formality, Gender, Limits, Room, Seat};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -122,6 +122,12 @@ pub struct Person {
     pub matrix: Option<String>,
     /// Grammatisches Geschlecht, als Hinweis für die Grammatik.
     pub gender: Option<Gender>,
+    /// Wie dieser Mensch angesprochen wird, in dem, was er an seinem Tisch
+    /// liest: vertraut oder respektvoll. `None` heißt: wie im Original.
+    ///
+    /// Seit dem 23.11.2026, für Sprachen, die Freunde und Ältere verschieden
+    /// ansprechen (siehe `rusty_fish_core::Formality`).
+    pub formality: Option<Formality>,
     /// Die Muttersprache: in sie wird an seinem Tisch übersetzt.
     pub lang: Option<String>,
     /// Sprachen, die für diesen Menschen unübersetzt bleiben. `None` heißt: es
@@ -237,6 +243,9 @@ struct RawPerson {
     id: Option<String>,
     matrix: Option<String>,
     gender: Option<String>,
+    /// "familiar" oder "respectful"; fehlt die Angabe, folgt die Anrede dem
+    /// Original.
+    formality: Option<String>,
     lang: Option<String>,
     neutral: Option<Vec<String>>,
     #[serde(default)]
@@ -370,6 +379,7 @@ impl Config {
                 // Eintrag sonst nichts aussagte. Seit ein Mensch auch Sprache
                 // und Einladung trägt, ist es freiwillig wie die anderen.
                 gender: read_gender(person.gender.as_deref(), &format!("person {key}"))?,
+                formality: read_formality(person.formality.as_deref(), &format!("person {key}"))?,
                 lang: person.lang.map(|l| l.trim().to_owned()).filter(|l| !l.is_empty()),
                 neutral: person.neutral.map(clean_langs),
                 invited: person.invited,
@@ -750,6 +760,8 @@ fn at_the_table(
         // Gelesen wird am Tisch vom Besitzer. Kennt die Tür seine Anrede
         // nicht, fällt die Raum-Logik auf die des Platzes zurück.
         reader_gender: person.and_then(|p| p.gender),
+        // Wie der Besitzer angesprochen wird, gilt für das, was er hier liest.
+        reader_formality: person.and_then(|p| p.formality),
         neutral: person.and_then(|p| p.neutral.clone()),
         served,
     }
@@ -799,6 +811,22 @@ fn read_gender(value: Option<&str>, whose: &str) -> Result<Option<Gender>, Strin
         "male" => Ok(Some(Gender::Male)),
         _ => Err(format!(
             "configuration: `gender` for {whose} must be \"female\" or \"male\", got {value:?}"
+        )),
+    }
+}
+
+/// Liest die Angabe, wie ein Mensch angesprochen wird. Erlaubt sind
+/// "familiar" und "respectful"; fehlt sie oder ist sie leer, folgt die Anrede
+/// dem Original. Alles andere wird laut abgelehnt, damit ein Tippfehler nicht
+/// still zu „keine Angabe" wird.
+fn read_formality(value: Option<&str>, whose: &str) -> Result<Option<Formality>, String> {
+    let Some(value) = filled(value) else { return Ok(None) };
+    match value.to_ascii_lowercase().as_str() {
+        "familiar" => Ok(Some(Formality::Familiar)),
+        "respectful" => Ok(Some(Formality::Respectful)),
+        _ => Err(format!(
+            "configuration: `formality` for {whose} must be \"familiar\" or \"respectful\", got \
+             {value:?}; leave it out to follow what the writer wrote"
         )),
     }
 }

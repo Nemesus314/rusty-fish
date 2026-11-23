@@ -50,6 +50,32 @@ pub enum Gender {
     Male,
 }
 
+/// Wie ein Mensch angesprochen wird, in dem, was er liest. Eine freiwillige
+/// Angabe; ohne sie folgt die Anrede dem Original.
+///
+/// Nemesus am 23.11.2026: „Sollte der Bot nicht auch noch das Alter von
+/// Menschen wissen? Ich meine, in Korea redest du ja anders mit einer älteren
+/// Person als mit einer jüngeren." Gemessen am selben Tag mit `gpt-6-luna`,
+/// 29 Aufrufe, ein Lauf je Fall:
+/// - Deutsches „du" wird ohne Hinweis im Koreanischen zur vertrauten Form
+///   (2 von 3 Sätzen, der dritte kam höflich an); die Stufe schwankt.
+/// - Mit dem Hinweis „respektvoll" 3 von 3 höflich, zwei davon mit Ehrform;
+///   mit „vertraut" 3 von 3 vertraut. Japanisch je 1 von 1.
+/// - „Der Leser ist älter" wirkte genau wie „respektvoll", mehr nicht: kein
+///   Anredewort wie 오빠 in 4 von 4 Fällen. Deshalb steht hier die Anrede
+///   und nicht das Alter.
+///
+/// Nicht gemessen: andere Modelle und Anbieter, mehr als ein Lauf, ein
+/// Gespräch mit Kontextzeilen, und ob es für Muttersprachler natürlich
+/// klingt (abgelesen wurden nur die Formen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Formality {
+    /// Wie unter Freunden gleichen Alters.
+    Familiar,
+    /// Wie gegenüber Älteren oder Menschen, denen man nicht nahe ist.
+    Respectful,
+}
+
 /// Ein Übersetzungsauftrag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request<'a> {
@@ -78,6 +104,10 @@ pub struct Request<'a> {
     /// Nemesus am selben Tag: „Auf Du ändern". Für Sätze, die Menschen
     /// einander schreiben, bleibt das aus: dort folgt die Anrede dem Original.
     pub informal: bool,
+    /// Wie die Person angesprochen wird, die die Übersetzung liest, falls
+    /// der Gastgeber es für sie eingetragen hat. Ohne Angabe folgt die Anrede
+    /// dem Original, wie von Anfang an.
+    pub reader_formality: Option<Formality>,
 }
 
 /// Was an die KI geht.
@@ -339,6 +369,23 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
             " Address the reader informally, the way friends do (for example \"du\" in \
              German, \"ты\" in Russian).",
         );
+    }
+    // Wort für Wort die Sätze, die am 23.11.2026 gemessen wurden (siehe
+    // [`Formality`]). Ohne Angabe bleibt der Auftrag, wie er war.
+    match req.reader_formality {
+        Some(Formality::Respectful) => system.push_str(
+            " Where the text addresses the reader directly, the reader is to be addressed \
+             respectfully, the way one speaks to an elder or to someone one is not close to: \
+             use the polite or honorific forms of the target language where it has them. Use \
+             this only for forms of address and never mention it.",
+        ),
+        Some(Formality::Familiar) => system.push_str(
+            " Where the text addresses the reader directly, the reader is to be addressed in \
+             the familiar way, the way close friends of the same age speak: use the plain, \
+             familiar forms of the target language where it has them. Use this only for forms \
+             of address and never mention it.",
+        ),
+        None => {}
     }
 
     Prompt { system, user }

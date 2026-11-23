@@ -146,10 +146,14 @@ account there.
      the neutral language and how many earlier messages the AI sees for
      context.
    - People: for each person a name of your choosing, their Discord user ID,
-     mother tongue, neutral languages, grammatical form, and whether you
-     invite them. The name is only your label, so you can see whose table is
-     whose; it stays on your PC, and neither Discord nor the AI gets it. The
-     Discord user ID can follow later.
+     mother tongue, neutral languages, grammatical form, formality, and
+     whether you invite them. The name is only your label, so you can see
+     whose table is whose; it stays on your PC, and neither Discord nor the
+     AI gets it. The Discord user ID can follow later. Formality says how
+     this person is addressed in what they read at their table: "familiar",
+     "respectful", or "as written", which follows what the writer wrote. It
+     matters for languages that tell friends from elders, such as du and Sie
+     or the levels of Korean and Japanese.
 3. Save. The profile appears as a card. Press "Switch on" at the top of the
    window: the fish starts for all profiles and the bot goes online in
    Discord. "Switch off", or closing the window, takes it offline. A profile
@@ -393,6 +397,23 @@ Limits of a mixed room:
   closed, the PC is put to sleep by hand, or the battery runs out. A screen
   that turns off is fine. What is written while the fish is not running is
   caught up when it starts again.
+- Formality changes forms of address and nothing else. It reaches the AI
+  as a hint, like the grammatical form; the fish does not know who is older,
+  and it adds no words such as the Korean ones for an older brother or
+  sister. Measured on 23 November 2026 with one model (gpt-6-luna), one run
+  per case, without earlier messages for context: without the entry a German
+  "du" came out in the familiar form in Korean in 2 of 3 sentences and
+  politely in the third; with "respectful" 3 of 3 came out polite, with
+  "familiar" 3 of 3 familiar, and Japanese likewise in one sentence each. A
+  "Sie" in the original came out polite without any entry. Not measured:
+  other models and services, a running conversation, and whether the result
+  sounds natural to a native speaker; only the forms were read off.
+- The language of a seat is a free word, so a variant can be named:
+  "Brazilian Portuguese" or "Traditional Chinese (Taiwan)" gave that variant
+  in the same measurement, one run each; plain "Portuguese" came out
+  European. Whether several people or one read at a table the fish does not
+  know: an English "you" became "du", and a hint about several readers did
+  not change that.
 - Edited and deleted messages, reactions and stickers are not mirrored.
 - Messages delivered after a pause carry the time of delivery, not of writing.
 - All profiles run together over one bot. The window has one switch for the

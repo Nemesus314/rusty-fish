@@ -11,7 +11,7 @@
 //! zweite Prüfung, die von der ersten abweichen könnte.
 
 use crate::config::{Config, DOORS};
-use rusty_fish_room::{Gender, Limits};
+use rusty_fish_room::{Formality, Gender, Limits};
 use serde::{Deserialize, Serialize};
 
 /// Die Einstellungen eines Profils in der Form, die über JSON hinausgeht.
@@ -112,6 +112,12 @@ pub struct DocPerson {
     /// `null`, "female" oder "male".
     #[serde(default)]
     pub gender: Option<String>,
+    /// Wie dieser Mensch angesprochen wird: `null` (wie im Original),
+    /// "familiar" oder "respectful". Fehlt das Feld, wie in einem Dokument
+    /// von vor dem 23.11.2026, gilt `null`; und ohne Angabe wird es nicht
+    /// ausgegeben, damit eine ältere Maske das Dokument weiter liest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formality: Option<String>,
     /// Die Muttersprache, oder `null`.
     #[serde(default)]
     pub lang: Option<String>,
@@ -132,6 +138,7 @@ impl DocPerson {
             discord: Some(id.to_owned()),
             matrix: None,
             gender: None,
+            formality: None,
             lang: None,
             neutral: None,
             invited: false,
@@ -175,6 +182,14 @@ fn gender_word(gender: Gender) -> &'static str {
     match gender {
         Gender::Female => "female",
         Gender::Male => "male",
+    }
+}
+
+/// Wie eine Anrede im Dokument und in der TOML-Datei heißt.
+fn formality_word(formality: Formality) -> &'static str {
+    match formality {
+        Formality::Familiar => "familiar",
+        Formality::Respectful => "respectful",
     }
 }
 
@@ -233,6 +248,7 @@ impl From<&Config> for Document {
                     discord: person.discord.clone(),
                     matrix: person.matrix.clone(),
                     gender: person.gender.map(|g| gender_word(g).to_owned()),
+                    formality: person.formality.map(|f| formality_word(f).to_owned()),
                     lang: person.lang.clone(),
                     neutral: person.neutral.clone(),
                     invited: person.invited,
@@ -314,6 +330,11 @@ impl Document {
             }
             if let Some(gender) = &person.gender {
                 out.push_str(&format!("gender = {}\n", quote(gender)));
+            }
+            // Nur wenn gesetzt: ohne Angabe folgt die Anrede dem Original, und
+            // das Profil steht in der Datei wie vor dem 23.11.2026.
+            if let Some(formality) = person.formality.as_deref().filter(|f| !f.trim().is_empty()) {
+                out.push_str(&format!("formality = {}\n", quote(formality)));
             }
             if let Some(lang) = person.lang.as_deref().filter(|l| !l.trim().is_empty()) {
                 out.push_str(&format!("lang = {}\n", quote(lang)));

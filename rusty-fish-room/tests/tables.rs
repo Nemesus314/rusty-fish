@@ -4,8 +4,8 @@
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_room::tongue::{Tongue, no_answer, no_questions_left, tongue_of};
 use rusty_fish_room::{
-    Delivery, Gender, House, Incoming, Limits, Mark, NO_ANSWER, NO_QUESTIONS_LEFT, Reason, Room,
-    RoomState, Seat, Sender, Tally, converse, relay,
+    Delivery, Formality, Gender, House, Incoming, Limits, Mark, NO_ANSWER, NO_QUESTIONS_LEFT,
+    Reason, Room, RoomState, Seat, Sender, Tally, converse, relay,
 };
 use std::future::Future;
 use std::sync::Mutex;
@@ -367,4 +367,51 @@ fn a_failed_translation_keeps_its_reason_untouched() {
     let mut state = RoomState::default();
     let out = now(relay(&fake, &room, &mut state, &from("de", "n", "Hallo")));
     assert_eq!(out[0].mark, Mark::Untranslated(Reason::Failed("HTTP 429: quota".to_owned())));
+}
+
+// --- die Anrede am Tisch, seit dem 23.11.2026 ----------------------------------
+
+#[test]
+fn the_owners_formality_goes_with_what_is_read_at_their_table() {
+    let room = room(vec![
+        Seat::new("de", "German"),
+        Seat { reader_formality: Some(Formality::Respectful), ..Seat::new("ko", "Korean") },
+    ]);
+    let mut state = RoomState::default();
+
+    // Was an ihrem Tisch gelesen wird, spricht sie respektvoll an.
+    let fake = Fake::says("x");
+    let _ = now(relay(&fake, &room, &mut state, &from("de", "n", "Hast du heute Zeit?")));
+    let p = prompt_into(&fake.prompts(), "Korean").clone();
+    assert!(p.system.contains("addressed respectfully"), "got: {}", p.system);
+
+    // Was sie schreibt, geht an den anderen Tisch ohne diesen Hinweis: dort
+    // liest jemand, für den nichts eingetragen ist.
+    let fake = Fake::says("x");
+    let _ = now(relay(&fake, &room, &mut state, &from("ko", "a", "안녕하세요")));
+    let p = prompt_into(&fake.prompts(), "German").clone();
+    assert!(!p.system.contains("addressed respectfully"), "got: {}", p.system);
+    assert!(!p.system.contains("familiar way"), "got: {}", p.system);
+}
+
+#[test]
+fn tables_with_a_different_formality_get_translations_of_their_own() {
+    let room = room(vec![
+        Seat::new("de", "German"),
+        Seat::new("ko1", "Korean"),
+        Seat::new("ko2", "Korean"),
+        Seat { reader_formality: Some(Formality::Respectful), ..Seat::new("ko3", "Korean") },
+        Seat { reader_formality: Some(Formality::Familiar), ..Seat::new("ko4", "Korean") },
+        Seat { reader_formality: Some(Formality::Respectful), ..Seat::new("ko5", "Korean") },
+    ]);
+    let mut state = RoomState::default();
+    let fake = Fake::says("x");
+    let out = now(relay(&fake, &room, &mut state, &from("de", "n", "Kommst du mit?")));
+    assert_eq!(channels(&out), ["ko1", "ko2", "ko3", "ko4", "ko5"]);
+    // Drei Arten von Tisch: ohne Angabe, respektvoll, vertraut. Gleiche Tische
+    // teilen sich eine bezahlte Übersetzung.
+    let prompts = fake.prompts();
+    assert_eq!(prompts.len(), 3, "one paid translation per kind of table");
+    assert_eq!(prompts.iter().filter(|p| p.system.contains("addressed respectfully")).count(), 1);
+    assert_eq!(prompts.iter().filter(|p| p.system.contains("familiar way")).count(), 1);
 }

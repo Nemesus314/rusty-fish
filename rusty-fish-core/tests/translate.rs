@@ -62,6 +62,7 @@ fn request<'a>(text: &'a str) -> Request<'a> {
         writer_gender: None,
         reader_gender: None,
         informal: false,
+        reader_formality: None,
     }
 }
 

@@ -18,7 +18,7 @@ mod stop;
 use clap::{Parser, Subcommand, ValueEnum};
 use profiles::Folder;
 use rusty_fish_core::{
-    Gender, Model, Outcome, Request, Secret, build_prompt, read_reply, translate,
+    Formality, Gender, Model, Outcome, Request, Secret, build_prompt, read_reply, translate,
 };
 use rusty_fish_house::config::Config;
 use rusty_fish_house::served::Profile as DoorProfile;
@@ -87,6 +87,10 @@ enum Command {
         /// Address the reader informally, the way friends do
         #[arg(long)]
         informal: bool,
+        /// How the reader is addressed, for languages that tell friends from
+        /// elders; without it the translation follows what the writer wrote
+        #[arg(long, value_enum)]
+        formality: Option<HowFormal>,
         /// For measuring only: one more sentence for the AI, after the fish's
         /// own instructions. So a hint can be tried with a real model before
         /// it is built into a profile.
@@ -254,6 +258,23 @@ enum ProfileAction {
     },
 }
 
+/// Die Anrede für den Probe-Befehl, damit sich der Hinweis an die KI mit
+/// einem echten Modell messen lässt.
+#[derive(Clone, Copy, ValueEnum)]
+enum HowFormal {
+    Familiar,
+    Respectful,
+}
+
+impl HowFormal {
+    fn formality(self) -> Formality {
+        match self {
+            HowFormal::Familiar => Formality::Familiar,
+            HowFormal::Respectful => Formality::Respectful,
+        }
+    }
+}
+
 /// Grammatisches Geschlecht für den Probe-Befehl, damit sich der Hinweis an
 /// die KI mit einem echten Modell messen lässt.
 #[derive(Clone, Copy, ValueEnum)]
@@ -400,6 +421,7 @@ async fn run(command: Command) -> Result<(), String> {
             writer,
             reader,
             informal,
+            formality,
             hint,
             tokens,
             text,
@@ -415,6 +437,7 @@ async fn run(command: Command) -> Result<(), String> {
                 writer_gender: writer.map(Who::gender),
                 reader_gender: reader.map(Who::gender),
                 informal,
+                reader_formality: formality.map(HowFormal::formality),
             };
             // Zum Messen: derselbe Weg wie im Kern, Schritt für Schritt, mit
             // einem Satz mehr im Auftrag. Seit dem 23.11.2026, für die Frage,

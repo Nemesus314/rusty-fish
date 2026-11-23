@@ -132,6 +132,70 @@ void main() {
     await cli.deleteProfile(name);
   }, skip: skip);
 
+  // Seit dem 23.11.2026: wie ein Mensch angesprochen wird.
+  test('the formality of a person goes through the real program and back', () async {
+    final cli = ProcessFishCli(exe!);
+    const name = 'desk-probe-formality';
+    const doc = ProfileDoc(
+      name: name,
+      model: 'some-model',
+      baseUrl: null,
+      host: 'Nemo',
+      aiNames: [],
+      limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+      rooms: [
+        Room(
+          passThrough: ['English'],
+          contextLines: 4,
+          seats: [
+            Seat(channel: '7', lang: 'German', owner: 'Nemo'),
+            Seat(channel: '8', lang: 'Korean', owner: 'Mina'),
+          ],
+        ),
+      ],
+      people: [
+        Person(name: 'Nemo', id: '42'),
+        Person(name: 'Mina', id: '9', formality: respectfulFormality, invited: true),
+      ],
+    );
+    try {
+      await cli.saveProfile(doc);
+      final shown = await cli.showProfile(name);
+      expect(shown.toJson(), doc.toJson());
+      expect(shown.people.map((person) => person.formality), [null, 'respectful']);
+      // Ein Wort, das das Programm nicht kennt, lehnt es ab und sagt, was geht.
+      const wrong = ProfileDoc(
+        name: name,
+        model: 'some-model',
+        baseUrl: null,
+        host: '42',
+        aiNames: [],
+        limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+        rooms: [
+          Room(
+            passThrough: [],
+            contextLines: 4,
+            seats: [Seat(channel: '7', lang: 'German'), Seat(channel: '8', lang: 'Korean')],
+          ),
+        ],
+        people: [Person(id: '9', formality: 'older')],
+      );
+      await expectLater(
+        cli.saveProfile(wrong),
+        throwsA(
+          isA<CliException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('formality'), contains('"familiar" or "respectful"')),
+          ),
+        ),
+      );
+      expect((await cli.showProfile(name)).toJson(), doc.toJson());
+    } finally {
+      await cli.deleteProfile(name);
+    }
+  }, skip: skip);
+
   test('what the program refuses comes back in its own words', () async {
     final cli = ProcessFishCli(exe!);
     const oneSeat = ProfileDoc(

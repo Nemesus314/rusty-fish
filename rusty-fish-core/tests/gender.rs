@@ -1,6 +1,6 @@
 //! Tests der freiwilligen Angabe zum grammatischen Geschlecht. Ohne Netz.
 
-use rusty_fish_core::{Ask, Gender, Request, build_ask_prompt, build_prompt};
+use rusty_fish_core::{Ask, Formality, Gender, Request, build_ask_prompt, build_prompt};
 
 fn request(writer: Option<Gender>, reader: Option<Gender>) -> Request<'static> {
     Request {
@@ -12,6 +12,7 @@ fn request(writer: Option<Gender>, reader: Option<Gender>) -> Request<'static> {
         writer_gender: writer,
         reader_gender: reader,
         informal: false,
+        reader_formality: None,
     }
 }
 
@@ -82,4 +83,64 @@ fn the_askers_gender_is_named_to_the_addressable_ai() {
 
     let q = build_ask_prompt(&question(Some(Gender::Male)));
     assert!(q.system.contains("The person who addressed you is a man."), "got: {}", q.system);
+}
+
+// --- die Anrede, seit dem 23.11.2026 ------------------------------------------
+
+#[test]
+fn without_the_entry_the_prompt_says_nothing_about_how_to_address_the_reader() {
+    let p = build_prompt(&request(Some(Gender::Female), Some(Gender::Male)));
+    for word in ["respectfully", "familiar way", "honorific", "forms of address and never"] {
+        assert!(!p.system.contains(word), "unexpected {word:?} in: {}", p.system);
+    }
+}
+
+#[test]
+fn the_readers_formality_is_named_for_forms_of_address_only() {
+    let plain = build_prompt(&request(None, None));
+
+    let respectful = build_prompt(&Request {
+        reader_formality: Some(Formality::Respectful),
+        ..request(None, None)
+    });
+    assert!(
+        respectful.system.contains("the reader is to be addressed respectfully"),
+        "got: {}",
+        respectful.system
+    );
+    assert!(respectful.system.contains("polite or honorific forms"), "got: {}", respectful.system);
+    assert!(
+        respectful.system.contains("Use this only for forms of address and never mention it."),
+        "got: {}",
+        respectful.system
+    );
+    assert!(!respectful.system.contains("familiar way"), "got: {}", respectful.system);
+
+    let familiar = build_prompt(&Request {
+        reader_formality: Some(Formality::Familiar),
+        ..request(None, None)
+    });
+    assert!(familiar.system.contains("addressed in the familiar way"), "got: {}", familiar.system);
+    assert!(familiar.system.contains("plain, familiar forms"), "got: {}", familiar.system);
+    assert!(!familiar.system.contains("respectfully"), "got: {}", familiar.system);
+
+    // Der Hinweis steht hinter dem Auftrag, wie er war: davor ändert sich
+    // kein Wort, und der Text, der übersetzt wird, bleibt derselbe.
+    assert!(respectful.system.starts_with(&plain.system), "the prompt before it is unchanged");
+    assert!(familiar.system.starts_with(&plain.system));
+    assert_eq!(respectful.user, plain.user);
+}
+
+#[test]
+fn the_formality_stands_after_the_hints_about_gender() {
+    let p = build_prompt(&Request {
+        reader_formality: Some(Formality::Respectful),
+        ..request(Some(Gender::Female), Some(Gender::Male))
+    });
+    let gender = p.system.find("The reader of your translation is a man").unwrap();
+    let formality = p.system.find("addressed respectfully").unwrap();
+    assert!(gender < formality, "got: {}", p.system);
+    // Jeder Hinweis nennt, wofür er gilt.
+    assert!(p.system.contains("only for grammatical forms that depend on gender"));
+    assert!(p.system.contains("only for forms of address"));
 }

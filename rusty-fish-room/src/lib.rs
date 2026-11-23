@@ -26,7 +26,7 @@ use rusty_fish_core::{
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub use rusty_fish_core::Gender;
+pub use rusty_fish_core::{Formality, Gender};
 
 pub mod tongue;
 
@@ -68,6 +68,10 @@ pub struct Seat {
     /// die Tür nichts Eigenes weiß. Der Besitzer liest an seinem Tisch; wer
     /// dort schreibt, kann ein anderer sein.
     pub reader_gender: Option<Gender>,
+    /// Wie der Mensch angesprochen wird, dem dieser Tisch gehört: vertraut
+    /// oder respektvoll, falls der Gastgeber es für ihn eingetragen hat. Ohne
+    /// Angabe folgt die Anrede dem Original.
+    pub reader_formality: Option<Formality>,
     /// Sprachen, die an diesem Tisch unübersetzt durchgehen. `None` heißt: es
     /// gilt die Angabe des Raums. Eine leere Liste heißt: hier wird alles
     /// übersetzt. Nicht jeder in einer großen Runde liest Englisch.
@@ -95,6 +99,7 @@ impl Seat {
             lang: lang.to_owned(),
             gender: None,
             reader_gender: None,
+            reader_formality: None,
             neutral: None,
             served: true,
         }
@@ -259,7 +264,7 @@ async fn spread<M: Model + Sync>(
     // Sprache, gleiche unübersetzte Sprachen und gleiche Anrede. „Hast du
     // geschlafen?" lautet im Russischen an eine Frau anders als an einen Mann,
     // und ein englischer Satz bleibt nur dort stehen, wo Englisch gelesen wird.
-    type Kind = (String, Vec<String>, Option<Gender>);
+    type Kind = (String, Vec<String>, Option<Gender>, Option<Formality>);
     let mut done: Vec<(Kind, String, Mark)> = Vec::new();
     let mut out = Vec::new();
     // Nur an Tische, die dieser Fisch bedient. Für die anderen übersetzt der
@@ -279,7 +284,7 @@ async fn spread<M: Model + Sync>(
         same.sort();
         same.dedup();
         let reader = seat.reader();
-        let key: Kind = (lang.to_lowercase(), same, reader);
+        let key: Kind = (lang.to_lowercase(), same, reader, seat.reader_formality);
         let (translated, mark) = match done.iter().find(|(k, _, _)| *k == key) {
             Some((_, translated, mark)) => (translated.clone(), mark.clone()),
             None => {
@@ -291,8 +296,11 @@ async fn spread<M: Model + Sync>(
                     context,
                     writer_gender: piece.writer_gender,
                     reader_gender: reader,
-                    // Was Menschen einander schreiben, behält seine Anrede.
+                    // Was Menschen einander schreiben, behält seine Anrede,
+                    // außer der Gastgeber hat für den Leser an diesem Tisch
+                    // eine eingetragen.
                     informal: false,
+                    reader_formality: seat.reader_formality,
                 };
                 let (translated, mark) = match translate(model, &request).await {
                     Ok(Outcome::Translated(t)) => (t, Mark::Translated),

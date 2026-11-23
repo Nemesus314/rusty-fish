@@ -115,6 +115,7 @@ class _PersonDraft {
       // Bis zum 20.11.2026 begann ein neuer Mensch mit der weiblichen Form,
       // weil eine Form Pflicht war. Seitdem ist sie freiwillig.
       form = _formOf(person?.gender),
+      formality = person?.formality ?? '',
       invited = person?.invited ?? false,
       _nothingNeutral = person?.neutral?.isEmpty ?? false {
     lastRef = ref;
@@ -168,6 +169,10 @@ class _PersonDraft {
   final TextEditingController lang;
   final TextEditingController neutral;
   _Form form;
+
+  /// Wie dieser Mensch angesprochen wird: leer (wie geschrieben), vertraut
+  /// oder respektvoll, in den Worten des Programms.
+  String formality;
   bool invited;
 
   /// Das Profil sagte ausdrücklich: für diesen Menschen bleibt nichts
@@ -627,6 +632,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
               matrix: person.idAt(matrixDoor),
               name: person.name.text.trim().isEmpty ? null : person.name.text.trim(),
               gender: _genderOf(person.form),
+              formality: person.formality.isEmpty ? null : person.formality,
               lang: person.lang.text.trim().isEmpty ? null : person.lang.text.trim(),
               neutral: person.neutralLangs,
               invited: person.invited,
@@ -1353,6 +1359,13 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         }, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 4),
         Text(
+          'Formality: how this person is addressed in what they read at their table, for '
+          'languages that tell friends from elders, such as du and Sie or the levels of Korean '
+          'and Japanese. "as written" follows what the writer wrote.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
           'Invited: your fish translates for this person, on your key. '
           'You as the host need no tick.',
           style: Theme.of(context).textTheme.bodySmall,
@@ -1388,11 +1401,14 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             ),
           ),
     ];
-    // Eine Kennung steht in der Zeile, wie bisher. Zwei bekämen dort zu
-    // wenig Platz (gemessen am 23.11.2026 bei 1280 Punkten Fensterbreite:
-    // die Beschriftungen daneben wurden abgeschnitten) und stehen deshalb in
-    // einer eigenen Zeile darunter.
-    final inline = ids.length < 2;
+    // Zwei Zeilen je Mensch. Oben, wer er ist: Name, Muttersprache, neutrale
+    // Sprachen, Form, Einladung. Darunter, wie man ihn erreicht und anspricht:
+    // seine Kennungen und die Anrede.
+    //
+    // Bis zum 23.11.2026 stand die Kennung in der oberen Zeile. Mit zwei
+    // Kennungen (gemischter Raum) wurden dort bei 1280 Punkten Fensterbreite
+    // die Beschriftungen abgeschnitten, und mit der Anrede stünde bei einer
+    // Kennung ein einzelnes Feld allein in der zweiten Zeile.
     final row = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1409,8 +1425,6 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             ),
           ),
         ),
-        if (inline)
-          for (final id in ids) ...[const SizedBox(width: 12), id],
         const SizedBox(width: 12),
         Expanded(
           flex: 2,
@@ -1473,26 +1487,47 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         ),
       ],
     );
+    // Wie dieser Mensch angesprochen wird.
+    final formality = SizedBox(
+      width: 190,
+      child: InputDecorator(
+        decoration: const InputDecoration(labelText: 'Formality'),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            key: ValueKey('person-$index-formality'),
+            value: person.formality,
+            isDense: true,
+            isExpanded: true,
+            onChanged: (how) => setState(() => person.formality = how ?? ''),
+            items: [
+              const DropdownMenuItem(value: '', child: Text('as written')),
+              const DropdownMenuItem(value: familiarFormality, child: Text('familiar')),
+              const DropdownMenuItem(value: respectfulFormality, child: Text('respectful')),
+              // Ein Wert, den diese Maske nicht kennt, bleibt stehen: sonst
+              // würde ein Profil beim bloßen Öffnen und Speichern umgestellt.
+              if (!const ['', familiarFormality, respectfulFormality].contains(person.formality))
+                DropdownMenuItem(value: person.formality, child: Text(person.formality)),
+            ],
+          ),
+        ),
+      ),
+    );
     return Padding(
       // Mit zwei Zeilen je Mensch braucht es mehr Abstand zum nächsten.
-      padding: EdgeInsets.only(bottom: inline ? 12 : 24),
-      child: inline
-          ? row
-          : Column(
-              children: [
-                row,
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final (n, id) in ids.indexed) ...[
-                      if (n > 0) const SizedBox(width: 12),
-                      id,
-                    ],
-                  ],
-                ),
-              ],
-            ),
+      padding: const EdgeInsets.only(bottom: 24),
+      child: Column(
+        children: [
+          row,
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final id in ids) ...[id, const SizedBox(width: 12)],
+              formality,
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

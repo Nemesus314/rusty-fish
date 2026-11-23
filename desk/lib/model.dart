@@ -111,6 +111,7 @@ class Person {
     this.matrix = '',
     this.name,
     this.gender,
+    this.formality,
     this.lang,
     this.neutral,
     this.invited = false,
@@ -146,6 +147,17 @@ class Person {
   /// wer nur seine Muttersprache nennen will, muss keine Form angeben.
   final Gender? gender;
 
+  /// Wie dieser Mensch angesprochen wird, in dem, was er an seinem Tisch
+  /// liest: [familiarFormality] oder [respectfulFormality]. Ohne Angabe folgt
+  /// die Anrede dem, was geschrieben wurde.
+  ///
+  /// Seit dem 23.11.2026, für Sprachen, die Freunde und Ältere verschieden
+  /// ansprechen. Nemesus an dem Tag: „in Korea redest du ja anders mit einer
+  /// älteren Person als mit einer jüngeren." Ein Text und kein Aufzählungstyp:
+  /// ein Wert, den diese Maske nicht kennt, bleibt beim Öffnen und Speichern
+  /// stehen.
+  final String? formality;
+
   /// Die Muttersprache. In sie wird an seinem Tisch übersetzt.
   final String? lang;
 
@@ -170,6 +182,7 @@ class Person {
       // wurde still zur weiblichen. Seit die Form freiwillig ist, bleibt eine
       // fehlende Angabe eine fehlende Angabe.
       gender: genderFromJson(json['gender']),
+      formality: _text(json['formality']),
       lang: _text(json['lang']),
       neutral: neutral is List ? _strings(neutral) : null,
       invited: json['invited'] == true,
@@ -184,6 +197,9 @@ class Person {
     // hinaus, wenn es etwas trägt.
     if (matrix.isNotEmpty) 'matrix': matrix,
     'gender': genderToJson(gender),
+    // Ein älteres Programm kennt das Feld nicht und lehnt es ab. Es geht nur
+    // hinaus, wenn es etwas trägt.
+    'formality': ?formality,
     'lang': ?lang,
     'neutral': ?neutral,
     if (invited) 'invited': true,
@@ -236,6 +252,12 @@ const discordDoor = 'discord';
 
 /// Die zweite Tür, seit dem 22.11.2026.
 const matrixDoor = 'matrix';
+
+/// Die Anrede „vertraut", wie das Programm sie nennt.
+const familiarFormality = 'familiar';
+
+/// Die Anrede „respektvoll", wie das Programm sie nennt.
+const respectfulFormality = 'respectful';
 
 /// Die Türen, die diese Maske kennt, in der Reihenfolge, in der sie Felder
 /// zeigt.

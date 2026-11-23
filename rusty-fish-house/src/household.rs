@@ -434,6 +434,10 @@ async fn consent_request<M: Model + Sync>(
         reader_gender: config.gender_for(author, channel),
         // Entschieden von Nemesus am 19.11.2026: die Begrüßung duzt.
         informal: true,
+        // Die Bitte spricht einen Gast an, über den der Fisch noch nichts
+        // weiß; eine eingetragene Anrede gilt für das, was Menschen ihm
+        // schreiben.
+        reader_formality: None,
     };
     // Auch diese Übersetzung zählt gegen den Übersetzungstopf. Ist er leer,
     // fragt der Fisch auf Englisch.

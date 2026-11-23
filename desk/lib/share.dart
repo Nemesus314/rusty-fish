@@ -64,6 +64,8 @@ String shareRoomsText(ProfileDoc doc) {
           matrix: person.matrix,
           name: person.name,
           gender: person.gender,
+          // Wie jemand angesprochen wird, gehört zum Raum wie seine Form.
+          formality: person.formality,
           lang: person.lang,
           neutral: person.neutral,
         ).toJson(),
@@ -140,6 +142,7 @@ Person _uninvited(Person person) => Person(
   matrix: person.matrix,
   name: person.name,
   gender: person.gender,
+  formality: person.formality,
   lang: person.lang,
   neutral: person.neutral,
 );
