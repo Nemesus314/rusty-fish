@@ -426,10 +426,15 @@ const SAFE_LEVEL: &str = " The target language makes the speaker choose how poli
 /// - Drei Stufen beim „du": Hindi, Urdu, Bengalisch, Nepali, Marathi,
 ///   Gujarati, Punjabi, Tamil, Telugu, Kannada, Malayalam, Singhalesisch.
 ///
-/// Gemessen ist davon nur ein Teil (siehe den Leitfaden, Abschnitt „Limits");
-/// der Rest steht hier nach dem, was über diese Sprachen bekannt ist. Die
-/// Regel ist vorsichtig gewählt: liegt sie daneben, dann zu höflich und nicht
-/// zu grob.
+/// Gemessen am 23. und 24.11.2026 mit `gpt-6-luna`, für jede Sprache ein Satz
+/// mit deutschem „du", ein Lauf ohne und einer mit der Regel: in 19 von 24
+/// wurde aus einer vertrauten Form eine höfliche, in 5 änderte sich nichts,
+/// weil die Übersetzung schon höflich war (Vietnamesisch, Thai, Khmer,
+/// Sundanesisch, Balinesisch). Vier kamen höher heraus, als Alltagssprache
+/// es vielleicht ist (Tagalog, Javanisch, Laotisch, Singhalesisch). Die Regel
+/// ist vorsichtig gewählt: liegt sie daneben, dann zu höflich und nicht zu
+/// grob. Abgelesen sind nur die Formen, von niemandem, der diese Sprachen
+/// spricht.
 ///
 /// Benannte Grenzen:
 /// - Erkannt wird die Sprache an ihrem englischen Namen als ganzem Wort, so

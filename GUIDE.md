@@ -419,14 +419,19 @@ Limits of a mixed room:
   Burmese, Khmer, Tagalog; Hindi, Urdu, Bengali, Nepali, Marathi, Gujarati,
   Punjabi, Tamil, Telugu, Kannada, Malayalam, Sinhala. A name in the
   language itself is not recognised. Measured on 23 and 24 November 2026
-  with gpt-6-luna, one run per case: Korean polite in 2 of 2 and Japanese in
-  1 of 1, Hindi and Bengali changed from the familiar to the polite "you",
-  Tamil came out polite, Vietnamese and Thai came out the same polite way
-  with and without it. Tagalog came out with "po" and Javanese in its high
-  level; whether that is more formal than young people expect, only someone
-  who lives the language can say. The other languages of the list are on it
-  by what is known about them and have not been measured. Every other
-  language is translated as before: "du" stayed "ты" in Russian.
+  with gpt-6-luna for every language of the list, one sentence with a German
+  "du", one run without and one with the rule. In 19 of the 24 the rule
+  changed a familiar form into a polite one: Korean, Japanese, Javanese,
+  Tibetan, Lao, Burmese, Tagalog, Hindi, Urdu, Bengali, Nepali, Marathi,
+  Gujarati, Punjabi, Tamil, Telugu, Kannada, Malayalam, Sinhala. Without it,
+  Marathi, Gujarati and Punjabi had come out in their lowest, intimate form.
+  In 5 it changed nothing, because the translation was polite already:
+  Vietnamese, Thai, Khmer, Sundanese, Balinese. Four came out higher than
+  everyday speech may be: Tagalog with "po", Javanese in its high level, Lao
+  and Sinhala with their formal "you". Whether that is more formal than
+  young people expect, only someone who lives the language can say; only
+  the forms were read off, by someone who does not speak these languages.
+  Every other language is translated as before: "du" stayed "ты" in Russian.
 - Not solved, and as it was before: the other way round. Everyday polite
   Korean came out as "du" in one run and as "Sie" in another, without any
   entry. A young Korean who writes politely may so be translated with a
