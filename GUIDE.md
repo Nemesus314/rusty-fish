@@ -439,9 +439,16 @@ Limits of a mixed room:
   with a formal "Sie". A reader who wants "du" sets their own formality to
   "familiar": with that, the same Japanese and Korean sentences came out as
   "du" (one run each).
-- Mandarin is not on the list and needs no rule: a German "du" became 你
-  and "Sie" became 您, and back again the same way (one run each; "Mandarin"
-  as the language of a seat gave simplified characters).
+- Mandarin and Cantonese are not on the list and need no rule: a German
+  "du" became 你 and "Sie" became 您, and back again the same way (one run
+  each). "Mandarin" as the language of a seat gave simplified characters,
+  "Cantonese" gave Cantonese as it is written in chats, in traditional
+  characters.
+- Thai shows its politeness in a small word at the end of the sentence, and
+  that word depends on whether a man or a woman writes. With the
+  grammatical form of the writer entered, the translation carried it (ครับ
+  for a man, ค่ะ for a woman, one run each); without it, the word was left
+  out. Polite Thai came out as "Sie" in German, like Japanese.
 - The language of a seat is a free word, so a variant can be named:
   "Brazilian Portuguese" or "Traditional Chinese (Taiwan)" gave that variant
   in the same measurement, one run each; plain "Portuguese" came out
