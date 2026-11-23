@@ -47,6 +47,15 @@
 //! - Alle Profile eines Fischs teilen sich ein Konto, und ein Raum gehört zu
 //!   höchstens einem laufenden Profil.
 //!
+//! Seit dem 23.11.2026 kann ein Profil auch Tische an einer anderen Tür haben
+//! (der gemischte Raum, siehe `rusty_fish_house::between`). Dann teilt diese
+//! Tür den Haushalt des Profils mit der anderen. Was an einem Tisch der
+//! anderen Tür erscheinen soll, reicht sie ihr zu; was die andere für einen
+//! Raum dieser Tür hat, setzt sie ab. Benannte Grenzen dabei:
+//! - Das Bild eines Schreibenden reicht diese Tür nicht weiter: es liegt
+//!   hinter der Anmeldung seines Servers.
+//! - Anhänge von der anderen Tür kommen als Adresse an.
+//!
 //! In die Ausgabe des Programms gelangen nur Kennungen und Fehlergründe, nie
 //! der Text einer Nachricht.
 
@@ -69,6 +78,7 @@ use matrix_sdk::ruma::{
 use matrix_sdk::sync::SyncResponse;
 use matrix_sdk::{Client, LoopCtrl, Room, RoomState};
 use rusty_fish_core::Model;
+use rusty_fish_house::between::{Errand, Handed, Lines, Writer, by_door};
 use rusty_fish_house::clock::today;
 use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
@@ -100,6 +110,10 @@ const REMEMBERED: usize = 1000;
 /// wer ihn ausschaltet, soll nicht auf einen Server warten.
 const LEAVE_WITHIN: Duration = Duration::from_secs(5);
 
+/// So lange wartet ein Auftrag einer anderen Tür darauf, dass diese mit
+/// ihrem Server verbunden ist. Danach scheitert er und sagt es.
+const CONNECT_WITHIN: Duration = Duration::from_secs(30);
+
 /// Ein Profil im Lauf: seine Einstellungen, seine KI und alles, was sich
 /// ändert.
 struct Served<M> {
@@ -119,13 +133,19 @@ struct Served<M> {
     /// Ob der Fisch an den Tischen dieses Profils gesagt hat, dass er
     /// eingeschaltet ist. Nur dann sagt er beim Anhalten, dass er geht.
     said_on: AtomicBool,
-    /// Ein Schloss für alles Veränderliche dieses Profils.
+    /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen
+    /// hat. Sein Schloss lässt die Nachrichten des Profils einzeln durch.
+    /// Steht das Profil auch an einer anderen Tür, ist es derselbe Haushalt
+    /// wie dort.
+    house: Arc<Mutex<Household>>,
+    /// Die Leitungen zu den anderen Türen, wenn das Profil auch dort steht.
+    lines: Option<Arc<Lines>>,
+    /// Was nur diese Tür sich merkt. Wer beide Schlösser braucht, nimmt
+    /// dieses zuerst.
     inner: Mutex<Inner>,
 }
 
 struct Inner {
-    /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen hat.
-    house: Household,
     /// Die zuletzt verarbeiteten Nachrichten, nach ihrer Kennung.
     handled: HashSet<OwnedEventId>,
     handled_order: VecDeque<OwnedEventId>,
@@ -202,13 +222,16 @@ struct Fish<M> {
 ///
 /// `access` ist der Zugang aus der Schlüsselablage, `store` der Ordner mit
 /// den Geräteschlüsseln des Fischs. `commands` und `lenient` bedeuten
-/// dasselbe wie an der Discord-Tür.
+/// dasselbe wie an der Discord-Tür. Über `handed` kommt, was eine andere Tür
+/// dieser zureicht (siehe `rusty_fish_house::between`); wer nur diese eine
+/// Tür betreibt, übergibt eine Leitung, an deren anderem Ende niemand ist.
 pub async fn run<M>(
     access: &Access,
     store: &Path,
     first: Vec<Profile<M>>,
     lenient: bool,
     mut commands: UnboundedReceiver<Command<M>>,
+    mut handed: UnboundedReceiver<Handed>,
     on_change: OnChange,
 ) -> Result<(), String>
 where
@@ -276,6 +299,22 @@ where
         move |event: OriginalSyncRoomEncryptedEvent, room: Room| {
             let fish = fish.clone();
             async move { fish.unreadable(event, room).await }
+        }
+    });
+
+    // Was eine andere Tür dieser zureicht. Jeder Auftrag für sich: die Tür,
+    // die ihn zureicht, wartet auf ihn und hält so die Reihenfolge ihres
+    // Profils; ein zweites Profil soll darauf nicht warten.
+    tokio::spawn({
+        let fish = fish.clone();
+        async move {
+            while let Some(handed) = handed.recv().await {
+                let fish = fish.clone();
+                tokio::spawn(async move {
+                    let done = fish.take(handed.profile.as_deref(), handed.errand).await;
+                    let _ = handed.done.send(done);
+                });
+            }
         }
     });
 
@@ -386,13 +425,37 @@ where
         profile: Profile<M>,
         said_on: bool,
     ) -> Result<(), String> {
-        if profile.config.door != Door::Matrix {
+        // Lehnt diese Tür ein Profil ab, das auch an einer anderen steht,
+        // muss das Programm es hören: es hält das Profil dann überall an.
+        let shared = profile.shared.as_ref().map(|shared| shared.lines.clone());
+        let name = profile.name.clone();
+        let started = Fish::take_in(fish, profile, said_on).await;
+        if let (Err(why), Some(lines), Some(name)) = (&started, shared, name) {
+            lines.refuse(Door::Matrix, &name, why);
+        }
+        started
+    }
+
+    async fn take_in(
+        fish: &Arc<Fish<M>>,
+        profile: Profile<M>,
+        said_on: bool,
+    ) -> Result<(), String> {
+        if !profile.config.doors.contains(&Door::Matrix) {
             return Err(format!(
                 "this profile stands at the {} door, not at Matrix",
                 profile.config.door.label()
             ));
         }
-        let house = Household::open(&profile.config, &profile.state_path)?;
+        // Ein Profil an zwei Türen bringt seinen Haushalt mit; sonst führt
+        // ihn diese Tür allein.
+        let (house, lines) = match profile.shared {
+            Some(shared) => (shared.house, Some(shared.lines)),
+            None => {
+                let house = Household::open(&profile.config, &profile.state_path)?;
+                (Arc::new(Mutex::new(house)), None)
+            }
+        };
         let served = Arc::new(Served {
             name: profile.name,
             model: profile.model,
@@ -401,8 +464,9 @@ where
             since: now_ms(),
             entered: std::sync::Mutex::new(HashMap::new()),
             said_on: AtomicBool::new(said_on),
+            house,
+            lines,
             inner: Mutex::new(Inner {
-                house,
                 handled: HashSet::new(),
                 handled_order: VecDeque::new(),
             }),
@@ -506,7 +570,10 @@ where
                 continue;
             }
             for seat in served.config.rooms.iter().flat_map(|room| room.seats.iter()) {
-                if !served.config.serves(&seat.channel) {
+                // Nur an den Tischen dieser Tür, und nur, wo der Fisch schreibt.
+                if served.config.door_of(&seat.channel) != Some(Door::Matrix)
+                    || !served.config.serves(&seat.channel)
+                {
                     continue;
                 }
                 // Wo der Fisch nicht ist, kann er nichts sagen; das steht
@@ -662,7 +729,9 @@ where
             key.trim() == CONSENT_KEY
         } else {
             let list = self.served.read().await;
-            list.iter().any(|entry| entry.served.config.host == event.sender.as_str())
+            list.iter().any(|entry| {
+                entry.served.config.host_at(Door::Matrix) == Some(event.sender.as_str())
+            })
         };
         let Some(ask) = self.asked_by(&room, target, look_up).await else { return };
         let at = u64::from(event.origin_server_ts.0);
@@ -676,7 +745,7 @@ where
                     return;
                 }
                 if ask.agrees(key, &served.service) {
-                    served.consent_given(self, &event.sender).await;
+                    served.consent_given(self, &room, &event.sender).await;
                 }
             }
             Ask::Budget { profile, .. } => {
@@ -693,7 +762,7 @@ where
                 }
                 // Nur das Zeichen des Gastgebers zählt: es ist sein Schlüssel
                 // und sein Geld.
-                if event.sender.as_str() != served.config.host {
+                if served.config.host_at(Door::Matrix) != Some(event.sender.as_str()) {
                     served.say("someone who is not the host set a sign on the budget notice");
                     return;
                 }
@@ -776,6 +845,33 @@ where
         }
         self.asked.lock().await.insert(event, Asked { ask, signs });
         Ok(())
+    }
+
+    /// Erledigt, was eine andere Tür dieser zugereicht hat: Zustellungen für
+    /// Tische dieser Tür, oder der Hinweis an den Gastgeber, der hier liest.
+    async fn take(&self, profile: Option<&str>, errand: Errand) -> Result<(), String> {
+        let Some(served) = self.named(profile).await else {
+            return Err("this profile is not running at the Matrix door".to_owned());
+        };
+        // Die andere Tür kann schneller verbunden sein als diese.
+        let mut ready = self.ready.subscribe();
+        let connected = matches!(
+            tokio::time::timeout(CONNECT_WITHIN, ready.wait_for(|ready| *ready)).await,
+            Ok(Ok(_))
+        );
+        if !connected {
+            return Err("the Matrix door is not connected yet".to_owned());
+        }
+        match errand {
+            Errand::Deliver { deliveries, writer } => {
+                if served.post_all(self, &deliveries, &writer).await {
+                    Ok(())
+                } else {
+                    Err("not everything arrived; see the lines above".to_owned())
+                }
+            }
+            Errand::TellHost(notice) => served.notify_host(self, &notice).await,
+        }
     }
 
     /// Der Name, unter dem jemand in diesem Raum erscheint.
@@ -895,6 +991,10 @@ where
     /// mitteilen, dass er sie bedient.
     async fn settle(&self, fish: &Fish<M>) {
         for seat in self.config.rooms.iter().flat_map(|room| room.seats.iter()) {
+            // Ein Tisch an einer anderen Tür ist kein Raum dieser Tür.
+            if self.config.door_of(&seat.channel) != Some(Door::Matrix) {
+                continue;
+            }
             let Ok(id) = RoomId::parse(&seat.channel) else { continue };
             match fish.client.get_room(&id) {
                 Some(room) if room.is_space() => self.not_a_table(room.room_id()),
@@ -913,17 +1013,25 @@ where
     /// Teilt Eingeladenen an ihrem Tisch mit, dass dieser Fisch sie jetzt
     /// bedient: einmal je Mensch, gemerkt in der Zustandsdatei.
     async fn tell_the_invited(&self, fish: &Fish<M>) {
-        let mut inner = self.inner.lock().await;
+        let mut house = self.house.lock().await;
         // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
-        let Some(pending) = inner.house.invitations(&self.config) else { return };
+        let Some(pending) = house.invitations(&self.config) else { return };
 
         let mut reached = Vec::new();
         for invite in &pending.due {
+            // Wessen Tisch an einer anderen Tür steht, dem sagt es die andere
+            // Tür. Hier bleibt er ungemerkt.
+            if self.config.door_of(&invite.channel) != Some(Door::Matrix) {
+                continue;
+            }
             let sent = match fish.room(&invite.channel) {
                 Ok(room) => {
-                    let host = match UserId::parse(&self.config.host) {
-                        Ok(host) => Some(fish.name_in(&room, &host).await),
-                        Err(_) => None,
+                    // Ohne Kennung des Gastgebers an dieser Tür nennt die
+                    // Mitteilung niemanden.
+                    let host = self.config.host_at(Door::Matrix);
+                    let host = match host.map(UserId::parse) {
+                        Some(Ok(host)) => Some(fish.name_in(&room, &host).await),
+                        _ => None,
                     };
                     let text = invitation_at(
                         Door::Matrix,
@@ -947,7 +1055,7 @@ where
             }
         }
 
-        if let Err(why) = inner.house.invitations_told(pending, &reached) {
+        if let Err(why) = house.invitations_told(pending, &reached) {
             self.say(why);
         }
     }
@@ -956,14 +1064,14 @@ where
     /// des Raums verteilen.
     async fn handle(&self, fish: &Fish<M>, heard: Heard) {
         let channel = heard.room.as_str();
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
+        let mut inner = self.inner.lock().await;
 
         // Dieselbe Nachricht ein zweites Mal gemeldet.
         if inner.handled.contains(&heard.event) {
             return;
         }
-        let seen = inner.house.seen(channel);
+        let mut house = self.house.lock().await;
+        let seen = house.seen(channel);
         // Wo der Fisch in einem Raum ohne Lesemarke beginnt: bei seinem
         // Eintritt, wenn er ihn in diesem Lauf betreten hat, sonst beim Start
         // dieses Profils.
@@ -1006,13 +1114,12 @@ where
             mark,
         };
         let today = today();
-        let Some(steps) = inner.house.message(&self.model, &self.terms(&today), &arrived).await
-        else {
+        let Some(steps) = house.message(&self.model, &self.terms(&today), &arrived).await else {
             return;
         };
         inner.remember(heard.event.clone());
 
-        let writer = fish.name_in(&here, &heard.sender).await;
+        let writer = self.writer(fish, &here, &heard.sender).await;
         let delivered = self.deliver(fish, &steps.deliveries, &writer).await;
         // Kam etwas nicht an, soll der Schreibende es an seiner Nachricht sehen.
         if !delivered {
@@ -1027,28 +1134,82 @@ where
             }
         }
 
-        // Ist das Kontingent leer, erfährt es der Gastgeber.
+        // Ist das Kontingent leer, erfährt es der Gastgeber, an der Tür, an
+        // der er liest.
         if let Some(notice) = &steps.tell_host {
-            self.notify_host(fish, notice).await;
+            let door = self.config.host_door();
+            let told = match &self.lines {
+                Some(lines) if door != Door::Matrix => {
+                    lines.hand(door, self.name.as_deref(), Errand::TellHost(notice.clone())).await
+                }
+                _ => self.notify_host(fish, notice).await,
+            };
+            if let Err(why) = told {
+                self.say(format_args!("cannot tell the host that the budget is used up: {why}"));
+            }
         }
 
         // Erst jetzt, nach dem Absetzen: stürzt der Fisch vorher ab, gilt die
         // Nachricht als nicht gelesen.
-        if let Err(why) = inner.house.save() {
+        if let Err(why) = house.save() {
             self.say(why);
         }
     }
 
-    /// Setzt Zustellungen ab: was ein Mensch schrieb, mit seinem Namen davor;
-    /// was die KI sagt, mit dem Namen, den der Gastgeber ihr gab. Liefert, ob
-    /// alles ankam.
-    async fn deliver(&self, fish: &Fish<M>, deliveries: &[Delivery], writer: &str) -> bool {
+    /// Der Schreibende, wie er in diesem Raum erscheint. Sein Bild bleibt
+    /// hier: eine andere Tür könnte es bei Matrix nicht abrufen.
+    async fn writer(&self, fish: &Fish<M>, room: &Room, user: &UserId) -> Writer {
+        Writer {
+            door: Door::Matrix,
+            name: fish.name_in(room, user).await,
+            face: None,
+            attachments: String::new(),
+        }
+    }
+
+    /// Setzt Zustellungen ab, jede an der Tür ihres Tisches: die für Räume
+    /// dieser Tür hier, die anderen reicht sie der Tür zu, an der ihr Tisch
+    /// steht, und wartet darauf. Liefert, ob alles ankam.
+    async fn deliver(&self, fish: &Fish<M>, deliveries: &[Delivery], writer: &Writer) -> bool {
+        let (mine, others) = by_door(&self.config, Door::Matrix, deliveries);
+        let mut delivered = self.post_all(fish, &mine, writer).await;
+        for (door, deliveries) in others {
+            let errand = Errand::Deliver { deliveries, writer: writer.clone() };
+            let handed = match &self.lines {
+                Some(lines) => lines.hand(door, self.name.as_deref(), errand).await,
+                None => Err("this profile was started at one door only".to_owned()),
+            };
+            if let Err(why) = handed {
+                delivered = false;
+                self.say(format_args!("cannot deliver through the {} door: {why}", door.label()));
+            }
+        }
+        delivered
+    }
+
+    /// Setzt Zustellungen in Räumen dieser Tür ab: was ein Mensch schrieb,
+    /// mit seinem Namen davor; was die KI sagt, mit dem Namen, den der
+    /// Gastgeber ihr gab. Liefert, ob alles ankam.
+    async fn post_all(&self, fish: &Fish<M>, deliveries: &[Delivery], writer: &Writer) -> bool {
         let assistant = self.config.ai_name().unwrap_or(FISH_NAME);
         let mut delivered = true;
         for delivery in deliveries {
             let name = match delivery.from {
-                Sender::Writer => writer,
+                Sender::Writer => writer.name.as_str(),
                 Sender::Assistant => assistant,
+            };
+            // Was an der Nachricht hing, steht als Adresse unter dem, was der
+            // Mensch schrieb. Diese Tür selbst reicht keine Anhänge herein;
+            // sie kommen von einer anderen.
+            let with_attachments;
+            let delivery = if delivery.from == Sender::Writer && !writer.attachments.is_empty() {
+                with_attachments = Delivery {
+                    text: format!("{}{}", delivery.text, writer.attachments),
+                    ..delivery.clone()
+                };
+                &with_attachments
+            } else {
+                delivery
             };
             // Die Kennzeichnung steht in der Sprache des Tisches, an dem sie
             // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
@@ -1075,13 +1236,12 @@ where
     }
 
     /// Jemand hat das Zeichen unter der Bitte um Zustimmung gesetzt.
-    async fn consent_given(&self, fish: &Fish<M>, user: &UserId) {
+    async fn consent_given(&self, fish: &Fish<M>, asked_in: &Room, user: &UserId) {
         // Wer das Zeichen setzt, stimmt für sich selbst zu, für niemanden
         // sonst. Das Schloss bleibt bis zum Ende: was jetzt nachgereicht wird,
         // soll vor dem stehen, was derselbe Mensch gleich danach schreibt.
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
-        match inner.house.consent(user.as_str(), &self.service) {
+        let mut house = self.house.lock().await;
+        match house.consent(user.as_str(), &self.service) {
             Ok(()) => self.say("consent stored"),
             Err(why) => {
                 self.say(why);
@@ -1092,19 +1252,28 @@ where
         // Was dieser Mensch davor schrieb, kam unübersetzt an. Jetzt wird es
         // übersetzt nachgereicht.
         let today = today();
-        let held = inner.house.held_back(&self.model, &self.terms(&today), user.as_str()).await;
+        let held = house.held_back(&self.model, &self.terms(&today), user.as_str()).await;
         if held.is_empty() {
             return;
         }
         // Nur die Zahl, kein Text.
         self.say(format_args!("handing in {} delivery(ies) written before consent", held.len()));
         // Sein Name, wie er an einem der Tische erscheint, an die es geht.
-        let mut writer = user.localpart().to_owned();
-        if let Some(room) = held.first().and_then(|d| fish.room(&d.channel).ok()) {
-            writer = fish.name_in(&room, user).await;
-        }
-        self.deliver(fish, &held, &shown_name(&writer)).await;
-        if let Err(why) = inner.house.save() {
+        // Geht alles an Tische einer anderen Tür, gilt sein Name in dem Raum,
+        // in dem er zugestimmt hat.
+        let writer = match held.iter().find_map(|d| fish.room(&d.channel).ok()) {
+            Some(room) => fish.name_in(&room, user).await,
+            None if self.config.is_mixed() => fish.name_in(asked_in, user).await,
+            None => user.localpart().to_owned(),
+        };
+        let writer = Writer {
+            door: Door::Matrix,
+            name: shown_name(&writer),
+            face: None,
+            attachments: String::new(),
+        };
+        self.deliver(fish, &held, &writer).await;
+        if let Err(why) = house.save() {
             self.say(why);
         }
     }
@@ -1112,8 +1281,11 @@ where
     /// Sagt dem Gastgeber, und nur ihm, dass das heutige Kontingent verbraucht
     /// ist, und fragt, ob er um denselben Betrag erhöhen will: in einem Raum
     /// zu zweit, mit zwei Zeichen zum Antippen.
-    async fn notify_host(&self, fish: &Fish<M>, notice: &HostNotice) {
-        let Ok(host) = UserId::parse(&self.config.host) else { return };
+    async fn notify_host(&self, fish: &Fish<M>, notice: &HostNotice) -> Result<(), String> {
+        let host = self.config.host_at(Door::Matrix).map(UserId::parse);
+        let Some(Ok(host)) = host else {
+            return Err("the host has no Matrix id in this profile".to_owned());
+        };
         let room = match fish.client.get_dm_room(&host) {
             Some(room) if room.state() == RoomState::Joined => Ok(room),
             _ => fish.client.create_dm(&host).await.map_err(|e| e.to_string()),
@@ -1136,12 +1308,9 @@ where
             raise: notice.raise_label.clone(),
             keep: notice.keep_label.to_owned(),
         };
-        let sent = match room {
+        match room {
             Ok(room) => fish.post(&room, &text, Some(ask)).await,
             Err(why) => Err(why),
-        };
-        if let Err(why) = sent {
-            self.say(format_args!("cannot tell the host that the budget is used up: {why}"));
         }
     }
 
@@ -1150,9 +1319,9 @@ where
         let text = match choice {
             Budget::Keep => KEPT_NOTICE.to_owned(),
             Budget::Raise => {
-                let mut inner = self.inner.lock().await;
+                let mut house = self.house.lock().await;
                 let today = today();
-                let (text, saved) = inner.house.raise(&self.terms(&today));
+                let (text, saved) = house.raise(&self.terms(&today));
                 if let Err(why) = saved {
                     self.say(why);
                 }

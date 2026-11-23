@@ -749,7 +749,7 @@ fn serve(
     // Der Name des Dienstes kommt aus der Adresse, die wirklich benutzt wird,
     // damit die Bitte um Zustimmung nichts anderes nennt.
     let service = rusty_fish_house::texts::service_name(&base_url);
-    Ok(DoorProfile { name, config, state_path, model, service })
+    Ok(DoorProfile { name, config, state_path, model, service, shared: None })
 }
 
 fn now() -> u64 {

@@ -4,6 +4,7 @@
 //! was Discord eigen ist: die graue Zeile, die Länge einer Nachricht und
 //! welche Namen ein Webhook tragen darf.
 
+use rusty_fish_house::config::Door;
 use rusty_fish_house::texts::untranslated_note;
 
 // Das Teilen eines langen Textes braucht jede Tür; es steht seit dem
@@ -33,9 +34,23 @@ pub fn render_in(delivery: &Delivery, tongue: Tongue) -> String {
     }
 }
 
+/// Name, unter dem erscheint, was an einer anderen Tür geschrieben wurde: mit
+/// der Tür dahinter, etwa „Robin (Matrix)". So sieht man im Kanal, über
+/// welche Tür jemand schreibt (entschieden von Nemesus am 23.11.2026). Ein
+/// langer Name wird gekürzt, nicht der Zusatz.
+pub fn hook_name_from(name: &str, door: Door) -> String {
+    let suffix = format!(" ({})", door.label());
+    let room = HOOK_NAME_LIMIT.saturating_sub(suffix.chars().count());
+    let short: String = hook_name(name).chars().take(room).collect();
+    format!("{}{suffix}", short.trim_end())
+}
+
+/// So lang darf der Name eines Webhooks bei Discord sein.
+const HOOK_NAME_LIMIT: usize = 80;
+
 /// Name, unter dem eine Zustellung erscheint. Discord lehnt manche Namen ab.
 pub fn hook_name(name: &str) -> String {
-    let mut out: String = name.trim().chars().take(80).collect();
+    let mut out: String = name.trim().chars().take(HOOK_NAME_LIMIT).collect();
     // Discord verbietet diese Wörter in Namen von Webhooks.
     for banned in ["discord", "clyde"] {
         while let Some(at) = out.to_ascii_lowercase().find(banned) {

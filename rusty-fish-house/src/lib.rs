@@ -13,13 +13,15 @@
 //! Diese Schicht kennt kein Netz. Eine Tür reicht herein, was ankam, und
 //! setzt ab, was hier herauskommt (siehe [`household`]).
 //!
-//! Seit dem 22.11.2026 gibt es zwei Türen, Discord und Matrix. Benannte
-//! Grenzen:
-//! - Ein Profil steht an genau einer Tür (siehe `config`).
+//! Seit dem 22.11.2026 gibt es zwei Türen, Discord und Matrix. Seit dem
+//! 23.11.2026 kann ein Profil Tische an beiden haben; was die Türen dann
+//! teilen, steht in [`between`]. Benannte Grenzen:
 //! - Die Lesemarke je Kanal ist eine Zahl, die wächst (siehe `state`). Das
 //!   stimmt bei Discord. Matrix zählt Nachrichten nicht; seine Tür vergibt
-//!   die Zahl selbst.
+//!   die Zahl selbst. In einem Profil an zwei Türen stehen beide Zählungen
+//!   nebeneinander, jede an ihrem Kanal.
 
+pub mod between;
 pub mod clock;
 pub mod config;
 pub mod document;

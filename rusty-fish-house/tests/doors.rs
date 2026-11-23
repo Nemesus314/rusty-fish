@@ -133,12 +133,7 @@ fn the_host_needs_an_id_at_the_door_of_the_profile() {
 }
 
 #[test]
-fn a_profile_serves_one_door() {
-    let mixed = MATRIX.replace("matrix = \"!russisch:example.org\"", "discord = \"222\"");
-    let err = Config::parse(&mixed).unwrap_err();
-    assert!(err.contains("has a seat at Discord"), "got {err}");
-    assert!(err.contains("first seat of this profile is at Matrix"), "got {err}");
-    assert!(err.contains("second profile"), "the message says what to do instead: {err}");
+fn a_table_stands_at_one_door() {
     // Ein Tisch an zwei Türen zugleich ist ein Versehen.
     let both = MATRIX.replace(
         "matrix = \"!russisch:example.org\"",

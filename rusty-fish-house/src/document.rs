@@ -208,7 +208,8 @@ impl From<&Config> for Document {
                             // "German" stehen hat, soll das wiederfinden.
                             let written = config.written.get(&seat.channel);
                             DocSeat {
-                                door: config.door.id().to_owned(),
+                                // Jeder Tisch nennt seine eigene Tür.
+                                door: written.map_or(config.door, |w| w.door).id().to_owned(),
                                 channel: seat.channel.clone(),
                                 lang: written.map_or_else(|| seat.lang.clone(), |w| w.lang.clone()),
                                 gender: written

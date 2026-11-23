@@ -12,17 +12,22 @@
 //! seine Tür (`discord = "..."` oder `matrix = "..."`), ein Mensch kann an
 //! jeder eine Kennung tragen.
 //!
+//! Seit dem 23.11.2026 dürfen die Tische eines Profils an verschiedenen Türen
+//! stehen, auch die eines Raums: der gemischte Raum. Die Türen eines solchen
+//! Profils teilen sich seinen Haushalt (siehe [`crate::between`]).
+//!
 //! Benannte Grenzen:
-//! - Ein Profil hat Tische an genau einer Tür. Der Haushalt eines Profils
-//!   gehört der Tür, die es bedient; für einen Raum mit Tischen an beiden
-//!   müssten zwei Türen sich einen Haushalt teilen und einander Zustellungen
-//!   zureichen. Das ist nicht gebaut.
-//! - Innen steht ein Mensch unter einem Schlüssel: seiner Kennung an der Tür
-//!   des Profils, sonst seinem Namen. Eine Kennung an der anderen Tür steht
-//!   nur dabei.
+//! - Innen steht ein Mensch unter einem Schlüssel: seiner Kennung an der
+//!   ersten Tür des Profils (der seines ersten Tisches), sonst der an einer
+//!   anderen Tür, an der das Profil Tische hat, sonst seinem Namen. Eine
+//!   Kennung an einer Tür, an der das Profil keinen Tisch hat, steht nur dabei.
 //! - Zustimmung, Fragenzähler und Lesemarken hängen an der Kennung, nicht am
-//!   Namen. Dass zwei Kennungen derselbe Mensch sind, behauptet nur der
-//!   Gastgeber; darauf darf keine Zustimmung ruhen.
+//!   Namen und nicht am Schlüssel. Dass zwei Kennungen derselbe Mensch sind,
+//!   behauptet nur der Gastgeber; darauf darf keine Zustimmung ruhen. Wer in
+//!   einem gemischten Raum an beiden Türen schreibt, wird an jeder gefragt und
+//!   hat an jeder sein eigenes Fragenlimit.
+//! - Der Gastgeber ist an jeder Tür der Gastgeber, an der er eine Kennung
+//!   trägt: es ist sein Profil, und er hat sie selbst eingetragen.
 
 use rusty_fish_providers::Provider;
 use rusty_fish_room::tongue::{Tongue, tongue_of};
@@ -43,10 +48,15 @@ pub struct Config {
     /// Eine eigene Adresse statt der des Dienstes. Bei einem selbst gehosteten
     /// Modell („custom") ist sie Pflicht, sonst eine Überschreibung.
     pub base_url: Option<String>,
-    /// Die Tür, an der alle Tische dieses Profils stehen.
+    /// Die erste Tür dieses Profils: die seines ersten Tisches. Stehen alle
+    /// Tische an einer Tür, ist es diese.
     pub door: Door,
-    /// Die Kennung des Gastgebers an dieser Tür. Wer den Fisch startet, hat
-    /// zugestimmt.
+    /// Alle Türen, an denen dieses Profil Tische hat, die erste zuerst.
+    pub doors: Vec<Door>,
+    /// Der Schlüssel des Gastgebers: seine Kennung an der ersten Tür, sonst
+    /// die an einer anderen Tür des Profils. Wer den Fisch startet, hat
+    /// zugestimmt. Ob jemand der Gastgeber ist, sagt [`Config::is_host`];
+    /// seine Kennung an einer bestimmten Tür [`Config::host_at`].
     pub host: String,
     /// Der Gastgeber, wie er im Profil steht: sein Name oder seine Kennung.
     /// Die Maske zeigt und speichert das Eingetragene.
@@ -64,10 +74,11 @@ pub struct Config {
     /// schon, was dort gilt (siehe [`Written`] für das, was eingetragen wurde).
     pub rooms: Vec<Room>,
     /// Was der Gastgeber über einzelne Menschen eingetragen hat. Freiwillig.
-    /// Der Schlüssel ist die Kennung des Menschen an der Tür des Profils; hat
-    /// er dort noch keine, sein Name. Die beiden können nicht zusammenfallen:
-    /// eine Discord-Kennung besteht nur aus Ziffern, eine Matrix-Kennung
-    /// beginnt mit `@`, ein Name tut keines von beiden.
+    /// Der Schlüssel ist die Kennung des Menschen an der ersten Tür des
+    /// Profils, sonst die an einer anderen seiner Türen; hat er noch keine,
+    /// sein Name. Sie können nicht zusammenfallen: eine Discord-Kennung
+    /// besteht nur aus Ziffern, eine Matrix-Kennung beginnt mit `@`, ein Name
+    /// tut keines von beiden.
     ///
     /// Entschieden am 19.11.2026: beide Kanäle bleiben für beide offen.
     /// Nemesus: „Sie soll ruhig auch den Kanal #tee sehen können und sich
@@ -78,6 +89,10 @@ pub struct Config {
     /// sind. Die Maske zeigt sie so wieder und findet nach dem Speichern vor,
     /// was sie geschickt hat; nach Kennung sortiert stünde "9" hinter "42".
     pub people_order: Vec<String>,
+    /// Von jeder Kennung eines Menschen an einer Tür dieses Profils zu seinem
+    /// Schlüssel. Wer in einem gemischten Raum an beiden Türen eine Kennung
+    /// trägt, wird so unter jeder gefunden.
+    pub ids: BTreeMap<String, String>,
     /// Was zu jedem Platz in der Datei steht, nach Kanal. Die Maske zeigt und
     /// speichert das Eingetragene, nicht das daraus Abgeleitete.
     pub written: BTreeMap<String, Written>,
@@ -123,6 +138,8 @@ pub struct Person {
 /// Was zu einem Platz in der Datei steht.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Written {
+    /// Die Tür, an der dieser Tisch steht.
+    pub door: Door,
     pub lang: String,
     pub gender: Option<Gender>,
     /// Der Mensch, dessen Tisch das ist: sein Schlüssel in [`Config::people`].
@@ -147,7 +164,7 @@ impl Person {
 pub const DOORS: [&str; 2] = ["discord", "matrix"];
 
 /// Eine Tür: der Dienst, über den Menschen mit dem Fisch schreiben.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Door {
     Discord,
     Matrix,
@@ -294,15 +311,18 @@ impl Config {
         if model.is_empty() {
             return Err("configuration: `model` is empty".to_owned());
         }
-        // Die Tür des Profils: die des ersten Tisches. Sie entscheidet, unter
-        // welcher Kennung ein Mensch innen steht. Dass alle Tische an ihr
-        // stehen, prüft die Schleife über die Tische weiter unten.
-        let door = raw
-            .rooms
-            .iter()
-            .flat_map(|room| room.seats.iter())
-            .find_map(RawSeat::door)
-            .unwrap_or(Door::Discord);
+        // Die Türen des Profils: die seiner Tische, die des ersten zuerst. Die
+        // erste entscheidet, unter welcher Kennung ein Mensch innen steht.
+        let mut doors: Vec<Door> = Vec::new();
+        for door in raw.rooms.iter().flat_map(|room| room.seats.iter()).filter_map(RawSeat::door) {
+            if !doors.contains(&door) {
+                doors.push(door);
+            }
+        }
+        if doors.is_empty() {
+            doors.push(Door::Discord);
+        }
+        let door = doors[0];
 
         // Die Menschen zuerst: `host` und `owner` zeigen mit Namen auf sie, und
         // was an einem Tisch gilt, hängt an seinem Besitzer.
@@ -310,6 +330,8 @@ impl Config {
         let mut people_order = Vec::new();
         // Vom Namen zum Schlüssel.
         let mut names: BTreeMap<String, String> = BTreeMap::new();
+        // Von jeder Kennung an einer Tür des Profils zum Schlüssel.
+        let mut ids: BTreeMap<String, String> = BTreeMap::new();
         for (n, person) in raw.people.into_iter().enumerate() {
             let name = read_person_name(person.name.as_deref())?;
             let discord = match (filled(person.discord.as_deref()), filled(person.id.as_deref())) {
@@ -328,19 +350,21 @@ impl Config {
                 Some(id) => Some(matrix_user_id(id, "matrix")?),
                 None => None,
             };
-            // Die Kennung an der Tür des Profils, sonst der Name. Eines von
-            // beiden muss da sein, sonst wäre der Eintrag über niemanden.
-            let here = match door {
+            // Die Kennung an einer Tür des Profils, die erste Tür zuerst, sonst
+            // der Name. Eines davon muss da sein, sonst wäre der Eintrag über
+            // niemanden.
+            let at = |door: &Door| match door {
                 Door::Discord => discord.clone(),
                 Door::Matrix => matrix.clone(),
             };
-            let Some(key) = here.or_else(|| name.clone()) else {
+            let Some(key) = doors.iter().find_map(at).or_else(|| name.clone()) else {
                 return Err(format!(
-                    "configuration: person {} needs a `name` or a `{}` id",
+                    "configuration: person {} needs a `name` or a {} id",
                     n + 1,
-                    door.id()
+                    one_of(&doors, |door| format!("`{}`", door.id()))
                 ));
             };
+            let here: Vec<String> = doors.iter().filter_map(at).collect();
             let entry = Person {
                 // Bis zum 20.11.2026 war das Geschlecht hier Pflicht, weil ein
                 // Eintrag sonst nichts aussagte. Seit ein Mensch auch Sprache
@@ -357,6 +381,12 @@ impl Config {
             if people.insert(key.clone(), entry).is_some() {
                 return Err(format!("configuration: person {key} is listed twice"));
             }
+            // Dasselbe für jede weitere Kennung: sie zeigt auf einen Menschen.
+            for id in here {
+                if ids.insert(id.clone(), key.clone()).is_some() {
+                    return Err(format!("configuration: person {id} is listed twice"));
+                }
+            }
             if let Some(name) = name
                 && names.insert(name.clone(), key.clone()).is_some()
             {
@@ -368,14 +398,15 @@ impl Config {
         // Der Gastgeber: sein Name oder, wie von Anfang an, seine Kennung. Die
         // Kennung braucht der Fisch in jedem Fall: an ihr erkennt er an der
         // Tür, wer der Gastgeber ist, und an sie schickt er dessen Hinweise.
+        // In einem Profil mit zwei Türen genügt eine an einer von beiden.
         let host_written = raw.host.trim().to_owned();
-        let host = points_at(&host_written, "host", door, &names)?;
-        if !door.is_user_id(&host) {
+        let host = points_at(&host_written, "host", &doors, &names, &ids)?;
+        if !doors.iter().any(|door| door.is_user_id(&host)) {
             return Err(format!(
-                "configuration: the host {host_written:?} needs a {} id: add \
-                 `{} = \"...\"` to that `[[person]]`",
-                door.label(),
-                door.id()
+                "configuration: the host {host_written:?} needs a {} id: add {} to that \
+                 `[[person]]`",
+                one_of(&doors, |door| door.label().to_owned()),
+                one_of(&doors, |door| format!("`{} = \"...\"`", door.id()))
             ));
         }
         if raw.rooms.is_empty() {
@@ -422,17 +453,6 @@ impl Config {
                         ));
                     }
                 };
-                // Ein Profil, eine Tür (siehe die benannten Grenzen oben).
-                if seat_door != door {
-                    return Err(format!(
-                        "configuration: room {} has a seat at {}, but the first seat of this \
-                         profile is at {}; a profile serves one door so far, make a second \
-                         profile for the other door",
-                        n + 1,
-                        seat_door.label(),
-                        door.label()
-                    ));
-                }
                 let lang = seat.lang.trim().to_owned();
                 if lang.is_empty() {
                     return Err(format!("configuration: `lang` is empty for channel {channel}"));
@@ -446,10 +466,13 @@ impl Config {
                 let owner_written = filled(seat.owner.as_deref()).map(str::to_owned);
                 let owner = match &owner_written {
                     None => None,
-                    Some(who) => Some(points_at(who, "owner", door, &names)?),
+                    Some(who) => Some(points_at(who, "owner", &doors, &names, &ids)?),
                 };
                 seats.push(at_the_table(&channel, &lang, gender, owner.as_deref(), &host, &people));
-                written.insert(channel, Written { lang, gender, owner, owner_written });
+                written.insert(
+                    channel,
+                    Written { door: seat_door, lang, gender, owner, owner_written },
+                );
             }
             rooms.push(Room {
                 seats,
@@ -488,6 +511,7 @@ impl Config {
             model,
             base_url,
             door,
+            doors,
             host,
             host_written,
             ai_names,
@@ -495,8 +519,54 @@ impl Config {
             rooms,
             people,
             people_order,
+            ids,
             written,
         })
+    }
+
+    /// An welcher Tür steht dieser Tisch?
+    pub fn door_of(&self, channel: &str) -> Option<Door> {
+        self.written.get(channel).map(|written| written.door)
+    }
+
+    /// Steht dieses Profil an mehr als einer Tür?
+    pub fn is_mixed(&self) -> bool {
+        self.doors.len() > 1
+    }
+
+    /// Der Schlüssel des Menschen mit dieser Kennung. Wer nicht eingetragen
+    /// ist, steht unter seiner Kennung selbst.
+    pub fn key_of<'a>(&'a self, user: &'a str) -> &'a str {
+        self.ids.get(user).map_or(user, String::as_str)
+    }
+
+    /// Ist das die Kennung des Gastgebers, an welcher Tür auch immer?
+    pub fn is_host(&self, user: &str) -> bool {
+        self.key_of(user) == self.host
+    }
+
+    /// Die Kennung des Gastgebers an dieser Tür, wenn er dort eine trägt.
+    pub fn host_at(&self, door: Door) -> Option<&str> {
+        match self.people.get(&self.host) {
+            Some(person) => person.id_at(door),
+            // Nicht unter `[[person]]`: dann ist der Schlüssel seine Kennung.
+            None => door.is_user_id(&self.host).then_some(self.host.as_str()),
+        }
+    }
+
+    /// Die Tür, an der der Gastgeber seine Hinweise bekommt: die seines
+    /// eigenen Tisches (des ersten im Profil, der ihm gehört), wenn er dort
+    /// eine Kennung trägt; sonst die erste Tür, an der er eine trägt.
+    pub fn host_door(&self) -> Door {
+        let own = self
+            .rooms
+            .iter()
+            .flat_map(|room| room.seats.iter())
+            .filter(|seat| self.owner_of(&seat.channel) == Some(self.host.as_str()))
+            .filter_map(|seat| self.door_of(&seat.channel))
+            .find(|door| self.host_at(*door).is_some());
+        own.or_else(|| self.doors.iter().copied().find(|door| self.host_at(*door).is_some()))
+            .unwrap_or(self.door)
     }
 
     /// Die Adresse des Dienstes, die wirklich benutzt wird: die eigene aus dem
@@ -529,7 +599,7 @@ impl Config {
     /// Das grammatische Geschlecht, das der Gastgeber für diese Person
     /// eingetragen hat.
     pub fn gender_of(&self, user: &str) -> Option<Gender> {
-        self.people.get(user).and_then(|p| p.gender)
+        self.people.get(self.key_of(user)).and_then(|p| p.gender)
     }
 
     /// Das grammatische Geschlecht für jemanden, der an diesem Kanal schreibt
@@ -613,13 +683,16 @@ impl Config {
         if !self.seat_of(channel).is_some_and(|seat| seat.served) {
             return false;
         }
+        let user = self.key_of(user);
         if user == self.host || self.people.get(user).is_some_and(|person| person.invited) {
             return true;
         }
+        // Die Kennung, die fehlen kann, ist die an der Tür dieses Tisches.
+        let door = self.door_of(channel).unwrap_or(self.door);
         match self.owner_of(channel) {
             None => true,
             Some(owner) => {
-                self.people.get(owner).is_some_and(|p| p.invited && p.id_at(self.door).is_none())
+                self.people.get(owner).is_some_and(|p| p.invited && p.id_at(door).is_none())
             }
         }
     }
@@ -765,29 +838,35 @@ fn read_person_name(value: Option<&str>) -> Result<Option<String>, String> {
 
 /// Auf wen `host` oder `owner` zeigt: der Schlüssel des Menschen.
 ///
-/// Eine Kennung an der Tür des Profils gilt, wie von Anfang an die Ziffern
-/// von Discord; dieser Mensch muss nicht unter `[[person]]` stehen. Alles
-/// andere ist ein Name und muss dort stehen, sonst wäre ein Tippfehler ein
-/// Tisch für niemanden.
+/// Eine Kennung an einer Tür des Profils gilt, wie von Anfang an die Ziffern
+/// von Discord; dieser Mensch muss nicht unter `[[person]]` stehen. Steht er
+/// dort, zeigt die Kennung auf seinen Schlüssel. Alles andere ist ein Name
+/// und muss dort stehen, sonst wäre ein Tippfehler ein Tisch für niemanden.
 fn points_at(
     value: &str,
     field: &str,
-    door: Door,
+    doors: &[Door],
     names: &BTreeMap<String, String>,
+    ids: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     let value = value.trim();
-    if door.is_user_id(value) {
-        return door.user_id(value, field);
+    if let Some(door) = doors.iter().find(|door| door.is_user_id(value)) {
+        let id = door.user_id(value, field)?;
+        return Ok(ids.get(&id).cloned().unwrap_or(id));
     }
     let name = value.split_whitespace().collect::<Vec<_>>().join(" ");
     names.get(&name).cloned().ok_or_else(|| {
         format!(
-            "configuration: `{field}` must be the name of a `[[person]]` or a {} id ({}), got \
-             {value:?}",
-            door.label(),
-            door.user_id_shape()
+            "configuration: `{field}` must be the name of a `[[person]]` or a {}, got {value:?}",
+            one_of(doors, |door| format!("{} id ({})", door.label(), door.user_id_shape()))
         )
     })
+}
+
+/// Eine Aufzählung über die Türen eines Profils, für Meldungen: bei einer Tür
+/// nur ihr Wort, bei mehreren mit „or" dazwischen.
+fn one_of(doors: &[Door], word: impl Fn(Door) -> String) -> String {
+    doors.iter().map(|door| word(*door)).collect::<Vec<_>>().join(" or ")
 }
 
 /// Die Kennung eines Menschen bei Matrix: `@name:server`. Geprüft wird die

@@ -5,6 +5,7 @@
 //! verstehen dieselben Worte, und das Programm muss nicht wissen, an welche
 //! Tür es gerade spricht.
 
+use crate::between::Shared;
 use crate::config::Config;
 use std::path::PathBuf;
 
@@ -20,6 +21,10 @@ pub struct Profile<M> {
     /// Der Name des KI-Dienstes, zu dem `model` spricht. Er kommt vom
     /// Aufrufer, weil nur der die Adresse kennt, die wirklich benutzt wird.
     pub service: String,
+    /// Steht das Profil an mehr als einer Tür: was es dort mit den anderen
+    /// teilt. `None` heißt: es steht an einer Tür, und die führt seinen
+    /// Haushalt allein, wie von Anfang an.
+    pub shared: Option<Shared>,
 }
 
 /// Was der Aufrufer einer laufenden Tür sagen kann.

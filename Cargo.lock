@@ -3776,11 +3776,15 @@ version = "0.3.0"
 name = "rusty-fish-discord"
 version = "0.3.0"
 dependencies = [
+ "futures-util",
  "rusty-fish-core",
  "rusty-fish-house",
  "rusty-fish-room",
+ "serde_json",
  "serenity",
  "tokio",
+ "tokio-tungstenite",
+ "wiremock",
 ]
 
 [[package]]
@@ -3792,6 +3796,7 @@ dependencies = [
  "rusty-fish-room",
  "serde",
  "serde_json",
+ "tokio",
  "toml",
 ]
 

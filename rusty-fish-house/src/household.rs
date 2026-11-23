@@ -178,7 +178,7 @@ impl Household {
         }
 
         // Wer den Fisch startet, hat zugestimmt.
-        let is_host = msg.author == config.host;
+        let is_host = config.is_host(msg.author);
         // Die Zustimmung gilt dem KI-Dienst, den die Bitte genannt hat. Nach
         // einem Wechsel des Dienstes wird neu gefragt.
         let consented = is_host || self.store.has_consented(msg.author, terms.service);
@@ -325,7 +325,7 @@ impl Household {
                 &mut tally,
                 &house,
                 &incoming,
-                user == config.host,
+                config.is_host(user),
             )
             .await;
             out.extend(
@@ -415,12 +415,13 @@ async fn consent_request<M: Model + Sync>(
 ) -> String {
     let config = terms.config;
     let lang = config.lang_of(channel).unwrap_or("English");
-    // Der Wortlaut hängt an der Tür: bei Matrix ist der Tisch ein Raum, und
-    // der Server gehört nicht dem Gastgeber.
+    // Der Wortlaut hängt an der Tür dieses Tisches: bei Matrix ist der Tisch
+    // ein Raum, und der Server gehört nicht dem Gastgeber.
+    let door = config.door_of(channel).unwrap_or(config.door);
     if let Some(tongue) = known_tongue(lang) {
-        return consent_text_at(config.door, tongue, terms.service);
+        return consent_text_at(door, tongue, terms.service);
     }
-    let base = consent_text_at(config.door, Tongue::English, terms.service);
+    let base = consent_text_at(door, Tongue::English, terms.service);
     let request = Request {
         speaker: "fish",
         text: &base,

@@ -13,6 +13,7 @@ use matrix_sdk::test_utils::mocks::MatrixMockServer;
 use matrix_sdk_test::{InvitedRoomBuilder, JoinedRoomBuilder};
 use matrix_sdk_test::event_factory::EventFactory;
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
+use rusty_fish_house::between::no_line;
 use rusty_fish_house::config::Config;
 use rusty_fish_house::texts::switched;
 use rusty_fish_room::tongue::Tongue;
@@ -217,6 +218,7 @@ async fn a_conversation_takes_its_course_through_the_matrix_door() {
         state_path: dir.join("tea.state.json"),
         model: fake.clone(),
         service: "ai.example".to_owned(),
+        shared: None,
     };
     let (to_door, commands) = unbounded_channel();
     let serving = Arc::new(Mutex::new(Vec::new()));
@@ -226,7 +228,7 @@ async fn a_conversation_takes_its_course_through_the_matrix_door() {
     };
     let store = dir.join("store");
     let door = tokio::spawn(async move {
-        run(&access, &store, vec![profile], false, commands, on_change).await
+        run(&access, &store, vec![profile], false, commands, no_line(), on_change).await
     });
 
     // --- der Gastgeber schreibt: am anderen Tisch erscheint die Übersetzung ---
@@ -395,12 +397,13 @@ async fn the_fish_says_at_its_tables_when_it_is_switched_on_and_off() {
         state_path: dir.join("tea.state.json"),
         model: Fake::default(),
         service: "ai.example".to_owned(),
+        shared: None,
     };
     let (to_door, commands) = unbounded_channel();
     let first = profile();
     let store = dir.join("store");
     let door = tokio::spawn(async move {
-        run(&access, &store, vec![first], false, commands, Box::new(|_: &[String]| {})).await
+        run(&access, &store, vec![first], false, commands, no_line(), Box::new(|_: &[String]| {})).await
     });
 
     async fn lines(server: &MatrixMockServer, count: usize) -> Vec<(String, bool, String)> {
@@ -541,6 +544,7 @@ async fn what_was_written_before_the_fish_entered_a_room_is_not_translated() {
         state_path: dir.join("tea.state.json"),
         model: fake.clone(),
         service: "ai.example".to_owned(),
+        shared: None,
     };
     let (to_door, commands) = unbounded_channel();
     let store = dir.join("store");
@@ -551,6 +555,7 @@ async fn what_was_written_before_the_fish_entered_a_room_is_not_translated() {
             vec![profile],
             false,
             commands,
+            no_line(),
             Box::new(|_| {}),
         )
         .await
@@ -688,11 +693,12 @@ async fn the_fish_does_not_enter_a_space() {
         state_path: dir.join("tea.state.json"),
         model: Fake::default(),
         service: "ai.example".to_owned(),
+        shared: None,
     };
     let (to_door, commands) = unbounded_channel();
     let store = dir.join("store");
     let door = tokio::spawn(async move {
-        run(&access, &store, vec![profile], false, commands, Box::new(|_| {})).await
+        run(&access, &store, vec![profile], false, commands, no_line(), Box::new(|_| {})).await
     });
 
     // Die Mitteilung an die Eingeladene kommt, wenn die Verbindung steht und
@@ -733,10 +739,11 @@ async fn a_discord_profile_is_turned_away_before_the_fish_shows_itself() {
         state_path: dir.join("tea.state.json"),
         model: Fake::default(),
         service: "ai.example".to_owned(),
+        shared: None,
     };
     let (_to_door, commands) = unbounded_channel();
     let ended =
-        run(&access, &dir.join("store"), vec![profile], false, commands, Box::new(|_| {})).await;
+        run(&access, &dir.join("store"), vec![profile], false, commands, no_line(), Box::new(|_| {})).await;
     let err = ended.unwrap_err();
     assert!(err.contains("stands at the Discord door"), "got {err}");
     // Mit dem Server hat der Fisch dafür nicht gesprochen.

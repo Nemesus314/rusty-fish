@@ -3,7 +3,10 @@
 //! Namen, die ein Webhook tragen darf.
 
 use rusty_fish_discord::mention::{mention_as_call, mention_question};
-use rusty_fish_discord::render::{MESSAGE_LIMIT, chunks, hook_name, render, render_in};
+use rusty_fish_discord::render::{
+    MESSAGE_LIMIT, chunks, hook_name, hook_name_from, render, render_in,
+};
+use rusty_fish_house::config::Door;
 use rusty_fish_house::texts::{consent_text_in, invitation};
 use rusty_fish_room::tongue::Tongue;
 use rusty_fish_room::{BUDGET_USED_UP, Delivery, Mark, Reason, Sender};
@@ -148,6 +151,20 @@ fn hook_names_are_ones_discord_accepts() {
     assert!(!hook_name("Discord Fan").to_lowercase().contains("discord"));
     assert!(!hook_name("clyde").to_lowercase().contains("clyde"));
     assert_eq!(hook_name(&"ä".repeat(200)).chars().count(), 80);
+}
+
+/// Entschieden von Nemesus am 23.11.2026: wer in einem Matrix-Raum schreibt,
+/// erscheint bei Discord mit der Tür hinter dem Namen.
+#[test]
+fn a_writer_from_another_door_carries_that_door_behind_the_name() {
+    assert_eq!(hook_name_from("Robin", Door::Matrix), "Robin (Matrix)");
+    assert_eq!(hook_name_from("  ", Door::Matrix), "Guest (Matrix)");
+    // Ein langer Name wird gekürzt, nicht der Zusatz.
+    let long = hook_name_from(&"ä".repeat(200), Door::Matrix);
+    assert_eq!(long.chars().count(), 80);
+    assert!(long.ends_with(" (Matrix)"), "got {long}");
+    // Auch hier kein Wort, das Discord in Namen verbietet.
+    assert!(!hook_name_from("Discord Fan", Door::Matrix).to_lowercase().contains("discord"));
 }
 
 // --- die graue Zeile in drei Sprachen ----------------------------------------

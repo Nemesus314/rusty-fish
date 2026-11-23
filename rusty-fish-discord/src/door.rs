@@ -58,21 +58,31 @@
 //!   denselben Kanal nennt, wird nicht gestartet.
 //! - Alle Profile eines Fischs teilen sich einen Bot.
 //!
+//! Seit dem 23.11.2026 kann ein Profil auch Tische an einer anderen Tür haben
+//! (der gemischte Raum, siehe `rusty_fish_house::between`). Dann teilt diese
+//! Tür den Haushalt des Profils mit der anderen. Was an einem Tisch der
+//! anderen Tür erscheinen soll, reicht sie ihr zu; was die andere für einen
+//! Kanal dieser Tür hat, setzt sie ab. Benannte Grenzen dabei:
+//! - Wer an der anderen Tür schrieb, erscheint hier mit ihr hinter dem Namen,
+//!   etwa „Robin (Matrix)", und mit dem Standardbild des Webhooks.
+//! - Nachgeholt werden nur die Kanäle dieser Tür.
+//!
 //! In die Ausgabe des Programms gelangen nur Kanal-Kennungen und Fehlergründe,
 //! nie der Text einer Nachricht.
 
 use crate::buttons::{Budget, CONSENT, budget_id, budget_of};
 use crate::mention::mention_as_call;
-use crate::render::{MESSAGE_LIMIT, chunks, hook_name, render_in};
+use crate::render::{MESSAGE_LIMIT, chunks, hook_name, hook_name_from, render_in};
 use rusty_fish_core::Model;
+use rusty_fish_house::between::{Errand, Handed, Lines, Writer, by_door};
 use rusty_fish_house::clock::today;
-use rusty_fish_house::config::Config;
+use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
 use rusty_fish_house::served::{label_of, title_of};
 use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation};
 use rusty_fish_room::{Delivery, Sender};
 use serenity::all::{
-    ButtonStyle, Channel, ChannelId, Client, ComponentInteraction, Context, CreateAllowedMentions,
+    ButtonStyle, Channel, ChannelId, ClientBuilder, ComponentInteraction, Context, CreateAllowedMentions,
     CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
     CreateWebhook, EditInteractionResponse, EventHandler, ExecuteWebhook, GatewayIntents,
     GetMessages, Http, Interaction, Message, MessageId, Ready, UserId, Webhook,
@@ -102,17 +112,18 @@ struct Served<M> {
     config: Config,
     /// Der Name des KI-Dienstes, wie er in der Bitte um Zustimmung steht.
     service: String,
-    /// Ein Schloss für alles Veränderliche dieses Profils. Es hält die
-    /// Nachrichten eines Raums in der Reihenfolge, in der sie geschrieben
-    /// wurden: Discord meldet sie gleichzeitig, das Schloss lässt sie einzeln
-    /// durch.
-    inner: Mutex<Inner>,
-}
-
-struct Inner {
-    /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen hat.
-    house: Household,
-    hooks: HashMap<ChannelId, Webhook>,
+    /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen
+    /// hat. Sein Schloss hält die Nachrichten eines Profils in der
+    /// Reihenfolge, in der sie geschrieben wurden: Discord meldet sie
+    /// gleichzeitig, das Schloss lässt sie einzeln durch. Steht das Profil
+    /// auch an einer anderen Tür, ist es derselbe Haushalt wie dort.
+    house: Arc<Mutex<Household>>,
+    /// Die Leitungen zu den anderen Türen, wenn das Profil auch dort steht.
+    lines: Option<Arc<Lines>>,
+    /// Die Webhooks der Kanäle, in die der Fisch schon geschrieben hat. Ein
+    /// eigenes Schloss: auch was eine andere Tür zureicht, wird hier
+    /// abgesetzt, während jene das Schloss des Haushalts hält.
+    hooks: Mutex<HashMap<ChannelId, Webhook>>,
 }
 
 /// Der Fisch an der Discord-Tür: die Profile, die er gerade bedient.
@@ -145,11 +156,32 @@ struct Handler<M>(Arc<Fish<M>>);
 /// Profil bleibt weg und sagt, warum, und die anderen laufen; so startet
 /// „alle Profile". Kann keines aufgenommen werden, startet der Fisch in
 /// beiden Fällen nicht.
+///
+/// Über `handed` kommt, was eine andere Tür dieser zureicht (siehe
+/// `rusty_fish_house::between`); wer nur diese eine Tür betreibt, übergibt
+/// eine Leitung, an deren anderem Ende niemand ist.
 pub async fn run<M>(
     token: &str,
     first: Vec<Profile<M>>,
     lenient: bool,
+    commands: UnboundedReceiver<Command<M>>,
+    handed: UnboundedReceiver<Handed>,
+    on_change: OnChange,
+) -> Result<(), String>
+where
+    M: Model + Send + Sync + 'static,
+{
+    run_with(Http::new(token), first, lenient, commands, handed, on_change).await
+}
+
+/// Wie [`run`], mit einem fertigen Zugang zur Schnittstelle von Discord. So
+/// läuft die Tür in Tests gegen eine nachgestellte Seite.
+pub async fn run_with<M>(
+    http: Http,
+    first: Vec<Profile<M>>,
+    lenient: bool,
     mut commands: UnboundedReceiver<Command<M>>,
+    mut handed: UnboundedReceiver<Handed>,
     on_change: OnChange,
 ) -> Result<(), String>
 where
@@ -179,10 +211,29 @@ where
     // MESSAGE_CONTENT muss im Entwicklerportal von Discord eingeschaltet sein,
     // sonst kommen die Nachrichten ohne Text an.
     let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-    let mut client = Client::builder(token, intents)
+    let mut client = ClientBuilder::new_with_http(http, intents)
         .event_handler(Handler(fish.clone()))
         .await
         .map_err(|e| format!("cannot set up the Discord connection: {e}"))?;
+
+    // Was eine andere Tür dieser zureicht. Jeder Auftrag für sich: die Tür,
+    // die ihn zureicht, wartet auf ihn und hält so die Reihenfolge ihres
+    // Profils; ein zweites Profil soll darauf nicht warten. Abgesetzt wird
+    // über die Schnittstelle, nicht über die Verbindung: das geht, sobald
+    // der Zugang eingerichtet ist.
+    tokio::spawn({
+        let fish = fish.clone();
+        let http = client.http.clone();
+        async move {
+            while let Some(handed) = handed.recv().await {
+                let (fish, http) = (fish.clone(), http.clone());
+                tokio::spawn(async move {
+                    let done = fish.take(&http, handed.profile.as_deref(), handed.errand).await;
+                    let _ = handed.done.send(done);
+                });
+            }
+        }
+    });
 
     // Sauberes Anhalten. Gemessen von Nemesus am 20.11.2026: wurde der Fisch
     // hart beendet, stand der Bot in Discord noch eine Weile als online da,
@@ -238,13 +289,41 @@ where
     /// teilt der Fisch gleich mit, wer eingeladen ist, und holt nach, was in
     /// den Kanälen dieses Profils verpasst wurde.
     async fn start(&self, http: Option<&Http>, profile: Profile<M>) -> Result<(), String> {
-        let house = Household::open(&profile.config, &profile.state_path)?;
+        // Lehnt diese Tür ein Profil ab, das auch an einer anderen steht,
+        // muss das Programm es hören: es hält das Profil dann überall an.
+        let shared = profile.shared.as_ref().map(|shared| shared.lines.clone());
+        let name = profile.name.clone();
+        let started = self.take_in(http, profile).await;
+        if let (Err(why), Some(lines), Some(name)) = (&started, shared, name) {
+            lines.refuse(Door::Discord, &name, why);
+        }
+        started
+    }
+
+    async fn take_in(&self, http: Option<&Http>, profile: Profile<M>) -> Result<(), String> {
+        if !profile.config.doors.contains(&Door::Discord) {
+            return Err(format!(
+                "this profile stands at the {} door, not at Discord",
+                profile.config.door.label()
+            ));
+        }
+        // Ein Profil an zwei Türen bringt seinen Haushalt mit; sonst führt
+        // ihn diese Tür allein.
+        let (house, lines) = match profile.shared {
+            Some(shared) => (shared.house, Some(shared.lines)),
+            None => {
+                let house = Household::open(&profile.config, &profile.state_path)?;
+                (Arc::new(Mutex::new(house)), None)
+            }
+        };
         let served = Arc::new(Served {
             name: profile.name,
             model: profile.model,
             config: profile.config,
             service: profile.service,
-            inner: Mutex::new(Inner { house, hooks: HashMap::new() }),
+            house,
+            lines,
+            hooks: Mutex::new(HashMap::new()),
         });
         // Prüfen und Aufnehmen unter einem Schloss, zusammen mit der Frage,
         // ob die Verbindung steht: sonst könnte ein Profil genau zwischen dem
@@ -330,6 +409,24 @@ where
             Some(name) => list.iter().find(|s| s.name.as_deref() == Some(name)).cloned(),
             None if list.len() == 1 => list.first().cloned(),
             None => None,
+        }
+    }
+
+    /// Erledigt, was eine andere Tür dieser zugereicht hat: Zustellungen für
+    /// Kanäle dieser Tür, oder der Hinweis an den Gastgeber, der hier liest.
+    async fn take(&self, http: &Http, profile: Option<&str>, errand: Errand) -> Result<(), String> {
+        let Some(served) = self.named(profile).await else {
+            return Err("this profile is not running at the Discord door".to_owned());
+        };
+        match errand {
+            Errand::Deliver { deliveries, writer } => {
+                if served.post_all(http, &deliveries, &writer).await {
+                    Ok(())
+                } else {
+                    Err("not everything arrived; see the lines above".to_owned())
+                }
+            }
+            Errand::TellHost(notice) => served.notify_host(http, &notice).await,
         }
     }
 }
@@ -436,9 +533,8 @@ where
         let user = click.user.id.to_string();
         // Das Schloss bleibt bis zum Ende: was jetzt nachgereicht wird, soll
         // vor dem stehen, was derselbe Mensch gleich danach schreibt.
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
-        let saved = inner.house.consent(&user, &self.service);
+        let mut house = self.house.lock().await;
+        let saved = house.consent(&user, &self.service);
         let reply = match saved {
             Ok(()) => {
                 self.say("consent stored");
@@ -458,7 +554,7 @@ where
         // da er zugestimmt hat, wird es übersetzt nachgereicht: sonst denkt er,
         // er habe etwas gesagt, und niemand konnte es lesen.
         let today = today();
-        let held = inner.house.held_back(&self.model, &self.terms(&today), &user).await;
+        let held = house.held_back(&self.model, &self.terms(&today), &user).await;
         if held.is_empty() {
             return;
         }
@@ -470,35 +566,65 @@ where
             .and_then(|m| m.nick.clone())
             .or_else(|| click.user.global_name.clone())
             .unwrap_or_else(|| click.user.name.clone());
-        self.deliver(http, &mut inner.hooks, &held, &hook_name(&name), &click.user.face(), "").await;
-        if let Err(why) = inner.house.save() {
+        let writer = Writer {
+            door: Door::Discord,
+            name,
+            face: Some(click.user.face()),
+            attachments: String::new(),
+        };
+        self.deliver(http, &held, &writer).await;
+        if let Err(why) = house.save() {
             self.say(why);
         }
     }
 
-    /// Setzt Zustellungen ab: was ein Mensch schrieb, unter seinem Namen und
-    /// Bild; was die KI sagt, unter dem Namen, den der Gastgeber ihr gab.
-    /// Liefert, ob alles ankam.
-    async fn deliver(
-        &self,
-        http: &Http,
-        hooks: &mut HashMap<ChannelId, Webhook>,
-        deliveries: &[Delivery],
-        writer: &str,
-        face: &str,
-        attachments: &str,
-    ) -> bool {
+    /// Setzt Zustellungen ab, jede an der Tür ihres Tisches: die für Kanäle
+    /// dieser Tür hier, die anderen reicht sie der Tür zu, an der ihr Tisch
+    /// steht, und wartet darauf. Liefert, ob alles ankam.
+    async fn deliver(&self, http: &Http, deliveries: &[Delivery], writer: &Writer) -> bool {
+        let (mine, others) = by_door(&self.config, Door::Discord, deliveries);
+        let mut delivered = self.post_all(http, &mine, writer).await;
+        for (door, deliveries) in others {
+            let errand = Errand::Deliver { deliveries, writer: writer.clone() };
+            let handed = match &self.lines {
+                Some(lines) => lines.hand(door, self.name.as_deref(), errand).await,
+                None => Err("this profile was started at one door only".to_owned()),
+            };
+            if let Err(why) = handed {
+                delivered = false;
+                self.say(format_args!("cannot deliver through the {} door: {why}", door.label()));
+            }
+        }
+        delivered
+    }
+
+    /// Setzt Zustellungen in Kanälen dieser Tür ab: was ein Mensch schrieb,
+    /// unter seinem Namen und Bild; was die KI sagt, unter dem Namen, den der
+    /// Gastgeber ihr gab. Liefert, ob alles ankam.
+    ///
+    /// Wer an einer anderen Tür schrieb, erscheint mit ihr hinter dem Namen,
+    /// etwa „Robin (Matrix)", und ohne eigenes Bild, wenn jene Tür keines
+    /// hergibt, das Discord abrufen kann (entschieden von Nemesus am
+    /// 23.11.2026).
+    async fn post_all(&self, http: &Http, deliveries: &[Delivery], writer: &Writer) -> bool {
         let assistant = hook_name(self.config.ai_name().unwrap_or(WEBHOOK_NAME));
+        let shown = match writer.door {
+            Door::Discord => hook_name(&writer.name),
+            other => hook_name_from(&writer.name, other),
+        };
+        let mut hooks = self.hooks.lock().await;
         let mut delivered = true;
         for delivery in deliveries {
             // Die graue Zeile steht in der Sprache des Tisches, an dem sie
             // erscheint, nicht in der des Tisches, an dem geschrieben wurde.
             let rendered = render_in(delivery, self.config.tongue_at(&delivery.channel));
             let (name, avatar, body) = match delivery.from {
-                Sender::Writer => (writer, Some(face), rendered + attachments),
+                Sender::Writer => {
+                    (shown.as_str(), writer.face.as_deref(), rendered + &writer.attachments)
+                }
                 Sender::Assistant => (assistant.as_str(), None, rendered),
             };
-            let posted = post(http, hooks, &delivery.channel, name, avatar, &body).await;
+            let posted = post(http, &mut hooks, &delivery.channel, name, avatar, &body).await;
             if let Err(why) = posted {
                 delivered = false;
                 self.say(format_args!("cannot deliver to channel {}: {why}", delivery.channel));
@@ -510,7 +636,7 @@ where
     /// Jemand hat einen Knopf am Hinweis zum leeren Kontingent gedrückt.
     async fn budget_clicked(&self, http: &Http, click: &ComponentInteraction, choice: Budget) {
         // Nur der Klick des Gastgebers zählt: es ist sein Schlüssel und sein Geld.
-        if click.user.id.to_string() != self.config.host {
+        if self.config.host_at(Door::Discord) != Some(click.user.id.to_string().as_str()) {
             let response = CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new().content(NOT_THE_HOST).ephemeral(true),
             );
@@ -530,9 +656,9 @@ where
         let text = match choice {
             Budget::Keep => KEPT_NOTICE.to_owned(),
             Budget::Raise => {
-                let mut inner = self.inner.lock().await;
+                let mut house = self.house.lock().await;
                 let today = today();
-                let (text, saved) = inner.house.raise(&self.terms(&today));
+                let (text, saved) = house.raise(&self.terms(&today));
                 if let Err(why) = saved {
                     self.say(why);
                 }
@@ -555,8 +681,11 @@ where
     /// Die Knöpfe tragen den Namen des Profils, und der Hinweis nennt ihn:
     /// laufen mehrere Profile, muss der Gastgeber wissen, welches leer ist,
     /// und der Fisch, welches er erhöhen soll.
-    async fn notify_host(&self, http: &Http, notice: &HostNotice) {
-        let Ok(id) = self.config.host.parse::<u64>() else { return };
+    async fn notify_host(&self, http: &Http, notice: &HostNotice) -> Result<(), String> {
+        let id = self.config.host_at(Door::Discord).map(str::parse::<u64>);
+        let Some(Ok(id)) = id else {
+            return Err("the host has no Discord id in this profile".to_owned());
+        };
         let name = self.name.as_deref();
         let content = match name {
             // `-# ` ist in Discord eine kleine graue Zeile.
@@ -579,9 +708,7 @@ where
             Ok(dm) => dm.id.send_message(http, message).await.map(|_| ()),
             Err(why) => Err(why),
         };
-        if let Err(why) = sent {
-            self.say(format_args!("cannot tell the host that the budget is used up: {why}"));
-        }
+        sent.map_err(|why| why.to_string())
     }
 
     /// Eine Nachricht aus einem Kanal dieses Profils: an alle anderen Plätze
@@ -594,8 +721,7 @@ where
         }
         let channel = msg.channel_id.to_string();
 
-        let mut guard = self.inner.lock().await;
-        let inner = &mut *guard;
+        let mut house = self.house.lock().await;
 
         let author = msg.author.id.to_string();
         // Die echte Erwähnung des Bots am Anfang zählt wie sein Rufname. Der
@@ -613,19 +739,19 @@ where
         };
         let today = today();
         // Nichts zu tun, etwa weil Nachholen und Live-Meldung sich überschneiden.
-        let Some(steps) = inner.house.message(&self.model, &self.terms(&today), &arrived).await
-        else {
+        let Some(steps) = house.message(&self.model, &self.terms(&today), &arrived).await else {
             return;
         };
 
         // Was ein Mensch schrieb, erscheint unter seinem Namen und Bild. Was
         // die KI sagt, erscheint unter dem Namen, den der Gastgeber ihr gab.
-        let writer = hook_name(&display_name(msg));
-        let face = msg.author.face();
-        let attachments: String = msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect();
-        let delivered = self
-            .deliver(http, &mut inner.hooks, &steps.deliveries, &writer, &face, &attachments)
-            .await;
+        let writer = Writer {
+            door: Door::Discord,
+            name: display_name(msg),
+            face: Some(msg.author.face()),
+            attachments: msg.attachments.iter().map(|a| format!("\n{}", a.url)).collect(),
+        };
+        let delivered = self.deliver(http, &steps.deliveries, &writer).await;
         // Kam etwas nicht an, soll der Schreibende es an seiner Nachricht sehen.
         if !delivered {
             let _ = msg.react(http, '⚠').await;
@@ -636,14 +762,24 @@ where
             self.ask_consent(http, msg.channel_id, text).await;
         }
 
-        // Ist das Kontingent leer, erfährt es der Gastgeber.
+        // Ist das Kontingent leer, erfährt es der Gastgeber, an der Tür, an
+        // der er liest.
         if let Some(notice) = &steps.tell_host {
-            self.notify_host(http, notice).await;
+            let door = self.config.host_door();
+            let told = match &self.lines {
+                Some(lines) if door != Door::Discord => {
+                    lines.hand(door, self.name.as_deref(), Errand::TellHost(notice.clone())).await
+                }
+                _ => self.notify_host(http, notice).await,
+            };
+            if let Err(why) = told {
+                self.say(format_args!("cannot tell the host that the budget is used up: {why}"));
+            }
         }
 
         // Erst jetzt, nach dem Absetzen: stürzt der Fisch vorher ab, gilt die
         // Nachricht als nicht gelesen, und der nächste Start holt sie nach.
-        if let Err(why) = inner.house.save() {
+        if let Err(why) = house.save() {
             self.say(why);
         }
     }
@@ -655,12 +791,17 @@ where
     /// Und dann ein Haken, wer eingeladen wird. Das könnte dann per
     /// Systemnachricht mitgeteilt werden."
     async fn tell_the_invited(&self, http: &Http) {
-        let mut inner = self.inner.lock().await;
+        let mut house = self.house.lock().await;
         // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
-        let Some(pending) = inner.house.invitations(&self.config) else { return };
+        let Some(pending) = house.invitations(&self.config) else { return };
 
         let mut reached = Vec::new();
         for invite in &pending.due {
+            // Wessen Tisch an einer anderen Tür steht, dem sagt es die andere
+            // Tür. Hier bleibt er ungemerkt.
+            if self.config.door_of(&invite.channel) != Some(Door::Discord) {
+                continue;
+            }
             let Ok(id) = invite.channel.parse::<u64>() else { continue };
             let channel = ChannelId::new(id);
             let host = self.host_name(http, channel).await;
@@ -683,7 +824,7 @@ where
             }
         }
 
-        if let Err(why) = inner.house.invitations_told(pending, &reached) {
+        if let Err(why) = house.invitations_told(pending, &reached) {
             self.say(why);
         }
     }
@@ -692,7 +833,9 @@ where
     /// erscheint, soweit Discord ihn hergibt. Sonst sein allgemeiner
     /// Anzeigename, sonst nichts: dann nennt die Mitteilung niemanden.
     async fn host_name(&self, http: &Http, channel: ChannelId) -> Option<String> {
-        let host = UserId::new(self.config.host.parse::<u64>().ok()?);
+        // Ohne Kennung des Gastgebers an dieser Tür nennt die Mitteilung
+        // niemanden.
+        let host = UserId::new(self.config.host_at(Door::Discord)?.parse::<u64>().ok()?);
         if let Ok(Channel::Guild(place)) = channel.to_channel(http).await
             && let Ok(member) = place.guild_id.member(http, host).await
         {
@@ -719,12 +862,15 @@ where
     /// bediente. Bei zwei gespiegelten Kanälen käme sonst nichts beim anderen an.
     async fn catch_up(&self, http: &Http, me: u64) {
         let marks: Vec<(String, u64)> = {
-            let inner = self.inner.lock().await;
+            let house = self.house.lock().await;
             self.config
                 .rooms
                 .iter()
                 .flat_map(|r| r.seats.iter())
-                .filter_map(|s| inner.house.seen(&s.channel).map(|id| (s.channel.clone(), id)))
+                // Nur die Kanäle dieser Tür; die Räume einer anderen holt
+                // jene nach.
+                .filter(|s| self.config.door_of(&s.channel) == Some(Door::Discord))
+                .filter_map(|s| house.seen(&s.channel).map(|id| (s.channel.clone(), id)))
                 .collect()
         };
 
