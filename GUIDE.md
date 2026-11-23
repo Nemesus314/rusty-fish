@@ -267,9 +267,9 @@ Limits of the Matrix door:
   offers a login through the browser is not served.
 - On 22 November 2026 the Matrix door translated between German and English
   in two real, encrypted rooms at matrix.org. On 23 November 2026 a guest
-  was asked for agreement there and was translated after tapping "OK". Not
-  yet seen in a real room: the budget notice. It has run against a simulated
-  server only.
+  was asked for agreement there and was translated after tapping "OK", and
+  the fish wrote its lines on being switched on and off. Not yet seen in a
+  real room: the budget notice. It has run against a simulated server only.
 
 ## Limits
 
