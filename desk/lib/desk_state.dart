@@ -315,6 +315,13 @@ class DeskState extends ChangeNotifier {
         _starting.remove(name);
         _runErrors[name] =
             'Still running with the settings from before: ${said.substring(_cannotRestart.length)}';
+      } else if (said.startsWith(_stopped)) {
+        // Ein Profil mit Tischen an zwei Türen läuft an beiden oder gar
+        // nicht. Konnte eine es nicht bedienen, hält der Fisch es auch an
+        // der anderen an und sagt hier, warum.
+        running.remove(name);
+        _starting.remove(name);
+        _runErrors[name] = said.substring(_stopped.length);
       } else if (said == 'no longer serving') {
         running.remove(name);
       }
@@ -366,6 +373,7 @@ class DeskState extends ChangeNotifier {
 
   static const _cannotStart = 'cannot start: ';
   static const _cannotRestart = 'cannot restart: ';
+  static const _stopped = 'stopped: ';
 
   void _changed() {
     if (!_disposed) {

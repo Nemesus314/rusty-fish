@@ -306,7 +306,7 @@ where
                 }
                 // Was auch an dieser Tür stand, geht an den anderen mit.
                 if !stopping {
-                    fish.stop_orphans(door);
+                    fish.stop_orphans(door, ended.as_ref().err());
                 }
                 note(&fish.serving());
                 if fish.doors.is_empty() {
@@ -317,13 +317,13 @@ where
                 // Die Tür hat ihren Grund schon gesagt.
                 let name = Some(refusal.profile.clone());
                 if let Some(doors) = fish.forget(&name) {
-                    fish.tell_doors(&refusal.profile, &doors, refusal.door);
-                    eprintln!(
-                        "rusty-fish: {}stopped at every door: the {} door cannot serve it, and a \
-                         profile with tables at two doors runs at both or not at all",
-                        label_of(name.as_deref()),
-                        refusal.door.label()
+                    let why = format!(
+                        "the {} door cannot serve it ({}), and a profile with tables at two \
+                         doors runs at both or not at all",
+                        refusal.door.label(),
+                        refusal.why
                     );
+                    fish.halt(&refusal.profile, &doors, refusal.door, &why);
                 }
             }
             Event::Said(Input::StopAll) => {
@@ -476,7 +476,13 @@ where
     }
 
     /// Eine Tür ist zu. Was auch an ihr stand, wird an den anderen angehalten.
-    fn stop_orphans(&mut self, closed: Door) {
+    fn stop_orphans(&mut self, closed: Door, failed: Option<&String>) {
+        let why = format!(
+            "the {} door is closed{}, and a profile with tables at two doors runs at both or not \
+             at all",
+            closed.label(),
+            failed.map(|why| format!(" ({why})")).unwrap_or_default()
+        );
         let orphans: Vec<Option<String>> = self
             .mixed
             .iter()
@@ -485,22 +491,16 @@ where
             .collect();
         for name in orphans {
             let doors = self.forget(&name).unwrap_or_default();
-            let told = match &name {
-                Some(name) => self.tell_doors(name, &doors, closed),
+            match &name {
+                Some(name) => self.halt(name, &doors, closed, &why),
                 // Ohne Namen lässt sich ein einzelnes Profil nicht anhalten;
                 // es ist dann das einzige, und der Fisch hält an.
                 None => {
                     self.tell_all(|| Command::StopAll);
-                    !self.doors.is_empty()
+                    if !self.doors.is_empty() {
+                        eprintln!("rusty-fish: stopped: {why}");
+                    }
                 }
-            };
-            if told {
-                eprintln!(
-                    "rusty-fish: {}stopped at every door: the {} door is closed, and a profile \
-                     with tables at two doors runs at both or not at all",
-                    label_of(name.as_deref()),
-                    closed.label()
-                );
             }
         }
     }
@@ -518,19 +518,17 @@ where
         told
     }
 
-    /// Sagt „stop NAME" den Türen eines Profils an mehreren Türen, außer
-    /// der einen, die es nicht mehr bedient. Nicht danach, was die Türen als
-    /// bedient gemeldet haben: eine Meldung kann noch unterwegs sein. Liefert,
-    /// ob es eine gehört hat.
-    fn tell_doors(&self, name: &str, doors: &[Door], except: Door) -> bool {
-        let mut told = false;
+    /// Hält ein Profil an den Türen an, an denen es stand, außer der einen,
+    /// die es nicht mehr bedient. Nicht danach, was die Türen als bedient
+    /// gemeldet haben: eine Meldung kann noch unterwegs sein. Den Grund sagt
+    /// die Tür selbst, als letzte Zeile zu diesem Profil; so steht er in der
+    /// Maske an seiner Karte und nicht vor einem „serving", das ihn wegwischt.
+    fn halt(&self, name: &str, doors: &[Door], except: Door, why: &str) {
         for open in &self.doors {
             if open.door != except && doors.contains(&open.door) {
-                let _ = open.to.send(Command::Stop(name.to_owned()));
-                told = true;
+                let _ = open.to.send(Command::Halt(name.to_owned(), why.to_owned()));
             }
         }
-        told
     }
 
     /// Sagt allen offenen Türen dasselbe.
@@ -729,6 +727,14 @@ host = "@nemo:localhost"
                         Some(Command::Restart(profile)) => {
                             me.take(door, "restarts", *profile, &mut serving);
                         }
+                        Some(Command::Halt(name, why)) => {
+                            me.said(format!("{} halts {name}: {why}", door.label()));
+                            me.said(format!("{} stops {name}", door.label()));
+                            serving.retain(|served| *served != name);
+                            if serving.is_empty() {
+                                break;
+                            }
+                        }
                         Some(Command::Stop(name)) => {
                             me.said(format!("{} stops {name}", door.label()));
                             serving.retain(|served| *served != name);
@@ -909,6 +915,12 @@ host = "@nemo:localhost"
         run.files.lock().unwrap().insert("tea".to_owned(), TEA.to_owned());
         run.say.send(Input::Start("tea".to_owned())).unwrap();
         run.until(&["Discord starts tea shared", "Matrix refuses tea", "Discord stops tea"]).await;
+        // Den Grund sagt die Tür, die es anhält: so steht er an der Karte.
+        run.until(&[concat!(
+            "Discord halts tea: the Matrix door cannot serve it (refused by the test), ",
+            "and a profile with tables at two doors runs at both or not at all"
+        )])
+            .await;
         // Die anderen Profile laufen weiter.
         run.until_noted(&["plain", "rooms"]).await;
         run.say.send(Input::StopAll).unwrap();
@@ -923,6 +935,11 @@ host = "@nemo:localhost"
         run.until_noted(&["tea", "plain"]).await;
         fakes.breaker(Door::Matrix).notify_one();
         run.until(&["Matrix breaks", "Discord stops tea"]).await;
+        run.until(&[concat!(
+            "Discord halts tea: the Matrix door is closed (the Matrix connection ended), ",
+            "and a profile with tables at two doors runs at both or not at all"
+        )])
+            .await;
         // Was nur an der anderen Tür steht, läuft weiter.
         run.until_noted(&["plain"]).await;
         assert!(!fakes.log().contains(&"Discord stops plain".to_owned()));

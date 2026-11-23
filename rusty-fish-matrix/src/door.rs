@@ -343,6 +343,13 @@ where
                             break;
                         }
                     }
+                    Some(Command::Halt(name, why)) => {
+                        let left = fish.stop(&name).await;
+                        eprintln!("rusty-fish: {}stopped: {why}", label_of(Some(&name)));
+                        if left == 0 {
+                            break;
+                        }
+                    }
                     Some(Command::StopAll) => break,
                     // Niemand kann dem Fisch mehr etwas sagen. Er läuft weiter.
                     None => std::future::pending::<()>().await,

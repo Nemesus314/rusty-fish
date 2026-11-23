@@ -304,8 +304,8 @@ How it behaves:
   door, it goes to the door where you have one.
 - A profile with tables at both doors runs at both or not at all. If one
   door refuses it or closes while the fish is on, the fish stops that
-  profile at the other door too and says so in the output. The other
-  profiles keep running.
+  profile at the other door too and says why, in the output and on the card
+  of the profile. The other profiles keep running.
 - In the Matrix room the fish says when it is switched on and off, as in
   every Matrix room. On Discord the bot turns grey only when the whole fish
   is off.

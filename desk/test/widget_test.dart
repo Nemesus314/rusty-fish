@@ -1232,6 +1232,32 @@ void startRequests() {
       expect(find.text('Switch off · 1 of 2 running'), findsOneWidget);
     });
 
+    // Seit dem 23.11.2026: ein Profil mit Tischen an Discord und an Matrix
+    // läuft an beiden Türen oder gar nicht. Hält der Fisch es an, weil eine
+    // Tür es nicht bedienen kann, steht der Grund an der Karte, auch wenn
+    // die andere Tür es eben noch als bedient gemeldet hat.
+    testWidgets('a profile stopped because one of its doors fails says why on its card', (
+      tester,
+    ) async {
+      final fake = two();
+      await open(tester, fake);
+      await switchOn(tester, fake, serving: ['tea', 'probe']);
+
+      const why =
+          'the Matrix door cannot serve it (the fish is not in this room), and a profile with '
+          'tables at two doors runs at both or not at all';
+      fake.lastRun!.emit('rusty-fish: [probe] cannot start: the fish is not in this room');
+      // Die andere Tür hatte es schon aufgenommen und meldet das erst jetzt.
+      fake.lastRun!.emit('rusty-fish: [probe] serving');
+      fake.lastRun!.emit('rusty-fish: [probe] no longer serving');
+      fake.lastRun!.emit('rusty-fish: [probe] stopped: $why');
+      await tester.pumpAndSettle();
+      expect(inCard('probe', find.text('Stopped')), findsOneWidget);
+      expect(inCard('probe', find.text(why)), findsOneWidget);
+      expect(inCard('tea', find.text('Running')), findsOneWidget);
+      expect(find.text('Switch off · 1 of 2 running'), findsOneWidget);
+    });
+
     testWidgets('when the fish ends by itself the window says why, once', (tester) async {
       final fake = two();
       await open(tester, fake);

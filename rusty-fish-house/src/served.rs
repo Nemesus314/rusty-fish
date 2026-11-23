@@ -37,6 +37,11 @@ pub enum Command<M> {
     Restart(Box<Profile<M>>),
     /// Ein Profil nicht mehr bedienen. War es das letzte, hält die Tür an.
     Stop(String),
+    /// Ein Profil nicht mehr bedienen, weil es an einer anderen Tür nicht
+    /// läuft: sein Name und der Grund. Die Tür sagt den Grund als letzte
+    /// Zeile zu diesem Profil (`[name] stopped: ...`); so steht er in der
+    /// Maske an seiner Karte.
+    Halt(String, String),
     /// Anhalten.
     StopAll,
 }
