@@ -263,6 +263,27 @@ void main() {
     }
   }, skip: skip);
 
+  test('the program names the languages it suggests', () async {
+    final cli = ProcessFishCli(exe!);
+    final List<Language> languages;
+    try {
+      languages = await cli.languages();
+    } on CliException {
+      markTestSkipped('this rusty-fish does not know `languages` yet');
+      return;
+    }
+    // Was jemand tippt, führt zu dem Wort, das der Fisch liest; auch über
+    // Namen in anderer Schrift, die heil durch die Leitung kommen müssen.
+    List<String> names(String typed) => [
+      for (final hit in suggestLanguages(languages, typed)) hit.name,
+    ];
+    expect(names('Ko'), ['Korean']);
+    expect(names('Deutsch'), ['German']);
+    expect(names('한국어'), ['Korean']);
+    expect(names('Thai'), isEmpty, reason: 'already a listed name');
+    expect(languages.map((language) => language.name), containsAll(['English', 'Russian']));
+  }, skip: skip);
+
   test('the program hands out its own description', () async {
     final cli = ProcessFishCli(exe!);
     final String text;

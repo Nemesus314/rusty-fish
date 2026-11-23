@@ -399,6 +399,64 @@ class Usage {
   );
 }
 
+/// Eine Sprache, die das Programm beim Eintragen vorschlägt
+/// (`languages --json`).
+class Language {
+  const Language({required this.name, this.also = const []});
+
+  /// Das Wort, das ins Profil kommt: der englische Name.
+  final String name;
+
+  /// Andere Namen, unter denen jemand sie beim Tippen sucht.
+  final List<String> also;
+
+  factory Language.fromJson(Map<String, dynamic> json) {
+    final also = json['also'];
+    return Language(
+      name: '${json['name'] ?? ''}'.trim(),
+      also: [
+        if (also is List)
+          for (final other in also)
+            if (other is String && other.trim().isNotEmpty) other.trim(),
+      ],
+    );
+  }
+}
+
+/// Ein Vorschlag: die Sprache und, wenn sie über einen anderen Namen gefunden
+/// wurde, dieser Name.
+typedef LanguageHit = ({String name, String? via});
+
+/// Die Sprachen, die zu dem Getippten passen. Zuerst die, deren Name so
+/// beginnt, dann die mit einem anderen Namen, der so beginnt („Deutsch" führt
+/// zu German), zuletzt die, in deren Namen ein Wort so beginnt.
+///
+/// Steht schon genau ein Name der Liste da, gibt es nichts vorzuschlagen.
+List<LanguageHit> suggestLanguages(List<Language> all, String typed) {
+  final exact = typed.trim();
+  final start = exact.toLowerCase();
+  if (start.isEmpty || all.any((language) => language.name == exact)) {
+    return const [];
+  }
+  final byName = <LanguageHit>[];
+  final byOther = <LanguageHit>[];
+  final byWord = <LanguageHit>[];
+  for (final language in all) {
+    final name = language.name.toLowerCase();
+    if (name.startsWith(start)) {
+      byName.add((name: language.name, via: null));
+      continue;
+    }
+    final other = language.also.where((also) => also.toLowerCase().startsWith(start));
+    if (other.isNotEmpty) {
+      byOther.add((name: language.name, via: other.first));
+    } else if (name.split(RegExp(r'[\s(]+')).any((word) => word.startsWith(start))) {
+      byWord.add((name: language.name, via: null));
+    }
+  }
+  return [...byName, ...byOther, ...byWord];
+}
+
 /// Ein KI-Dienst, so wie das Programm ihn nennt (`providers --json`).
 ///
 /// Nemesus am 20.11.2026: „Die Möglichkeit, die KIs im Profil zu wechseln

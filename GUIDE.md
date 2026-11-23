@@ -156,6 +156,11 @@ account there.
      With "unknown" the translation follows what the writer wrote, except
      into a language that makes every sentence choose a level: there the
      fish uses the polite everyday forms, not the intimate ones.
+   - Languages: a language field suggests while you type. "Ko" offers
+     Korean; a German or native name works too, so "Deutsch" offers German,
+     the word the fish reads. Click a suggestion or press Enter. The field
+     stays free: a word that is not on the list is kept as typed.
+     `rusty-fish languages` prints the list.
 3. Save. The profile appears as a card. Press "Switch on" at the top of the
    window: the fish starts for all profiles and the bot goes online in
    Discord. "Switch off", or closing the window, takes it offline. A profile

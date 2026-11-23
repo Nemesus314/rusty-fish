@@ -5,6 +5,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
+import 'language_field.dart';
 import 'model.dart';
 import 'paste_rooms.dart';
 
@@ -17,6 +18,7 @@ class ProfileEditorPage extends StatefulWidget {
     required this.existingNames,
     this.providers = fallbackProviders,
     this.providersListed = false,
+    this.languages = const [],
     this.scrollTo,
   });
 
@@ -33,6 +35,9 @@ class ProfileEditorPage extends StatefulWidget {
   /// Ob die Liste wirklich vom Programm stammt. Ein älteres Programm kennt
   /// die Angabe des Dienstes bei der Frage nach den Modellen nicht.
   final bool providersListed;
+
+  /// Die Sprachen, die das Programm vorschlägt. Leer: freie Felder wie zuvor.
+  final List<Language> languages;
 
   /// Neu oder Kopie: der Name ist dann noch frei wählbar.
   final bool isNew;
@@ -1169,9 +1174,12 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             children: [
               Expanded(
                 flex: 3,
-                child: TextField(
-                  key: ValueKey('room-$r-pass'),
+                child: LanguageField(
+                  key: ObjectKey(room.passThrough),
+                  fieldKey: ValueKey('room-$r-pass'),
                   controller: room.passThrough,
+                  languages: widget.languages,
+                  many: true,
                   decoration: const InputDecoration(
                     // Bis zum 20.11.2026 hieß das Feld „Languages that stay
                     // untranslated". Nemesus suchte nach der „Neutral-Sprache"
@@ -1283,9 +1291,11 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           const SizedBox(width: 12),
           Expanded(
             flex: 2,
-            child: TextField(
-              key: ValueKey('seat-$r-$s-lang'),
+            child: LanguageField(
+              key: ObjectKey(seat.lang),
+              fieldKey: ValueKey('seat-$r-$s-lang'),
               controller: seat.lang,
+              languages: widget.languages,
               decoration: InputDecoration(
                 labelText: 'Language',
                 // Welche Sprache gilt, entscheidet das Programm: die
@@ -1429,18 +1439,23 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         const SizedBox(width: 12),
         Expanded(
           flex: 2,
-          child: TextField(
-            key: ValueKey('person-$index-lang'),
+          child: LanguageField(
+            key: ObjectKey(person.lang),
+            fieldKey: ValueKey('person-$index-lang'),
             controller: person.lang,
+            languages: widget.languages,
             decoration: const InputDecoration(labelText: 'Mother tongue', hintText: 'Russian'),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           flex: 3,
-          child: TextField(
-            key: ValueKey('person-$index-neutral'),
+          child: LanguageField(
+            key: ObjectKey(person.neutral),
+            fieldKey: ValueKey('person-$index-neutral'),
             controller: person.neutral,
+            languages: widget.languages,
+            many: true,
             decoration: const InputDecoration(
               labelText: 'Neutral languages',
               helperText: 'Stay untranslated for this person. Empty: as in the room.',

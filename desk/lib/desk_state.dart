@@ -39,6 +39,12 @@ class DeskState extends ChangeNotifier {
   /// Die Maske bleibt dann benutzbar, nur ohne Auswahl.
   String? providersError;
 
+  /// Die Sprachen, die das Programm beim Eintragen vorschlägt. Leer, solange
+  /// es sie nicht genannt hat; die Sprachfelder sind dann freie Felder wie
+  /// zuvor.
+  List<Language> languages = const [];
+  bool _languagesListed = false;
+
   /// Warum die Übersicht nicht geladen werden konnte, im Wortlaut des Programms.
   String? loadError;
 
@@ -128,6 +134,16 @@ class DeskState extends ChangeNotifier {
         providersError = null;
       } on CliException catch (e) {
         providersError = e.message;
+      }
+    }
+    // Dasselbe für die Sprachliste. Ein älteres Programm kennt sie nicht;
+    // dann gibt es keine Vorschläge, und sonst fehlt nichts.
+    if (!_languagesListed) {
+      try {
+        languages = await cli.languages();
+        _languagesListed = true;
+      } on CliException {
+        // Bewusst still: die Felder nehmen jedes Wort auch ohne Liste.
       }
     }
     try {

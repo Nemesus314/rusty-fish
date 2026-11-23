@@ -102,6 +102,12 @@ enum Command {
         /// The text to translate
         text: String,
     },
+    /// List the languages the fish suggests when a profile is filled in
+    Languages {
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage saved profiles: settings you can keep, change and start
     Profile {
         #[command(subcommand)]
@@ -460,6 +466,30 @@ async fn run(command: Command) -> Result<(), String> {
             match outcome {
                 Outcome::Translated(translation) => println!("{translation}"),
                 Outcome::Skip => println!("(nothing to translate)"),
+            }
+            Ok(())
+        }
+        Command::Languages { json } => {
+            let languages = rusty_fish_core::languages::LANGUAGES;
+            if json {
+                // Für die Maske: der Name, der ins Profil kommt, andere Namen
+                // zum Finden, und ob die Sprache eine Höflichkeitsstufe
+                // verlangt.
+                let list: Vec<serde_json::Value> = languages
+                    .iter()
+                    .map(|language| {
+                        json!({
+                            "name": language.name,
+                            "also": language.also,
+                            "level": language.asks_for_a_level(),
+                        })
+                    })
+                    .collect();
+                println!("{}", pretty(&json!({ "languages": list })));
+            } else {
+                for language in languages {
+                    println!("{}", language.name);
+                }
             }
             Ok(())
         }

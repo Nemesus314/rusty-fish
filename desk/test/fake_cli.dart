@@ -72,6 +72,20 @@ const fakeProviders = [
   ),
 ];
 
+/// Ein Ausschnitt der Sprachliste, so wie das Programm sie nennt.
+const fakeLanguages = [
+  Language(name: 'Brazilian Portuguese', also: ['Brasilianisch']),
+  Language(name: 'Cantonese', also: ['Kantonesisch']),
+  Language(name: 'English', also: ['Englisch']),
+  Language(name: 'German', also: ['Deutsch']),
+  Language(name: 'Kannada'),
+  Language(name: 'Korean', also: ['Koreanisch', '한국어']),
+  Language(name: 'Mandarin', also: ['Chinesisch', 'Chinese']),
+  Language(name: 'Portuguese', also: ['Portugiesisch']),
+  Language(name: 'Russian', also: ['Russisch']),
+  Language(name: 'Simplified Chinese'),
+];
+
 class FakeCli implements FishCli {
   FakeCli({
     required this.entries,
@@ -87,6 +101,10 @@ class FakeCli implements FishCli {
   /// Gesetzt: das Programm kennt den Aufruf `providers` nicht (älterer Stand).
   String? providersError;
   List<Provider> providerList = fakeProviders;
+
+  /// Gesetzt: das Programm kennt den Aufruf `languages` nicht (älterer Stand).
+  String? languagesError;
+  List<Language> languageList = fakeLanguages;
   List<String> modelList = ['alpha-model', 'beta-model'];
 
   final saved = <ProfileDoc>[];
@@ -201,6 +219,15 @@ class FakeCli implements FishCli {
       throw CliException(error);
     }
     return providerList;
+  }
+
+  @override
+  Future<List<Language>> languages() async {
+    final error = languagesError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return languageList;
   }
 
   @override

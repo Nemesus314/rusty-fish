@@ -17,6 +17,8 @@
 //! Geblieben ist: die KI erfährt keine Namen. Sprecher gehen als Buchstaben
 //! hinaus (A, B, ...), vergeben in der Reihenfolge ihres Auftretens.
 
+pub mod languages;
+
 use std::fmt;
 use std::future::Future;
 

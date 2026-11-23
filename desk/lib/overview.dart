@@ -178,6 +178,7 @@ class _OverviewPageState extends State<OverviewPage> {
           existingNames: _names,
           providers: _state.providers,
           providersListed: _state.providersListed,
+          languages: _state.languages,
           scrollTo: scrollTo,
         ),
       ),

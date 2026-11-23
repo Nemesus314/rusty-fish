@@ -65,6 +65,10 @@ abstract class FishCli {
   /// Liste. Ein älteres Programm kennt den Aufruf nicht und lehnt ihn ab.
   Future<List<Provider>> providers();
 
+  /// Die Sprachen, die das Programm beim Eintragen vorschlägt. Ein älteres
+  /// Programm kennt den Aufruf nicht und lehnt ihn ab.
+  Future<List<Language>> languages();
+
   /// [entry] ist der Name des Eintrags in der Ablage: [botTokenEntry] oder
   /// die Kennung eines Dienstes.
   Future<void> setKey(String entry, String value);
@@ -185,6 +189,19 @@ class ProcessFishCli implements FishCli {
       throw CliException('rusty-fish named no AI service.');
     }
     return list;
+  }
+
+  @override
+  Future<List<Language>> languages() async {
+    final list = _object(await _call(['languages', '--json']))['languages'];
+    if (list is! List) {
+      throw CliException('rusty-fish answered in an unexpected form.');
+    }
+    return [
+      for (final item in list)
+        if (item is Map)
+          Language.fromJson(item.map((key, value) => MapEntry('$key', value))),
+    ].where((language) => language.name.isNotEmpty).toList();
   }
 
   @override
