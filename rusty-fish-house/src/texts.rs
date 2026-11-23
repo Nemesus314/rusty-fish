@@ -330,6 +330,32 @@ pub fn invitation_at(door: Door, tongue: Tongue, host: Option<&str>) -> String {
     }
 }
 
+/// Was der Fisch an einem Tisch sagt, wenn er ein- oder ausgeschaltet wird.
+///
+/// Nemesus am 23.11.2026: in einem Matrix-Raum blieb der Fisch in der Liste
+/// der Mitglieder stehen, auch als er aus war; bei matrix.org zeigt niemand,
+/// wer online ist. „Ja, die Systemmeldung ist eine gute Sache. Bitte bauen."
+///
+/// Die Zeile beim Ausschalten verspricht nicht, dass später nachgereicht
+/// wird: das hängt davon ab, wie lange der Fisch fort ist und ob er ganz aus
+/// war. Für jede andere Sprache steht die englische Fassung da.
+pub fn switched(tongue: Tongue, on: bool) -> &'static str {
+    match (tongue, on) {
+        (Tongue::English, true) => "Rusty Fish is switched on and translates here.",
+        (Tongue::English, false) => {
+            "Rusty Fish is switched off. Until it is back, nothing is translated here."
+        }
+        (Tongue::German, true) => "Rusty Fish ist eingeschaltet und übersetzt hier.",
+        (Tongue::German, false) => {
+            "Rusty Fish ist ausgeschaltet. Bis er wieder da ist, wird hier nichts übersetzt."
+        }
+        (Tongue::Russian, true) => "Rusty Fish включён и переводит здесь.",
+        (Tongue::Russian, false) => {
+            "Rusty Fish выключен. Пока он не вернётся, здесь ничего не переводится."
+        }
+    }
+}
+
 /// Der Anzeigename, wie er in einer Mitteilung stehen darf: in einer Zeile
 /// und nicht beliebig lang. Ein leerer Name ist kein Name.
 ///

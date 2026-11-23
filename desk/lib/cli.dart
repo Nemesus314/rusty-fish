@@ -346,9 +346,11 @@ class _ProcessRun implements FishRun {
     // Erst bitten, dann beenden. Gemessen von Nemesus am 20.11.2026: nach
     // einem harten Ende stand der Bot in Discord noch eine Weile als online
     // da. Auf die Zeile „stop" meldet sich der Fisch bei Discord ab und endet
-    // von selbst. Tut er das nicht binnen vier Sekunden, wird er beendet.
+    // von selbst. Tut er das nicht binnen acht Sekunden, wird er beendet.
+    // Bis zum 23.11.2026 waren es vier. Seither sagt der Fisch in seinen
+    // Matrix-Räumen, dass er geht, und nimmt sich dafür bis zu fünf.
     say('stop');
-    Timer(const Duration(seconds: 4), _process.kill);
+    Timer(const Duration(seconds: 8), _process.kill);
   }
 }
 

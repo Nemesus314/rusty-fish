@@ -222,11 +222,14 @@ What is different from Discord:
   messages and other bots from people. Two fish in one room pass over each
   other, as on Discord.
 - Mentioning the fish at the start of a message counts like its call name.
-- Whether the fish is switched on cannot be seen in the room. On Discord a
-  bot that is off turns grey; a Matrix room lists its members, and the fish
-  stays in that list while it is off. Element shows for nobody at matrix.org
-  who is online (its own setting for that server, read on 23 November 2026).
-  What was written while the fish was off is caught up when it comes back.
+- The fish says in its rooms when it is switched on and when it is switched
+  off, one line each, in the language of the table (German, English or
+  Russian; English for any other). On Discord a bot that is off turns grey;
+  a Matrix room lists its members, and the fish stays in that list while it
+  is off. Element shows for nobody at matrix.org who is online (its own
+  setting for that server, read on 23 November 2026). If the fish ends
+  without being switched off (the PC goes off, the network is gone), no line
+  is written. A profile that is only reloaded after a change says nothing.
 
 About encryption, said plainly: a Matrix room can be end-to-end encrypted,
 and the fish reads and writes there as a member with a device of its own.

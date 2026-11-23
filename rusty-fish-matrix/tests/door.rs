@@ -14,6 +14,8 @@ use matrix_sdk_test::{InvitedRoomBuilder, JoinedRoomBuilder};
 use matrix_sdk_test::event_factory::EventFactory;
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_house::config::Config;
+use rusty_fish_house::texts::switched;
+use rusty_fish_room::tongue::Tongue;
 use rusty_fish_matrix::door::{Command, Profile, run};
 use rusty_fish_matrix::session::Access;
 use serde_json::Value;
@@ -73,8 +75,41 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64
 }
 
-/// Was die Tür abgesetzt hat: Raum, Art des Ereignisses, Inhalt.
+/// Sagt dieser Inhalt, dass der Fisch ein- oder ausgeschaltet ist?
+fn about_the_switch(content: &Value) -> Option<bool> {
+    let body = content["body"].as_str()?;
+    for tongue in [Tongue::German, Tongue::English, Tongue::Russian] {
+        for on in [true, false] {
+            if body == switched(tongue, on) {
+                return Some(on);
+            }
+        }
+    }
+    None
+}
+
+/// Was die Tür abgesetzt hat: Raum, Art des Ereignisses, Inhalt. Ohne die
+/// Zeilen zum Ein- und Ausschalten; die stehen in [`switch_lines`].
 async fn sent(server: &MatrixMockServer) -> Vec<(String, String, Value)> {
+    let mut all = everything_sent(server).await;
+    all.retain(|(_, _, content)| about_the_switch(content).is_none());
+    all
+}
+
+/// Wo der Fisch gesagt hat, dass er ein- (`true`) oder ausgeschaltet ist,
+/// und mit welchen Worten.
+async fn switch_lines(server: &MatrixMockServer) -> Vec<(String, bool, String)> {
+    everything_sent(server)
+        .await
+        .into_iter()
+        .filter_map(|(room, _, content)| {
+            let on = about_the_switch(&content)?;
+            Some((room, on, content["body"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+
+async fn everything_sent(server: &MatrixMockServer) -> Vec<(String, String, Value)> {
     let mut out = Vec::new();
     for request in server.received_requests().await.unwrap_or_default() {
         if request.method.as_str() != "PUT" {
@@ -309,6 +344,133 @@ async fn a_conversation_takes_its_course_through_the_matrix_door() {
     to_door.send(Command::StopAll).unwrap();
     let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
     assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Nemesus am 23.11.2026: in einem Matrix-Raum sieht niemand, ob der Fisch
+/// an ist; er steht in der Liste der Mitglieder, auch wenn er aus ist. Also
+/// sagt er es selbst, an jedem Tisch in dessen Sprache: einmal, wenn er
+/// kommt, und einmal, wenn er geht. Ein Profil, das nur neu geladen wird,
+/// sagt nichts.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fish_says_at_its_tables_when_it_is_switched_on_and_off() {
+    let server = MatrixMockServer::new().await;
+    let dir = folder("switch");
+    let german = room_id!("!deutsch:localhost");
+    let russian = room_id!("!russisch:localhost");
+    let me = user_id!("@fish:localhost");
+
+    server.mock_versions().ok().mount().await;
+    server.mock_upload_keys().ok().mount().await;
+    server.mock_query_keys().ok().mount().await;
+    server.mock_room_state_encryption().plain().mount().await;
+    server.mock_room_send().ok(event_id!("$from-the-fish")).mount().await;
+    server.mock_sync().ok(|_| {}).with_priority(10).mount().await;
+    let in_german = EventFactory::new().room(german);
+    let in_russian = EventFactory::new().room(russian);
+    server
+        .mock_sync()
+        .ok(|builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(german)
+                    .add_state_event(in_german.member(me).membership(MembershipState::Join)),
+            );
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(russian)
+                    .add_state_event(in_russian.member(me).membership(MembershipState::Join)),
+            );
+        })
+        .mock_once()
+        .with_priority(1)
+        .mount()
+        .await;
+
+    let secret = serde_json::json!({
+        "h": server.uri(), "u": me, "d": "DEVICEID", "t": "1234", "p": "not-a-real-passphrase",
+    });
+    let access = Access::parse(&secret.to_string()).unwrap();
+    let profile = || Profile {
+        name: Some("tea".to_owned()),
+        config: Config::parse(PROFILE).unwrap(),
+        state_path: dir.join("tea.state.json"),
+        model: Fake::default(),
+        service: "ai.example".to_owned(),
+    };
+    let (to_door, commands) = unbounded_channel();
+    let first = profile();
+    let store = dir.join("store");
+    let door = tokio::spawn(async move {
+        run(&access, &store, vec![first], false, commands, Box::new(|_: &[String]| {})).await
+    });
+
+    async fn lines(server: &MatrixMockServer, count: usize) -> Vec<(String, bool, String)> {
+        for _ in 0..300 {
+            let said = switch_lines(server).await;
+            if said.len() >= count {
+                return said;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("expected {count} lines about the switch, got {:?}", switch_lines(server).await);
+    }
+
+    // --- eingeschaltet: an jedem Tisch eine Zeile, in dessen Sprache ------------
+    let mut said = lines(&server, 2).await;
+    said.sort();
+    assert_eq!(
+        said,
+        [
+            (
+                "!deutsch:localhost".to_owned(),
+                true,
+                "Rusty Fish ist eingeschaltet und übersetzt hier.".to_owned()
+            ),
+            (
+                "!russisch:localhost".to_owned(),
+                true,
+                "Rusty Fish включён и переводит здесь.".to_owned()
+            ),
+        ]
+    );
+    // Die Zeile kommt vor allem anderen, auch vor der Mitteilung an Eingeladene.
+    let all = everything_sent(&server).await;
+    assert!(about_the_switch(&all[0].2).is_some(), "got {all:?}");
+    // Eine Notiz wie alles vom Fisch: ein anderer Fisch überliest sie.
+    assert_eq!(all[0].2["msgtype"], "m.notice");
+
+    // --- neu geladen: an den Tischen steht dazu nichts --------------------------
+    let before = everything_sent(&server).await.len();
+    to_door.send(Command::Restart(Box::new(profile()))).unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(switch_lines(&server).await.len(), 2, "a reloaded profile says nothing");
+    assert_eq!(everything_sent(&server).await.len(), before);
+
+    // --- ausgeschaltet: wieder an jedem Tisch eine Zeile, bevor die Tür zu ist --
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let mut off: Vec<(String, String)> = switch_lines(&server)
+        .await
+        .into_iter()
+        .filter(|(_, on, _)| !on)
+        .map(|(room, _, body)| (room, body))
+        .collect();
+    off.sort();
+    assert_eq!(
+        off,
+        [
+            (
+                "!deutsch:localhost".to_owned(),
+                "Rusty Fish ist ausgeschaltet. Bis er wieder da ist, wird hier nichts übersetzt."
+                    .to_owned()
+            ),
+            (
+                "!russisch:localhost".to_owned(),
+                "Rusty Fish выключен. Пока он не вернётся, здесь ничего не переводится."
+                    .to_owned()
+            ),
+        ]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

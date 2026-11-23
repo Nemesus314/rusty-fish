@@ -73,11 +73,12 @@ use rusty_fish_house::clock::today;
 use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
 use rusty_fish_house::served::{label_of, title_of};
-use rusty_fish_house::texts::{KEPT_NOTICE, invitation_at};
+use rusty_fish_house::texts::{KEPT_NOTICE, invitation_at, switched};
 use rusty_fish_room::{Delivery, Sender};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Notify, RwLock, watch};
@@ -93,6 +94,11 @@ pub const CATCH_UP: u32 = 100;
 /// So viele Nachrichten merkt sich ein Profil als schon verarbeitet, damit
 /// eine doppelt gemeldete nicht zweimal übersetzt wird.
 const REMEMBERED: usize = 1000;
+
+/// So lange nimmt sich der Fisch beim Ausschalten, um in seinen Räumen zu
+/// sagen, dass er geht. Danach geht er, auch wenn es nicht überall ankam:
+/// wer ihn ausschaltet, soll nicht auf einen Server warten.
+const LEAVE_WITHIN: Duration = Duration::from_secs(5);
 
 /// Ein Profil im Lauf: seine Einstellungen, seine KI und alles, was sich
 /// ändert.
@@ -110,6 +116,9 @@ struct Served<M> {
     /// einen Raum, zeigt ihm der Server, was dort zuletzt geschrieben wurde;
     /// das ist älter als sein Eintritt und wird nicht übersetzt.
     entered: std::sync::Mutex<HashMap<OwnedRoomId, u64>>,
+    /// Ob der Fisch an den Tischen dieses Profils gesagt hat, dass er
+    /// eingeschaltet ist. Nur dann sagt er beim Anhalten, dass er geht.
+    said_on: AtomicBool,
     /// Ein Schloss für alles Veränderliche dieses Profils.
     inner: Mutex<Inner>,
 }
@@ -231,7 +240,7 @@ where
     let mut any = false;
     for profile in first {
         let label = label_of(profile.name.as_deref());
-        match Fish::start(&fish, profile).await {
+        match Fish::start(&fish, profile, false).await {
             Ok(()) => any = true,
             Err(why) if lenient => eprintln!("rusty-fish: {label}cannot start: {why}"),
             Err(why) => return Err(why),
@@ -280,7 +289,7 @@ where
                 match commands.recv().await {
                     Some(Command::Start(profile)) => {
                         let label = label_of(profile.name.as_deref());
-                        if let Err(why) = Fish::start(&fish, *profile).await {
+                        if let Err(why) = Fish::start(&fish, *profile, false).await {
                             eprintln!("rusty-fish: {label}cannot start: {why}");
                         }
                     }
@@ -301,6 +310,11 @@ where
                 }
             }
             eprintln!("rusty-fish: stopping the Matrix door");
+            // Wer jetzt noch bedient wird, liest, dass der Fisch geht.
+            let leaving: Vec<Arc<Served<M>>> =
+                fish.served.read().await.iter().map(|entry| entry.served.clone()).collect();
+            let leaving: Vec<&Served<M>> = leaving.iter().map(Arc::as_ref).collect();
+            fish.announce(&leaving, false).await;
             stop.notify_one();
         }
     });
@@ -364,7 +378,14 @@ where
     /// Nimmt ein Profil in den Lauf. Steht die Verbindung schon, betritt der
     /// Fisch gleich die Räume, in die er eingeladen ist, und teilt mit, wer
     /// eingeladen ist; sonst geschieht beides, sobald sie steht.
-    async fn start(fish: &Arc<Fish<M>>, profile: Profile<M>) -> Result<(), String> {
+    ///
+    /// `said_on`: der Fisch hat an diesen Tischen schon gesagt, dass er
+    /// eingeschaltet ist (ein Profil, das nur neu geladen wird).
+    async fn start(
+        fish: &Arc<Fish<M>>,
+        profile: Profile<M>,
+        said_on: bool,
+    ) -> Result<(), String> {
         if profile.config.door != Door::Matrix {
             return Err(format!(
                 "this profile stands at the {} door, not at Matrix",
@@ -379,6 +400,7 @@ where
             service: profile.service,
             since: now_ms(),
             entered: std::sync::Mutex::new(HashMap::new()),
+            said_on: AtomicBool::new(said_on),
             inner: Mutex::new(Inner {
                 house,
                 handled: HashSet::new(),
@@ -414,11 +436,18 @@ where
     /// Zustand. Lässt sich das neue nicht aufnehmen, läuft danach keines von
     /// beiden, wie an der Discord-Tür.
     async fn restart(fish: &Arc<Fish<M>>, profile: Profile<M>) -> Result<(), String> {
+        // Neu geladen ist nicht aus- und wieder eingeschaltet: an den Tischen
+        // steht dazu nichts, wenn dort schon steht, dass der Fisch da ist.
+        let mut said_on = false;
         if let Some(name) = profile.name.as_deref() {
             let mut list = fish.served.write().await;
+            said_on = list
+                .iter()
+                .filter(|entry| entry.served.name.as_deref() == Some(name))
+                .any(|entry| entry.served.said_on.load(Ordering::SeqCst));
             list.retain(|entry| entry.served.name.as_deref() != Some(name));
         }
-        let started = Fish::start(fish, profile).await;
+        let started = Fish::start(fish, profile, said_on).await;
         if started.is_err() {
             let list = fish.served.read().await;
             fish.told(&list);
@@ -428,16 +457,87 @@ where
 
     /// Nimmt ein Profil aus dem Lauf. Liefert, wie viele noch laufen.
     async fn stop(&self, name: &str) -> usize {
-        let mut list = self.served.write().await;
-        let before = list.len();
-        list.retain(|entry| entry.served.name.as_deref() != Some(name));
-        if list.len() < before {
-            eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
-            self.told(&list);
-        } else {
-            eprintln!("rusty-fish: {}was not running at the Matrix door", label_of(Some(name)));
+        let (gone, left) = {
+            let mut list = self.served.write().await;
+            let gone: Vec<Arc<Served<M>>> = list
+                .iter()
+                .filter(|entry| entry.served.name.as_deref() == Some(name))
+                .map(|entry| entry.served.clone())
+                .collect();
+            list.retain(|entry| entry.served.name.as_deref() != Some(name));
+            if gone.is_empty() {
+                eprintln!("rusty-fish: {}was not running at the Matrix door", label_of(Some(name)));
+            } else {
+                eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
+                self.told(&list);
+            }
+            (gone, list.len())
+        };
+        let gone: Vec<&Served<M>> = gone.iter().map(Arc::as_ref).collect();
+        self.announce(&gone, false).await;
+        left
+    }
+
+    /// Sagt an den Tischen dieser Profile, dass der Fisch ein- oder
+    /// ausgeschaltet ist, in der Sprache des Tisches.
+    ///
+    /// Nemesus am 23.11.2026, nach dem ersten Tag mit der Matrix-Tür: der
+    /// Fisch stand in der Liste der Mitglieder, auch als er aus war. Bei
+    /// Discord wird ein Bot grau; bei matrix.org zeigt niemand, wer online
+    /// ist. Deshalb sagt der Fisch es selbst.
+    ///
+    /// Benannte Grenzen: Endet der Fisch, ohne angehalten zu werden (der PC
+    /// geht aus, das Netz fällt weg, der Server nimmt den Zugang nicht mehr
+    /// an), steht nichts da. Beim Ausschalten hat er [`LEAVE_WITHIN`]; was bis
+    /// dahin nicht ankam, bleibt ungesagt und steht in der Programmausgabe.
+    async fn announce(&self, profiles: &[&Served<M>], on: bool) {
+        let word = if on { "on" } else { "off" };
+        // Alle Räume zugleich: beim Ausschalten bleibt wenig Zeit.
+        let mut posts = tokio::task::JoinSet::new();
+        for served in profiles {
+            let due = if on {
+                // Einmal je Lauf eines Profils.
+                !served.said_on.swap(true, Ordering::SeqCst)
+            } else {
+                // Wer nie gesagt hat, dass er da ist, sagt nicht, dass er geht.
+                served.said_on.swap(false, Ordering::SeqCst)
+            };
+            if !due {
+                continue;
+            }
+            for seat in served.config.rooms.iter().flat_map(|room| room.seats.iter()) {
+                if !served.config.serves(&seat.channel) {
+                    continue;
+                }
+                // Wo der Fisch nicht ist, kann er nichts sagen; das steht
+                // schon in der Programmausgabe.
+                let Ok(room) = self.room(&seat.channel) else { continue };
+                let text = plain(switched(served.config.tongue_at(&seat.channel), on));
+                let content = notice(&text.body, &text.html, None);
+                let label = label_of(served.name.as_deref());
+                let channel = seat.channel.clone();
+                posts.spawn(async move {
+                    let sent = room.send_raw("m.room.message", content).await;
+                    (label, channel, sent.err().map(|why| why.to_string()))
+                });
+            }
         }
-        list.len()
+        let all = async {
+            while let Some(done) = posts.join_next().await {
+                if let Ok((label, channel, Some(why))) = done {
+                    eprintln!(
+                        "rusty-fish: {label}cannot say in room {channel} that the fish is \
+                         switched {word}: {why}"
+                    );
+                }
+            }
+        };
+        let limit = if on { Duration::from_secs(60) } else { LEAVE_WITHIN };
+        if tokio::time::timeout(limit, all).await.is_err() {
+            eprintln!(
+                "rusty-fish: not every room was told in time that the fish is switched {word}"
+            );
+        }
     }
 
     /// Sagt dem Aufrufer, welche Profile jetzt laufen.
@@ -806,6 +906,7 @@ where
                 )),
             }
         }
+        fish.announce(&[self], true).await;
         self.tell_the_invited(fish).await;
     }
 
