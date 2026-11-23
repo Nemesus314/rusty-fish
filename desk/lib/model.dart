@@ -237,6 +237,10 @@ const discordDoor = 'discord';
 /// Die zweite Tür, seit dem 22.11.2026.
 const matrixDoor = 'matrix';
 
+/// Die Türen, die diese Maske kennt, in der Reihenfolge, in der sie Felder
+/// zeigt.
+const knownDoors = [discordDoor, matrixDoor];
+
 /// Wie eine Tür in der Maske heißt.
 String doorLabel(String door) => switch (door) {
   discordDoor => 'Discord',
@@ -531,8 +535,14 @@ class ProfileDoc {
     return null;
   }
 
-  /// Die Tür, an der die Tische dieses Profils stehen: die des ersten. Das
-  /// Programm nimmt ein Profil nur an, wenn alle an derselben stehen.
+  /// Die Türen, an denen dieses Profil Tische hat. Seit dem 23.11.2026
+  /// können es mehrere sein, auch in einem Raum.
+  Set<String> get doors => {
+    for (final room in rooms)
+      for (final seat in room.seats) seat.door,
+  };
+
+  /// Die erste Tür dieses Profils: die seines ersten Tisches.
   String get door {
     for (final room in rooms) {
       for (final seat in room.seats) {

@@ -760,9 +760,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add person'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byKey(const ValueKey('person-3-id')));
+      await tester.ensureVisible(find.byKey(const ValueKey('person-3-discord')));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('person-3-id')), '400');
+      await tester.enterText(find.byKey(const ValueKey('person-3-discord')), '400');
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -1070,13 +1070,13 @@ void startRequests() {
       await tester.ensureVisible(find.byKey(const ValueKey('person-1-name')));
       await tester.pumpAndSettle();
       expect(textOf(tester, const ValueKey('person-1-name')), 'Robin');
-      expect(textOf(tester, const ValueKey('person-1-id')), '', reason: 'no id yet');
+      expect(textOf(tester, const ValueKey('person-1-discord')), '', reason: 'no id yet');
       // Der Gastgeber steht mit seinem Namen da und ist als solcher erkannt.
       expect(textOf(tester, const ValueKey('person-0-name')), 'Nemo');
       expect(find.text('This is you, the host.'), findsOneWidget);
 
       await tester.enterText(find.byKey(const ValueKey('person-1-name')), 'Robin Goodfellow');
-      await tester.enterText(find.byKey(const ValueKey('person-1-id')), '200');
+      await tester.enterText(find.byKey(const ValueKey('person-1-discord')), '200');
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -1099,11 +1099,11 @@ void startRequests() {
       await tester.tap(inCard('pair', find.text('Edit')));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.byKey(const ValueKey('person-1-id')));
+      await tester.ensureVisible(find.byKey(const ValueKey('person-1-discord')));
       await tester.pumpAndSettle();
       // Erst die Kennung leeren, dann den Namen tippen: für einen Augenblick
       // hat der Mensch keines von beiden.
-      await tester.enterText(find.byKey(const ValueKey('person-1-id')), '');
+      await tester.enterText(find.byKey(const ValueKey('person-1-discord')), '');
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('person-1-name')), 'Robin');
       await tester.pumpAndSettle();

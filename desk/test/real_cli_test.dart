@@ -403,7 +403,9 @@ void main() {
       // Beide Tische werden bedient: der eigene und der der Eingeladenen.
       expect(listed.doc!.rooms.single.seats.map((seat) => seat.served), [true, true]);
 
-      // Ein Tisch an der anderen Tür: das Programm sagt, was stattdessen geht.
+      // Ein Tisch an der anderen Tür: seit dem 23.11.2026 ein gemischter Raum.
+      // Das Programm nimmt ihn an und gibt ihn unverändert zurück; bis dahin
+      // lehnte es ihn ab.
       const mixed = ProfileDoc(
         name: name,
         model: 'some-model',
@@ -423,18 +425,43 @@ void main() {
         ],
         people: [],
       );
-      await expectLater(
-        cli.saveProfile(mixed),
-        throwsA(
-          isA<CliException>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('one door'), contains('second profile')),
+      await cli.saveProfile(mixed);
+      final crossed = await cli.showProfile(name);
+      expect(crossed.toJson(), mixed.toJson());
+      expect(crossed.doors, {matrixDoor, discordDoor});
+      expect(crossed.rooms.single.seats.map((seat) => seat.door), [matrixDoor, discordDoor]);
+      // Und ein zweites Mal gespeichert bleibt er, wie er ist.
+      await cli.saveProfile(crossed);
+      expect((await cli.showProfile(name)).toJson(), mixed.toJson());
+      // Ein Tisch an zwei Türen zugleich ist nicht möglich; eine Kennung, die
+      // an der Tür des Tisches nichts ist, lehnt das Programm weiter ab.
+      const wrong = ProfileDoc(
+        name: name,
+        model: 'some-model',
+        baseUrl: null,
+        host: '@nemo:example.org',
+        aiNames: [],
+        limits: Limits(translationTokensPerDay: 5000, questionsPerGuestPerDay: 3),
+        rooms: [
+          Room(
+            passThrough: [],
+            contextLines: 4,
+            seats: [
+              Seat(door: matrixDoor, channel: '!deutsch:example.org', lang: 'German'),
+              Seat(channel: '!russisch:example.org', lang: 'Russian'),
+            ],
           ),
+        ],
+        people: [],
+      );
+      await expectLater(
+        cli.saveProfile(wrong),
+        throwsA(
+          isA<CliException>().having((e) => e.message, 'message', contains('Discord id')),
         ),
       );
       // Das abgelehnte Profil hat das gespeicherte nicht ersetzt.
-      expect((await cli.showProfile(name)).toJson(), doc.toJson());
+      expect((await cli.showProfile(name)).toJson(), mixed.toJson());
     } finally {
       await cli.deleteProfile(name);
     }

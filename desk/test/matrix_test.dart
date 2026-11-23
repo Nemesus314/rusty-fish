@@ -66,6 +66,31 @@ ProfileDoc matrixDoc(String name) => ProfileDoc(
   ],
 );
 
+/// Ein Gespräch an zwei Türen: der Gastgeber liest Deutsch in einem
+/// Discord-Kanal, sein Gast Englisch in einem Matrix-Raum.
+ProfileDoc mixedDoc(String name) => ProfileDoc(
+  name: name,
+  model: 'some-model',
+  baseUrl: null,
+  host: 'Nemo',
+  aiNames: const ['Fish'],
+  limits: const Limits(translationTokensPerDay: 100000, questionsPerGuestPerDay: 10),
+  rooms: const [
+    Room(
+      passThrough: ['English'],
+      contextLines: 10,
+      seats: [
+        Seat(channel: '111', lang: 'German', owner: 'Nemo'),
+        Seat(door: matrixDoor, channel: '!english:example.org', lang: 'English', owner: 'Robin'),
+      ],
+    ),
+  ],
+  people: const [
+    Person(name: 'Nemo', id: '100', lang: 'German'),
+    Person(name: 'Robin', matrix: '@robin:example.org', lang: 'English', invited: true),
+  ],
+);
+
 void main() {
   group('what goes to the program and back', () {
     test('a person carries an id at each door, and only what is there goes out', () {
@@ -398,7 +423,8 @@ void main() {
       expect(find.text('Matrix user ID'), findsNWidgets(2));
       expect(find.text('Discord channel ID'), findsNothing);
       expect(textOf(tester, const ValueKey('seat-0-1-channel')), '!russisch:example.org');
-      expect(textOf(tester, const ValueKey('person-1-id')), '@robin:example.org');
+      expect(textOf(tester, const ValueKey('person-1-matrix')), '@robin:example.org');
+      expect(find.byKey(const ValueKey('person-1-discord')), findsNothing);
 
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -406,7 +432,9 @@ void main() {
       expect(fake.saved.single.toJson(), matrixDoc('tea').toJson());
     });
 
-    testWidgets('choosing Matrix renames the fields and saves every table at that door', (
+    // Entschieden von Nemesus am 23.11.2026: die Tür wird je Tisch gewählt,
+    // nicht mehr einmal je Profil unter General.
+    testWidgets('moving every table to Matrix renames the fields and saves them at that door', (
       tester,
     ) async {
       final fake = FakeCli(
@@ -423,20 +451,25 @@ void main() {
       await tester.tap(inCard('study', find.text('Edit')));
       await tester.pumpAndSettle();
       expect(find.text('Your Discord user ID'), findsOneWidget);
-      expect(textOf(tester, const ValueKey('person-0-id')), '200');
+      expect(find.byKey(const ValueKey('field-door')), findsNothing, reason: 'no door per profile');
+      expect(textOf(tester, const ValueKey('person-0-discord')), '200');
+      expect(find.byKey(const ValueKey('person-0-matrix')), findsNothing);
 
-      await choose(tester, 'field-door', 'Matrix');
+      await choose(tester, 'seat-0-0-door', 'Matrix');
+      await choose(tester, 'seat-0-1-door', 'Matrix');
       expect(find.text('Your Matrix user ID'), findsOneWidget);
       expect(find.text('Matrix room ID'), findsNWidgets(2));
-      // An der neuen Tür hat Robin noch keine Kennung.
-      expect(textOf(tester, const ValueKey('person-0-id')), isEmpty);
+      // An der neuen Tür hat Robin noch keine Kennung; ihr Feld für Discord
+      // ist fort, weil dort kein Tisch mehr steht.
+      expect(textOf(tester, const ValueKey('person-0-matrix')), isEmpty);
+      expect(find.byKey(const ValueKey('person-0-discord')), findsNothing);
 
       await tester.enterText(find.byKey(const ValueKey('field-host')), '@nemo:example.org');
       await tester.ensureVisible(find.byKey(const ValueKey('seat-0-0-channel')));
       await tester.enterText(find.byKey(const ValueKey('seat-0-0-channel')), '!a:example.org');
       await tester.enterText(find.byKey(const ValueKey('seat-0-1-channel')), '!b:example.org');
-      await tester.ensureVisible(find.byKey(const ValueKey('person-0-id')));
-      await tester.enterText(find.byKey(const ValueKey('person-0-id')), '@robin:example.org');
+      await tester.ensureVisible(find.byKey(const ValueKey('person-0-matrix')));
+      await tester.enterText(find.byKey(const ValueKey('person-0-matrix')), '@robin:example.org');
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
@@ -451,13 +484,13 @@ void main() {
       expect(doc.people.single.id, '200');
     });
 
-    testWidgets('switching the door there and back changes nothing', (tester) async {
+    testWidgets('switching the door of a table there and back changes nothing', (tester) async {
       final fake = FakeCli(entries: [entryOf(tablesDoc('pair'))]);
       await open(tester, fake);
       await tester.tap(inCard('pair', find.text('Edit')));
       await tester.pumpAndSettle();
-      await choose(tester, 'field-door', 'Matrix');
-      await choose(tester, 'field-door', 'Discord');
+      await choose(tester, 'seat-0-1-door', 'Matrix');
+      await choose(tester, 'seat-0-1-door', 'Discord');
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(fake.saved.single.toJson(), tablesDoc('pair').toJson());
@@ -470,6 +503,102 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Your Discord user ID'), findsOneWidget);
       expect(find.text('Discord channel ID'), findsNWidgets(2));
+      expect(find.text('Matrix user ID'), findsNothing);
+    });
+  });
+
+  // Seit dem 23.11.2026: ein Gespräch, dessen Tische an verschiedenen Türen
+  // stehen.
+  group('a mixed room', () {
+    testWidgets('opens with a door at every table and goes back out unchanged', (tester) async {
+      final fake = FakeCli(entries: [entryOf(mixedDoc('bridge'))]);
+      await open(tester, fake);
+      // Die Karte sagt, über welche Türen der Raum läuft und wo er offen ist.
+      expect(
+        inCard(
+          'bridge',
+          find.textContaining('Discord ⇄ Matrix · not end-to-end encrypted on Discord'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(inCard('bridge', find.text('Edit')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your user ID'), findsOneWidget);
+      expect(find.text('Discord channel ID'), findsOneWidget);
+      expect(find.text('Matrix room ID'), findsOneWidget);
+      // Jeder Mensch hat je Tür ein Kennungsfeld.
+      expect(find.text('Discord user ID'), findsNWidgets(2));
+      expect(find.text('Matrix user ID'), findsNWidgets(2));
+      expect(textOf(tester, const ValueKey('person-0-discord')), '100');
+      expect(textOf(tester, const ValueKey('person-0-matrix')), isEmpty);
+      expect(textOf(tester, const ValueKey('person-1-matrix')), '@robin:example.org');
+
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(fake.saved.single.toJson(), mixedDoc('bridge').toJson());
+    });
+
+    testWidgets('can be made from a Discord profile by moving one table to Matrix', (
+      tester,
+    ) async {
+      final fake = FakeCli(
+        entries: [
+          entryOf(
+            docOf(
+              'study',
+              people: const [Person(name: 'Robin', id: '200', lang: 'Russian')],
+            ),
+          ),
+        ],
+      );
+      await open(tester, fake);
+      await tester.tap(inCard('study', find.text('Edit')));
+      await tester.pumpAndSettle();
+      final before = fake.entries.single.doc!;
+
+      await choose(tester, 'seat-0-1-door', 'Matrix');
+      expect(find.text('Your user ID'), findsOneWidget);
+      expect(find.text('Discord channel ID'), findsOneWidget);
+      expect(find.text('Matrix room ID'), findsOneWidget);
+      // Robins Discord-Kennung bleibt stehen, und ein Feld für Matrix kommt dazu.
+      expect(textOf(tester, const ValueKey('person-0-discord')), '200');
+      expect(textOf(tester, const ValueKey('person-0-matrix')), isEmpty);
+
+      await tester.ensureVisible(find.byKey(const ValueKey('seat-0-1-channel')));
+      await tester.enterText(find.byKey(const ValueKey('seat-0-1-channel')), '!b:example.org');
+      await tester.ensureVisible(find.byKey(const ValueKey('person-0-matrix')));
+      await tester.enterText(find.byKey(const ValueKey('person-0-matrix')), '@robin:example.org');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final doc = fake.saved.single;
+      expect(doc.doors, {discordDoor, matrixDoor});
+      expect(doc.rooms.single.seats.map((seat) => seat.door), [discordDoor, matrixDoor]);
+      expect(doc.rooms.single.seats[0].channel, before.rooms.single.seats[0].channel);
+      expect(doc.rooms.single.seats[1].channel, '!b:example.org');
+      expect(doc.host, before.host, reason: 'the host keeps the id he has');
+      expect(doc.people.single.id, '200');
+      expect(doc.people.single.matrix, '@robin:example.org');
+    });
+
+    testWidgets('a new table starts at the door of the table above it', (tester) async {
+      final fake = FakeCli(entries: [entryOf(mixedDoc('bridge'))]);
+      await open(tester, fake);
+      await tester.tap(inCard('bridge', find.text('Edit')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Add seat'));
+      await tester.tap(find.text('Add seat'));
+      await tester.pumpAndSettle();
+      expect(find.text('Matrix room ID'), findsNWidgets(2));
+      expect(find.text('Discord channel ID'), findsOneWidget);
+    });
+
+    testWidgets('makes the title bar warn while the fish is not logged in to Matrix', (
+      tester,
+    ) async {
+      await open(tester, FakeCli(entries: [entryOf(mixedDoc('bridge'))]));
+      expect(find.text('Matrix: not logged in'), findsOneWidget);
     });
   });
 

@@ -249,7 +249,7 @@ class _OverviewPageState extends State<OverviewPage> {
   /// solange der Fisch dort nicht angemeldet ist.
   bool _usesMatrix(ProfileList? list) => [
     for (final entry in list?.profiles ?? const <ProfileEntry>[])
-      if (entry.doc?.door == matrixDoor) entry,
+      if (entry.doc?.doors.contains(matrixDoor) ?? false) entry,
   ].isNotEmpty;
 
   /// „AI keys: 1 of 4 stored". Seit jeder Dienst seinen eigenen Schlüssel

@@ -62,11 +62,15 @@ Gender? _genderOf(_Form form) => switch (form) {
 
 class _SeatDraft {
   _SeatDraft(Seat seat)
-    : channel = TextEditingController(text: seat.channel),
+    : door = seat.door,
+      channel = TextEditingController(text: seat.channel),
       lang = TextEditingController(text: seat.lang),
       form = _formOf(seat.gender),
       owner = seat.owner ?? '';
 
+  /// Die Tür, an der dieser Tisch steht. Seit dem 23.11.2026 wählt sie jeder
+  /// Tisch für sich: ein Raum kann Tische an Discord und an Matrix haben.
+  String door;
   final TextEditingController channel;
   final TextEditingController lang;
   _Form form;
@@ -101,10 +105,11 @@ class _RoomDraft {
 }
 
 class _PersonDraft {
-  _PersonDraft(Person? person, String door)
+  _PersonDraft(Person? person, this._doorsInUse)
     : name = TextEditingController(text: person?.name ?? ''),
-      id = TextEditingController(text: person?.idAt(door) ?? ''),
-      otherId = person?.idAt(door == matrixDoor ? discordDoor : matrixDoor) ?? '',
+      ids = {
+        for (final door in knownDoors) door: TextEditingController(text: person?.idAt(door) ?? ''),
+      },
       lang = TextEditingController(text: person?.lang ?? ''),
       neutral = TextEditingController(text: person?.neutral?.join(', ') ?? ''),
       // Bis zum 20.11.2026 begann ein neuer Mensch mit der weiblichen Form,
@@ -118,29 +123,47 @@ class _PersonDraft {
   /// Der Name, den der Gastgeber diesem Menschen gibt.
   final TextEditingController name;
 
+  /// Die Türen, an denen gerade Tische stehen. Der Entwurf fragt das
+  /// Formular: mit jedem Tisch, der die Tür wechselt, kann es sich ändern.
+  final List<String> Function() _doorsInUse;
+
   /// Womit Tische auf diesen Menschen zeigen: mit seinem Namen, sonst mit
-  /// seiner Kennung. So schreibt es auch das Programm ins Profil.
-  String get ref => name.text.trim().isNotEmpty ? name.text.trim() : id.text.trim();
+  /// seiner Kennung an einer Tür, an der Tische stehen. So schreibt es auch
+  /// das Programm ins Profil.
+  String get ref {
+    if (name.text.trim().isNotEmpty) {
+      return name.text.trim();
+    }
+    for (final door in _doorsInUse()) {
+      if (idAt(door).isNotEmpty) {
+        return idAt(door);
+      }
+    }
+    // Eine Kennung nur an einer Tür ohne Tisch: der Mensch bleibt stehen, und
+    // das Programm sagt beim Speichern, was ihm fehlt.
+    for (final door in knownDoors) {
+      if (idAt(door).isNotEmpty) {
+        return idAt(door);
+      }
+    }
+    return '';
+  }
 
   /// Worauf die Tische zuletzt zeigten. Ändert sich [ref], weil jemand den
   /// Namen tippt, ziehen die Tische dieses Menschen mit.
   String lastRef = '';
 
-  /// Die Kennung an der Tür des Profils. Das Feld heißt nach ihr.
-  final TextEditingController id;
+  /// Die Kennung je Tür. Ein Feld bekommt jede Tür, an der Tische stehen; die
+  /// Kennung an einer anderen steht in keinem Feld, bleibt aber erhalten: das
+  /// bloße Öffnen und Speichern darf keine verlieren.
+  final Map<String, TextEditingController> ids;
 
-  /// Die Kennung an der anderen Tür. Sie steht in keinem Feld, bleibt aber
-  /// erhalten: ein Mensch kann an beiden Türen eine tragen, und das bloße
-  /// Öffnen und Speichern darf keine davon verlieren.
-  String otherId;
+  /// Die Kennung dieses Menschen an dieser Tür, wie sie gerade dasteht.
+  String idAt(String door) => ids[door]?.text.trim() ?? '';
 
-  /// Das Profil wechselt die Tür: im Feld steht jetzt die Kennung an der
-  /// neuen, und die bisherige wird die andere.
-  void showOtherDoor() {
-    final shown = id.text.trim();
-    id.text = otherId;
-    otherId = shown;
-  }
+  /// Zeigt diese Angabe (ein Name oder eine Kennung) auf diesen Menschen?
+  bool answersTo(String what) =>
+      what.isNotEmpty && (name.text.trim() == what || knownDoors.any((door) => idAt(door) == what));
 
   final TextEditingController lang;
   final TextEditingController neutral;
@@ -168,7 +191,9 @@ class _PersonDraft {
 
   void dispose() {
     name.dispose();
-    id.dispose();
+    for (final id in ids.values) {
+      id.dispose();
+    }
     lang.dispose();
     neutral.dispose();
   }
@@ -193,10 +218,29 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   /// Die Kennung des gewählten KI-Dienstes.
   late String _provider;
 
-  /// Die Tür, an der die Tische dieses Profils stehen. Eine Wahl für das
-  /// ganze Profil: das Programm nimmt keines an, dessen Tische an zwei Türen
-  /// stehen.
-  late String _door;
+  /// Die Türen, an denen gerade Tische stehen, Discord vor Matrix. Danach
+  /// richten sich die Felder: je Tür ein Kennungsfeld bei den Menschen, und
+  /// die Erklärungen nennen, was es an diesen Türen braucht.
+  ///
+  /// Bis zum 23.11.2026 wählte ein Profil seine Tür einmal, unter General.
+  /// Entschieden von Nemesus an dem Tag: die Tür wird je Tisch gewählt.
+  List<String> _doorsInUse() {
+    final used = {for (final seat in _rooms.expand((room) => room.seats)) seat.door};
+    return [
+      for (final door in knownDoors)
+        if (used.contains(door)) door,
+      // Eine Tür, die diese Maske nicht kennt, zählt auch.
+      for (final door in used)
+        if (!knownDoors.contains(door)) door,
+    ];
+  }
+
+  /// Die eine Tür, an der alle Tische stehen, oder `null` in einem Profil
+  /// mit Tischen an mehreren.
+  String? get _onlyDoor {
+    final doors = _doorsInUse();
+    return doors.length == 1 ? doors.single : null;
+  }
 
   /// Der Dienst wurde gewechselt, das Modell stammt aber noch vom alten. Dann
   /// steht ein Hinweis am Modellfeld, bis dort etwas Neues eingetragen ist.
@@ -214,7 +258,6 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     super.initState();
     final doc = widget.initial;
     _provider = doc.provider;
-    _door = doc.door;
     _choices = [
       ...widget.providers,
       if (!widget.providers.any((p) => p.id == doc.provider))
@@ -228,7 +271,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     _questions = TextEditingController(text: '${doc.limits.questionsPerGuestPerDay}');
     _aiNames = [for (final name in doc.aiNames) TextEditingController(text: name)];
     _rooms = [for (final room in doc.rooms) _RoomDraft(room)];
-    _people = [for (final person in doc.people) _watched(_PersonDraft(person, _door))];
+    _people = [for (final person in doc.people) _watched(_PersonDraft(person, _doorsInUse))];
     _pointSeatsAtPeople();
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
@@ -256,9 +299,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   void _pointSeatsAtPeople() {
     for (final seat in _rooms.expand((room) => room.seats)) {
       for (final person in _people) {
-        final owner = seat.owner;
-        if (owner.isNotEmpty &&
-            (owner == person.name.text.trim() || owner == person.id.text.trim())) {
+        if (person.answersTo(seat.owner)) {
           seat.owner = person.ref;
           break;
         }
@@ -287,15 +328,14 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       for (final person in _people) {
         person.dispose();
       }
-      // Die Tür kommt mit den Räumen: beide Fische stehen an derselben.
-      _door = pasted.shared.rooms.first.seats.first.door;
+      // Die Türen kommen mit den Räumen: jeder Tisch bringt seine mit.
       _rooms
         ..clear()
         ..addAll([for (final room in pasted.shared.rooms) _RoomDraft(room)]);
       _people
         ..clear()
         ..addAll([
-          for (final person in pasted.shared.people) _watched(_PersonDraft(person, _door)),
+          for (final person in pasted.shared.people) _watched(_PersonDraft(person, _doorsInUse)),
         ]);
       _pointSeatsAtPeople();
       final me = pasted.me;
@@ -325,7 +365,9 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   _PersonDraft _watched(_PersonDraft person) {
     void followed() => _followRef(person);
     person.name.addListener(followed);
-    person.id.addListener(followed);
+    for (final id in person.ids.values) {
+      id.addListener(followed);
+    }
     person.lang.addListener(_redraw);
     return person;
   }
@@ -360,10 +402,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
   String get _hostId => _host.text.trim();
 
   /// Ist dieser Mensch der Gastgeber?
-  bool _isHost(_PersonDraft person) {
-    final host = _hostId;
-    return host.isNotEmpty && (person.id.text.trim() == host || person.name.text.trim() == host);
-  }
+  bool _isHost(_PersonDraft person) => person.answersTo(_hostId);
 
   /// Der Mensch, auf den ein Tisch zeigt, so wie er gerade im Formular steht.
   _PersonDraft? _personAt(String ref) {
@@ -428,19 +467,30 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     ];
   }
 
-  /// Das Profil wechselt die Tür. Die Tische bleiben, wie sie sind; ihre
-  /// Kennungen gelten an der neuen Tür nicht und sind neu einzutragen. Bei
-  /// den Menschen erscheint die Kennung, die sie an der neuen Tür tragen.
-  void _chooseDoor(String door) {
-    if (door == _door) {
+  /// Ein Tisch wechselt die Tür. Seine Kennung bleibt stehen; sie gilt an der
+  /// neuen Tür nicht und ist neu einzutragen. Bei den Menschen erscheint ein
+  /// Kennungsfeld für jede Tür, an der jetzt Tische stehen.
+  void _chooseSeatDoor(_SeatDraft seat, String door) {
+    if (door == seat.door) {
       return;
     }
     setState(() {
-      _door = door;
+      seat.door = door;
+      // Wer ohne Namen eingetragen ist, heißt nach seiner Kennung an einer
+      // benutzten Tür. Ändert sich das, ziehen seine Tische mit.
       for (final person in _people) {
-        person.showOtherDoor();
+        _followRef(person);
       }
     });
+  }
+
+  /// Die Tür, an der ein neuer Tisch beginnt: die des Tisches davor.
+  String _doorForNewSeat(_RoomDraft? room) {
+    if (room != null && room.seats.isNotEmpty) {
+      return room.seats.last.door;
+    }
+    final seats = _rooms.expand((room) => room.seats);
+    return seats.isEmpty ? discordDoor : seats.last.door;
   }
 
   void _chooseService(String id) {
@@ -541,7 +591,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           seats: [
             for (final seat in room.seats)
               Seat(
-                door: _door,
+                door: seat.door,
                 channel: seat.channel.text.trim(),
                 lang: seat.lang.text.trim(),
                 gender: _genderOf(seat.form),
@@ -573,8 +623,8 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         for (final person in _people)
           if (person.ref.isNotEmpty)
             Person(
-              id: _door == matrixDoor ? person.otherId : person.id.text.trim(),
-              matrix: _door == matrixDoor ? person.id.text.trim() : person.otherId,
+              id: person.idAt(discordDoor),
+              matrix: person.idAt(matrixDoor),
               name: person.name.text.trim().isEmpty ? null : person.name.text.trim(),
               gender: _genderOf(person.form),
               lang: person.lang.text.trim().isEmpty ? null : person.lang.text.trim(),
@@ -864,42 +914,27 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             ),
           ),
         const SizedBox(height: 16),
-        InputDecorator(
-          decoration: const InputDecoration(
-            labelText: 'Door',
-            helperText:
-                'Where the tables of this profile are: channels on Discord or rooms on Matrix. '
-                'A profile uses one of the two.',
-            helperMaxLines: 2,
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              key: const ValueKey('field-door'),
-              value: _door,
-              isDense: true,
-              isExpanded: true,
-              onChanged: (door) => _chooseDoor(door ?? _door),
-              items: [
-                const DropdownMenuItem(value: discordDoor, child: Text('Discord')),
-                const DropdownMenuItem(value: matrixDoor, child: Text('Matrix')),
-                // Eine Tür, die diese Maske nicht kennt, bleibt stehen: sonst
-                // würde ein Profil beim bloßen Öffnen und Speichern umgestellt.
-                if (_door != discordDoor && _door != matrixDoor)
-                  DropdownMenuItem(value: _door, child: Text(doorLabel(_door))),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
         TextField(
           key: const ValueKey('field-host'),
           controller: _host,
           decoration: InputDecoration(
-            labelText: 'Your ${doorLabel(_door)} user ID',
-            helperText: _door == matrixDoor
-                ? 'Looks like @name:server. Your Matrix app shows it in your own profile.'
-                : 'In Discord: right-click your own name, then Copy User ID. '
-                      'Needs Developer Mode (Settings, Advanced).',
+            // Stehen alle Tische an einer Tür, heißt das Feld nach ihr, wie
+            // bisher. In einem Profil mit Tischen an beiden genügt die
+            // Kennung an einer.
+            labelText: switch (_onlyDoor) {
+              final door? => 'Your ${doorLabel(door)} user ID',
+              null => 'Your user ID',
+            },
+            helperText: switch (_onlyDoor) {
+              matrixDoor =>
+                'Looks like @name:server. Your Matrix app shows it in your own profile.',
+              null =>
+                'Your Discord user ID (digits) or your Matrix user ID (@name:server). '
+                    'One of the two is enough; the other can stand under People.',
+              _ =>
+                'In Discord: right-click your own name, then Copy User ID. '
+                    'Needs Developer Mode (Settings, Advanced).',
+            },
             helperMaxLines: 2,
           ),
         ),
@@ -1004,23 +1039,38 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       children: [
         // Bis zum 20.11.2026: „Every seat is a channel with a language." Seit
         // ein Platz der Tisch eines Menschen sein kann, steht das Wort dabei.
-        Text(
-          _door == matrixDoor
-              ? 'A room is one conversation. Every seat is a table: a Matrix room in one language. '
-                    'What is written at one table appears at all others in their language.'
-              : 'A room is one conversation. Every seat is a table: a channel in one language. '
-                    'What is written at one table appears at all others in their language.',
-        ),
+        Text(switch (_onlyDoor) {
+          matrixDoor =>
+            'A room is one conversation. Every seat is a table: a Matrix room in one language. '
+                'What is written at one table appears at all others in their language.',
+          null =>
+            'A room is one conversation. Every seat is a table: a Discord channel or a Matrix '
+                'room in one language. What is written at one table appears at all others in '
+                'their language, whichever door they stand at.',
+          _ =>
+            'A room is one conversation. Every seat is a table: a channel in one language. '
+                'What is written at one table appears at all others in their language.',
+        }),
         const SizedBox(height: 4),
         Text(
-          _door == matrixDoor
-              ? 'Room ID: the internal ID of the Matrix room, which starts with ! (in Element: '
-                    'room settings, Advanced). Invite the account of the fish into each room. '
-                    'Language as a word, for example German.'
-              : 'Channel ID: in Discord, right-click the channel, then Copy Channel ID. '
-                    'Language as a word, for example German.',
+          'Door: where the table stands, a channel on Discord or a room on Matrix. '
+          'The tables of one room may stand at different doors.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
+        const SizedBox(height: 4),
+        if (_doorsInUse().contains(discordDoor))
+          Text(
+            'Channel ID: in Discord, right-click the channel, then Copy Channel ID. '
+            'Language as a word, for example German.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (_doorsInUse().contains(matrixDoor))
+          Text(
+            'Room ID: the internal ID of the Matrix room, which starts with ! (in Element: '
+            'room settings, Advanced). Invite the account of the fish into each room. '
+            'Language as a word, for example German.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
         const SizedBox(height: 4),
         Text(
           'Whose table: the person who reads there. Their mother tongue then decides the '
@@ -1048,13 +1098,13 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             onPressed: () => setState(
               () => _rooms.add(
                 _RoomDraft(
-                  const Room(
+                  Room(
                     // Wie beim neuen Profil: Englisch ist vorbelegt.
-                    passThrough: ['English'],
+                    passThrough: const ['English'],
                     contextLines: 10,
                     seats: [
-                      Seat(channel: '', lang: ''),
-                      Seat(channel: '', lang: ''),
+                      Seat(door: _doorForNewSeat(null), channel: '', lang: ''),
+                      Seat(door: _doorForNewSeat(null), channel: '', lang: ''),
                     ],
                   ),
                 ),
@@ -1099,7 +1149,9 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
               onPressed: () => setState(
-                () => room.seats.add(_SeatDraft(const Seat(channel: '', lang: ''))),
+                () => room.seats.add(
+                  _SeatDraft(Seat(door: _doorForNewSeat(room), channel: '', lang: '')),
+                ),
               ),
               icon: const Icon(Icons.add),
               label: const Text('Add seat'),
@@ -1187,13 +1239,38 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         // Felder daneben sollen dann nicht nach unten rutschen.
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SizedBox(
+            width: 120,
+            child: InputDecorator(
+              decoration: const InputDecoration(labelText: 'Door'),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  key: ValueKey('seat-$r-$s-door'),
+                  value: seat.door,
+                  isDense: true,
+                  isExpanded: true,
+                  onChanged: (door) => _chooseSeatDoor(seat, door ?? seat.door),
+                  items: [
+                    const DropdownMenuItem(value: discordDoor, child: Text('Discord')),
+                    const DropdownMenuItem(value: matrixDoor, child: Text('Matrix')),
+                    // Eine Tür, die diese Maske nicht kennt, bleibt stehen:
+                    // sonst würde ein Profil beim bloßen Öffnen und Speichern
+                    // umgestellt.
+                    if (!knownDoors.contains(seat.door))
+                      DropdownMenuItem(value: seat.door, child: Text(doorLabel(seat.door))),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             flex: 3,
             child: TextField(
               key: ValueKey('seat-$r-$s-channel'),
               controller: seat.channel,
               decoration: InputDecoration(
-                labelText: _door == matrixDoor ? 'Matrix room ID' : 'Discord channel ID',
+                labelText: seat.door == matrixDoor ? 'Matrix room ID' : 'Discord channel ID',
               ),
             ),
           ),
@@ -1264,12 +1341,16 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
           'Everyone else gets what the seat says where they write.',
         ),
         const SizedBox(height: 4),
-        Text(
-          'Name: your own label for this person, so you can see whose table is whose. '
-          'It stays in this profile; neither ${doorLabel(_door)} nor the AI gets it. '
-          'The ${doorLabel(_door)} user ID can follow later.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        Text(switch (_onlyDoor) {
+          final door? =>
+            'Name: your own label for this person, so you can see whose table is whose. '
+                'It stays in this profile; neither ${doorLabel(door)} nor the AI gets it. '
+                'The ${doorLabel(door)} user ID can follow later.',
+          null =>
+            'Name: your own label for this person, so you can see whose table is whose. '
+                'It stays in this profile; neither Discord nor Matrix nor the AI gets it. '
+                'The user IDs can follow later; a person needs one only where they write.',
+        }, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 4),
         Text(
           'Invited: your fish translates for this person, on your key. '
@@ -1282,7 +1363,7 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () => setState(() => _people.add(_watched(_PersonDraft(null, _door)))),
+            onPressed: () => setState(() => _people.add(_watched(_PersonDraft(null, _doorsInUse)))),
             icon: const Icon(Icons.add),
             label: const Text('Add person'),
           ),
@@ -1293,98 +1374,125 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
 
   /// Ein Mensch: Kennung, Muttersprache, neutrale Sprachen, Form, Einladung.
   Widget _person(int index, _PersonDraft person, {required bool isHost}) {
+    // Je Tür, an der Tische stehen, ein Kennungsfeld. Das Feld heißt nach
+    // seiner Tür.
+    final ids = [
+      for (final door in _doorsInUse())
+        if (person.ids[door] case final id?)
+          Expanded(
+            flex: 3,
+            child: TextField(
+              key: ValueKey('person-$index-$door'),
+              controller: id,
+              decoration: InputDecoration(labelText: '${doorLabel(door)} user ID'),
+            ),
+          ),
+    ];
+    // Eine Kennung steht in der Zeile, wie bisher. Zwei bekämen dort zu
+    // wenig Platz (gemessen am 23.11.2026 bei 1280 Punkten Fensterbreite:
+    // die Beschriftungen daneben wurden abgeschnitten) und stehen deshalb in
+    // einer eigenen Zeile darunter.
+    final inline = ids.length < 2;
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 2,
+          child: TextField(
+            key: ValueKey('person-$index-name'),
+            controller: person.name,
+            decoration: InputDecoration(
+              labelText: 'Name',
+              hintText: 'Robin',
+              helperText: isHost ? 'This is you, the host.' : null,
+              helperMaxLines: 2,
+            ),
+          ),
+        ),
+        if (inline)
+          for (final id in ids) ...[const SizedBox(width: 12), id],
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 2,
+          child: TextField(
+            key: ValueKey('person-$index-lang'),
+            controller: person.lang,
+            decoration: const InputDecoration(labelText: 'Mother tongue', hintText: 'Russian'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 3,
+          child: TextField(
+            key: ValueKey('person-$index-neutral'),
+            controller: person.neutral,
+            decoration: const InputDecoration(
+              labelText: 'Neutral languages',
+              helperText: 'Stay untranslated for this person. Empty: as in the room.',
+              helperMaxLines: 3,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        _formChoice(
+          key: ValueKey('person-$index-form'),
+          value: person.form,
+          tooltip: 'Grammatical form of this person. Used only for grammar.',
+          onChanged: (form) => setState(() => person.form = form),
+        ),
+        const SizedBox(width: 4),
+        Tooltip(
+          message: isHost
+              ? 'Your fish always translates for you.'
+              : 'Your fish translates for whoever you invite, on your key.',
+          child: Padding(
+            // Auf die Höhe der Feldzeile gesetzt, nicht auf die des Etiketts.
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Checkbox(
+                  key: ValueKey('person-$index-invited'),
+                  // Der Gastgeber braucht keinen Haken: sein Fisch übersetzt
+                  // ohnehin für ihn. Gezeigt wird er gesetzt und fest; im
+                  // Profil ändert das nichts.
+                  value: isHost || person.invited,
+                  onChanged: isHost
+                      ? null
+                      : (ticked) => setState(() => person.invited = ticked ?? false),
+                ),
+                const Text('Invited'),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Remove this person',
+          onPressed: () => setState(() => _people.removeAt(index).dispose()),
+          icon: const Icon(Icons.close),
+        ),
+      ],
+    );
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: TextField(
-              key: ValueKey('person-$index-name'),
-              controller: person.name,
-              decoration: InputDecoration(
-                labelText: 'Name',
-                hintText: 'Robin',
-                helperText: isHost ? 'This is you, the host.' : null,
-                helperMaxLines: 2,
-              ),
+      // Mit zwei Zeilen je Mensch braucht es mehr Abstand zum nächsten.
+      padding: EdgeInsets.only(bottom: inline ? 12 : 24),
+      child: inline
+          ? row
+          : Column(
+              children: [
+                row,
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final (n, id) in ids.indexed) ...[
+                      if (n > 0) const SizedBox(width: 12),
+                      id,
+                    ],
+                  ],
+                ),
+              ],
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 3,
-            child: TextField(
-              key: ValueKey('person-$index-id'),
-              controller: person.id,
-              decoration: InputDecoration(labelText: '${doorLabel(_door)} user ID'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 2,
-            child: TextField(
-              key: ValueKey('person-$index-lang'),
-              controller: person.lang,
-              decoration: const InputDecoration(
-                labelText: 'Mother tongue',
-                hintText: 'Russian',
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 3,
-            child: TextField(
-              key: ValueKey('person-$index-neutral'),
-              controller: person.neutral,
-              decoration: const InputDecoration(
-                labelText: 'Neutral languages',
-                helperText: 'Stay untranslated for this person. Empty: as in the room.',
-                helperMaxLines: 3,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          _formChoice(
-            key: ValueKey('person-$index-form'),
-            value: person.form,
-            tooltip: 'Grammatical form of this person. Used only for grammar.',
-            onChanged: (form) => setState(() => person.form = form),
-          ),
-          const SizedBox(width: 4),
-          Tooltip(
-            message: isHost
-                ? 'Your fish always translates for you.'
-                : 'Your fish translates for whoever you invite, on your key.',
-            child: Padding(
-              // Auf die Höhe der Feldzeile gesetzt, nicht auf die des Etiketts.
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Checkbox(
-                    key: ValueKey('person-$index-invited'),
-                    // Der Gastgeber braucht keinen Haken: sein Fisch übersetzt
-                    // ohnehin für ihn. Gezeigt wird er gesetzt und fest; im
-                    // Profil ändert das nichts.
-                    value: isHost || person.invited,
-                    onChanged: isHost
-                        ? null
-                        : (ticked) => setState(() => person.invited = ticked ?? false),
-                  ),
-                  const Text('Invited'),
-                ],
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Remove this person',
-            onPressed: () => setState(() => _people.removeAt(index).dispose()),
-            icon: const Icon(Icons.close),
-          ),
-        ],
-      ),
     );
   }
 }
