@@ -151,9 +151,11 @@ account there.
      whose table is whose; it stays on your PC, and neither Discord nor the
      AI gets it. The Discord user ID can follow later. Formality says how
      this person is addressed in what they read at their table: "familiar",
-     "respectful", or "as written", which follows what the writer wrote. It
-     matters for languages that tell friends from elders, such as du and Sie
-     or the levels of Korean and Japanese.
+     "respectful", or "unknown". It matters for languages that tell friends
+     from elders, such as du and Sie or the levels of Korean and Japanese.
+     With "unknown" the translation follows what the writer wrote, except
+     into a language that makes every sentence choose a level: there the
+     fish uses the polite everyday forms, not the intimate ones.
 3. Save. The profile appears as a card. Press "Switch on" at the top of the
    window: the fish starts for all profiles and the bot goes online in
    Discord. "Switch off", or closing the window, takes it offline. A profile
@@ -408,6 +410,27 @@ Limits of a mixed room:
   "Sie" in the original came out polite without any entry. Not measured:
   other models and services, a running conversation, and whether the result
   sounds natural to a native speaker; only the forms were read off.
+- That familiar form is what "unknown" now avoids. Into a language in which
+  nobody can be addressed without choosing a level, the fish asks for the
+  polite everyday forms as long as nothing is entered for the reader; this
+  also goes for the request for agreement. The program decides this by the
+  English name of the language of the seat, written as a word: Korean,
+  Japanese, Javanese, Sundanese, Balinese, Tibetan; Vietnamese, Thai, Lao,
+  Burmese, Khmer, Tagalog; Hindi, Urdu, Bengali, Nepali, Marathi, Gujarati,
+  Punjabi, Tamil, Telugu, Kannada, Malayalam, Sinhala. A name in the
+  language itself is not recognised. Measured on 23 and 24 November 2026
+  with gpt-6-luna, one run per case: Korean polite in 2 of 2 and Japanese in
+  1 of 1, Hindi and Bengali changed from the familiar to the polite "you",
+  Tamil came out polite, Vietnamese and Thai came out the same polite way
+  with and without it. Tagalog came out with "po" and Javanese in its high
+  level; whether that is more formal than young people expect, only someone
+  who lives the language can say. The other languages of the list are on it
+  by what is known about them and have not been measured. Every other
+  language is translated as before: "du" stayed "ты" in Russian.
+- Not solved, and as it was before: the other way round. Everyday polite
+  Korean came out as "du" in one run and as "Sie" in another, without any
+  entry. A young Korean who writes politely may so be translated with a
+  stiff "Sie".
 - The language of a seat is a free word, so a variant can be named:
   "Brazilian Portuguese" or "Traditional Chinese (Taiwan)" gave that variant
   in the same measurement, one run each; plain "Portuguese" came out

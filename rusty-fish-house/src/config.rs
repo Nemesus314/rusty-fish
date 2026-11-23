@@ -123,7 +123,9 @@ pub struct Person {
     /// Grammatisches Geschlecht, als Hinweis für die Grammatik.
     pub gender: Option<Gender>,
     /// Wie dieser Mensch angesprochen wird, in dem, was er an seinem Tisch
-    /// liest: vertraut oder respektvoll. `None` heißt: wie im Original.
+    /// liest: vertraut oder respektvoll. `None` heißt: unbekannt. Dann folgt
+    /// die Anrede dem Original, außer die Sprache des Tisches verlangt eine
+    /// Stufe (siehe `rusty_fish_core::asks_for_a_level`).
     ///
     /// Seit dem 23.11.2026, für Sprachen, die Freunde und Ältere verschieden
     /// ansprechen (siehe `rusty_fish_core::Formality`).
@@ -243,8 +245,8 @@ struct RawPerson {
     id: Option<String>,
     matrix: Option<String>,
     gender: Option<String>,
-    /// "familiar" oder "respectful"; fehlt die Angabe, folgt die Anrede dem
-    /// Original.
+    /// "familiar" oder "respectful"; fehlt die Angabe, ist die Anrede
+    /// unbekannt.
     formality: Option<String>,
     lang: Option<String>,
     neutral: Option<Vec<String>>,
@@ -816,17 +818,19 @@ fn read_gender(value: Option<&str>, whose: &str) -> Result<Option<Gender>, Strin
 }
 
 /// Liest die Angabe, wie ein Mensch angesprochen wird. Erlaubt sind
-/// "familiar" und "respectful"; fehlt sie oder ist sie leer, folgt die Anrede
-/// dem Original. Alles andere wird laut abgelehnt, damit ein Tippfehler nicht
-/// still zu „keine Angabe" wird.
+/// "familiar" und "respectful". Fehlt sie, ist sie leer oder steht dort
+/// "unknown", wie die Maske die Vorgabe nennt, ist die Anrede unbekannt. Alles
+/// andere wird laut abgelehnt, damit ein Tippfehler nicht still zu „keine
+/// Angabe" wird.
 fn read_formality(value: Option<&str>, whose: &str) -> Result<Option<Formality>, String> {
     let Some(value) = filled(value) else { return Ok(None) };
     match value.to_ascii_lowercase().as_str() {
+        "unknown" => Ok(None),
         "familiar" => Ok(Some(Formality::Familiar)),
         "respectful" => Ok(Some(Formality::Respectful)),
         _ => Err(format!(
             "configuration: `formality` for {whose} must be \"familiar\" or \"respectful\", got \
-             {value:?}; leave it out to follow what the writer wrote"
+             {value:?}; leave it out if you do not know"
         )),
     }
 }

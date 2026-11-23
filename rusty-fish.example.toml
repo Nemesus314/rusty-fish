@@ -117,8 +117,10 @@ context_lines = 10
 # gender = "male"
 # How this person is addressed in what they read at their own table:
 # "familiar" or "respectful". It matters for languages that tell friends from
-# elders (du and Sie, the levels of Korean and Japanese). Leave it out to
-# follow what the writer wrote.
+# elders (du and Sie, the levels of Korean and Japanese). Left out, it is
+# unknown: the translation then follows what the writer wrote, except into a
+# language that makes every sentence choose a level (Korean, Japanese, Hindi
+# and others, see GUIDE.md), where the fish uses the polite everyday forms.
 # formality = "respectful"
 # The person's mother tongue: at a table this person owns, the fish translates
 # into it instead of the seat's language.

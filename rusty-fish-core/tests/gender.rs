@@ -1,6 +1,8 @@
 //! Tests der freiwilligen Angabe zum grammatischen Geschlecht. Ohne Netz.
 
-use rusty_fish_core::{Ask, Formality, Gender, Request, build_ask_prompt, build_prompt};
+use rusty_fish_core::{
+    Ask, Formality, Gender, Request, asks_for_a_level, build_ask_prompt, build_prompt,
+};
 
 fn request(writer: Option<Gender>, reader: Option<Gender>) -> Request<'static> {
     Request {
@@ -143,4 +145,90 @@ fn the_formality_stands_after_the_hints_about_gender() {
     // Jeder Hinweis nennt, wofür er gilt.
     assert!(p.system.contains("only for grammatical forms that depend on gender"));
     assert!(p.system.contains("only for forms of address"));
+}
+
+// --- unbekannte Anrede in Sprachen, die eine Stufe verlangen -------------------
+
+/// Der Satz, an dem die Regel im Auftrag zu erkennen ist.
+const SAFE: &str = "use its ordinary polite everyday forms";
+
+fn into(lang: &'static str) -> Request<'static> {
+    Request { target_lang: lang, ..request(None, None) }
+}
+
+#[test]
+fn the_languages_of_the_table_ask_for_a_level() {
+    // Entschieden von Nemesus am 23.11.2026: die Liste nach der Tabelle.
+    for lang in [
+        "Korean", "Japanese", "Javanese", "Sundanese", "Balinese", "Tibetan", "Vietnamese",
+        "Thai", "Lao", "Burmese", "Khmer", "Tagalog", "Hindi", "Urdu", "Bengali", "Nepali",
+        "Marathi", "Gujarati", "Punjabi", "Tamil", "Telugu", "Kannada", "Malayalam", "Sinhala",
+    ] {
+        assert!(asks_for_a_level(lang), "{lang}");
+    }
+    // Wie ein Mensch sie eintippt, und unter ihren anderen Namen.
+    for lang in ["korean", " KOREAN ", "Korean (Seoul)", "Laotian", "Filipino", "Bangla", "Sinhalese"] {
+        assert!(asks_for_a_level(lang), "{lang}");
+    }
+}
+
+#[test]
+fn every_other_language_does_not() {
+    for lang in [
+        "German", "English", "Russian", "French", "Spanish", "Italian", "Brazilian Portuguese",
+        "Polish", "Turkish", "Persian", "Arabic", "Indonesian", "Malay", "Simplified Chinese",
+        "Traditional Chinese (Taiwan)", "",
+    ] {
+        assert!(!asks_for_a_level(lang), "{lang}");
+    }
+    // Ein ganzes Wort, kein Teil eines anderen: Malaiisch ist nicht Malayalam.
+    assert!(!asks_for_a_level("Malay"));
+    assert!(asks_for_a_level("Malayalam"));
+    // Benannte Grenze: der Name in der Sprache selbst wird nicht erkannt.
+    assert!(!asks_for_a_level("한국어"));
+}
+
+#[test]
+fn with_the_address_unknown_such_a_language_gets_the_polite_everyday_forms() {
+    for lang in ["Korean", "Japanese", "Hindi", "Vietnamese"] {
+        let p = build_prompt(&into(lang));
+        assert!(p.system.contains(SAFE), "{lang}: {}", p.system);
+        assert!(p.system.contains("not the intimate forms"), "{lang}: {}", p.system);
+        assert!(p.system.contains("only for forms of address and never mention it"), "{lang}");
+    }
+}
+
+#[test]
+fn into_every_other_language_the_prompt_is_word_for_word_as_before() {
+    for lang in ["Russian", "German", "French", "Brazilian Portuguese"] {
+        let p = build_prompt(&into(lang));
+        assert!(!p.system.contains(SAFE), "{lang}: {}", p.system);
+        assert!(!p.system.contains("politely"), "{lang}: {}", p.system);
+    }
+}
+
+#[test]
+fn an_entry_for_the_reader_goes_before_the_rule() {
+    let respectful =
+        build_prompt(&Request { reader_formality: Some(Formality::Respectful), ..into("Korean") });
+    assert!(respectful.system.contains("addressed respectfully"), "got: {}", respectful.system);
+    assert!(!respectful.system.contains(SAFE), "got: {}", respectful.system);
+
+    let familiar =
+        build_prompt(&Request { reader_formality: Some(Formality::Familiar), ..into("Korean") });
+    assert!(familiar.system.contains("addressed in the familiar way"), "got: {}", familiar.system);
+    assert!(!familiar.system.contains(SAFE), "got: {}", familiar.system);
+}
+
+#[test]
+fn the_greeting_stays_informal_except_where_the_language_asks_for_a_level() {
+    // Entschieden am 19.11.2026: die Begrüßung duzt. Das galt Russisch und
+    // Deutsch; in einer Sprache mit Stufen wäre die vertraute Form gegenüber
+    // einem Gast, den der Fisch nicht kennt, grob.
+    let russian = build_prompt(&Request { informal: true, ..into("Russian") });
+    assert!(russian.system.contains("Address the reader informally"), "got: {}", russian.system);
+
+    let korean = build_prompt(&Request { informal: true, ..into("Korean") });
+    assert!(!korean.system.contains("Address the reader informally"), "got: {}", korean.system);
+    assert!(korean.system.contains(SAFE), "got: {}", korean.system);
 }

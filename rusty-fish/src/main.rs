@@ -88,7 +88,7 @@ enum Command {
         #[arg(long)]
         informal: bool,
         /// How the reader is addressed, for languages that tell friends from
-        /// elders; without it the translation follows what the writer wrote
+        /// elders; without it the form of address is unknown
         #[arg(long, value_enum)]
         formality: Option<HowFormal>,
         /// For measuring only: one more sentence for the AI, after the fish's

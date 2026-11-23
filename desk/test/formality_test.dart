@@ -1,5 +1,5 @@
 // Tests zur Anrede eines Menschen in der Maske: das Feld „Formality" mit den
-// Werten „as written", „familiar" und „respectful". Gegen die Attrappe.
+// Werten „unknown", „familiar" und „respectful". Gegen die Attrappe.
 //
 // Seit dem 23.11.2026. Nemesus an dem Tag: „in Korea redest du ja anders mit
 // einer älteren Person als mit einer jüngeren." Gemessen wurde danach, dass
@@ -67,7 +67,7 @@ void main() {
   });
 
   group('the field in the form', () {
-    testWidgets('a profile without it shows "as written" and goes back out unchanged', (
+    testWidgets('a profile without it shows "unknown" and goes back out unchanged', (
       tester,
     ) async {
       final fake = FakeCli(entries: [entryOf(doc())]);
@@ -77,7 +77,9 @@ void main() {
       expect(find.text('Formality'), findsNWidgets(2), reason: 'one field per person');
       expect(chosen(tester, 'person-0-formality'), '');
       expect(chosen(tester, 'person-1-formality'), '');
-      expect(find.text('as written'), findsNWidgets(2));
+      // Die Vorgabe sagt, was man weiß: nichts.
+      expect(find.text('unknown'), findsNWidgets(2));
+      expect(find.text('as written'), findsNothing);
 
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -119,7 +121,7 @@ void main() {
 
       await tester.tap(inCard('tea', find.text('Edit')));
       await tester.pumpAndSettle();
-      await choose(tester, 'person-1-formality', 'as written');
+      await choose(tester, 'person-1-formality', 'unknown');
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(fake.saved.last.people[1].formality, isNull);
@@ -136,7 +138,7 @@ void main() {
       expect(fake.saved.single.people[1].formality, 'ceremonial');
     });
 
-    testWidgets('a new person starts "as written"', (tester) async {
+    testWidgets('a new person starts "unknown"', (tester) async {
       final fake = FakeCli(entries: [entryOf(doc())]);
       await open(tester, fake);
       await tester.tap(inCard('tea', find.text('Edit')));

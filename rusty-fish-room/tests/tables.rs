@@ -414,4 +414,18 @@ fn tables_with_a_different_formality_get_translations_of_their_own() {
     assert_eq!(prompts.len(), 3, "one paid translation per kind of table");
     assert_eq!(prompts.iter().filter(|p| p.system.contains("addressed respectfully")).count(), 1);
     assert_eq!(prompts.iter().filter(|p| p.system.contains("familiar way")).count(), 1);
+    // Wo nichts eingetragen ist, gilt in einer Sprache mit Stufen die
+    // alltägliche höfliche, und nur dort.
+    let safe = "ordinary polite everyday forms";
+    assert_eq!(prompts.iter().filter(|p| p.system.contains(safe)).count(), 1);
+
+    // An einem russischen Tisch ohne Eintrag steht davon nichts.
+    let plain = Room {
+        seats: vec![Seat::new("de", "German"), Seat::new("ru", "Russian")],
+        pass_through: vec!["English".to_owned()],
+        context_lines: 5,
+    };
+    let fake = Fake::says("x");
+    let _ = now(relay(&fake, &plain, &mut RoomState::default(), &from("de", "n", "Kommst du?")));
+    assert!(!fake.prompts()[0].system.contains(safe), "got: {}", fake.prompts()[0].system);
 }

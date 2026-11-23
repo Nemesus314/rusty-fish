@@ -51,7 +51,8 @@ pub enum Gender {
 }
 
 /// Wie ein Mensch angesprochen wird, in dem, was er liest. Eine freiwillige
-/// Angabe; ohne sie folgt die Anrede dem Original.
+/// Angabe. Ohne sie ist die Anrede unbekannt: dann folgt sie dem Original,
+/// außer die Zielsprache verlangt eine Stufe (siehe [`asks_for_a_level`]).
 ///
 /// Nemesus am 23.11.2026: „Sollte der Bot nicht auch noch das Alter von
 /// Menschen wissen? Ich meine, in Korea redest du ja anders mit einer älteren
@@ -364,14 +365,24 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
         system.push(' ');
         system.push_str(GRAMMAR_ONLY);
     }
-    if req.informal {
+    // Ist über die Anrede des Lesers nichts eingetragen und verlangt die
+    // Zielsprache eine Stufe (siehe [`asks_for_a_level`]), gilt die
+    // alltägliche höfliche. Das geht auch dem Duzen der Begrüßung vor: „du"
+    // unter Fremden ist im Deutschen freundlich, die vertraute Stufe dieser
+    // Sprachen ist es nicht.
+    let safe_level = req.reader_formality.is_none() && asks_for_a_level(to);
+    if req.informal && !safe_level {
         system.push_str(
             " Address the reader informally, the way friends do (for example \"du\" in \
              German, \"ты\" in Russian).",
         );
     }
+    if safe_level {
+        system.push_str(SAFE_LEVEL);
+    }
     // Wort für Wort die Sätze, die am 23.11.2026 gemessen wurden (siehe
-    // [`Formality`]). Ohne Angabe bleibt der Auftrag, wie er war.
+    // [`Formality`]). Ohne Angabe und in jede andere Zielsprache bleibt der
+    // Auftrag, wie er war.
     match req.reader_formality {
         Some(Formality::Respectful) => system.push_str(
             " Where the text addresses the reader directly, the reader is to be addressed \
@@ -389,6 +400,83 @@ pub fn build_prompt(req: &Request<'_>) -> Prompt {
     }
 
     Prompt { system, user }
+}
+
+/// Was der Auftrag sagt, wenn die Zielsprache eine Stufe verlangt und über
+/// den Leser nichts eingetragen ist.
+const SAFE_LEVEL: &str = " The target language makes the speaker choose how politely to address \
+    someone. Where the text addresses the reader directly, use its ordinary polite everyday \
+    forms, the ones adults use with people they are not close to, whatever pronoun the original \
+    uses, and not the intimate forms. Use this only for forms of address and never mention it.";
+
+/// Sprachen, in denen man niemanden ansprechen kann, ohne eine Stufe zu
+/// wählen, und in denen die vertraute Stufe unter Fremden grob wirkt.
+///
+/// Nemesus am 23.11.2026, nach einem Gespräch mit Gemini darüber, ob ein
+/// deutsches „du" im Koreanischen zur vertrauten Form werden darf: solange
+/// über jemanden nichts bekannt ist, soll die sichere, alltägliche höfliche
+/// Stufe gelten. Und auf die Frage, welche Sprachen dafür in Frage kommen:
+/// „Mach doch eigentlich die Settings genau nach der Tabelle."
+///
+/// Die Tabelle, in drei Gruppen:
+/// - Stufen in jedem Satz: Koreanisch, Japanisch, Javanisch, Sundanesisch,
+///   Balinesisch, Tibetisch.
+/// - Anrede über Partikel und Fürwörter, ohne neutrales „du": Vietnamesisch,
+///   Thai, Laotisch, Birmanisch, Khmer, Tagalog.
+/// - Drei Stufen beim „du": Hindi, Urdu, Bengalisch, Nepali, Marathi,
+///   Gujarati, Punjabi, Tamil, Telugu, Kannada, Malayalam, Singhalesisch.
+///
+/// Gemessen ist davon nur ein Teil (siehe den Leitfaden, Abschnitt „Limits");
+/// der Rest steht hier nach dem, was über diese Sprachen bekannt ist. Die
+/// Regel ist vorsichtig gewählt: liegt sie daneben, dann zu höflich und nicht
+/// zu grob.
+///
+/// Benannte Grenzen:
+/// - Erkannt wird die Sprache an ihrem englischen Namen als ganzem Wort, so
+///   wie der Leitfaden sie eintragen lässt („Korean", auch „Korean (Seoul)").
+///   Ein Name in der Sprache selbst („한국어") wird nicht erkannt.
+/// - Der Code entscheidet, ob die Regel im Auftrag steht, nicht die KI.
+///   Gemessen am 23.11.2026: als allgemeiner Satz in jedem Auftrag machte sie
+///   aus koreanischer Alltagshöflichkeit im Deutschen manchmal „Sie".
+const LEVELLED: [&str; 31] = [
+    "korean",
+    "japanese",
+    "javanese",
+    "sundanese",
+    "balinese",
+    "tibetan",
+    "vietnamese",
+    "thai",
+    "lao",
+    "laotian",
+    "burmese",
+    "myanmar",
+    "khmer",
+    "cambodian",
+    "tagalog",
+    "filipino",
+    "hindi",
+    "urdu",
+    "bengali",
+    "bangla",
+    "nepali",
+    "marathi",
+    "gujarati",
+    "punjabi",
+    "panjabi",
+    "tamil",
+    "telugu",
+    "kannada",
+    "malayalam",
+    "sinhala",
+    "sinhalese",
+];
+
+/// Verlangt diese Zielsprache eine Höflichkeitsstufe? Siehe [`LEVELLED`].
+pub fn asks_for_a_level(lang: &str) -> bool {
+    lang.split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .any(|word| LEVELLED.contains(&word.to_lowercase().as_str()))
 }
 
 /// Wie ein Geschlecht im Auftrag an die KI heißt.

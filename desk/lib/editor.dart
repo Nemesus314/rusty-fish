@@ -170,8 +170,8 @@ class _PersonDraft {
   final TextEditingController neutral;
   _Form form;
 
-  /// Wie dieser Mensch angesprochen wird: leer (wie geschrieben), vertraut
-  /// oder respektvoll, in den Worten des Programms.
+  /// Wie dieser Mensch angesprochen wird: leer (unbekannt), vertraut oder
+  /// respektvoll, in den Worten des Programms.
   String formality;
   bool invited;
 
@@ -1360,8 +1360,9 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         const SizedBox(height: 4),
         Text(
           'Formality: how this person is addressed in what they read at their table, for '
-          'languages that tell friends from elders, such as du and Sie or the levels of Korean '
-          'and Japanese. "as written" follows what the writer wrote.',
+          'languages that tell friends from elders. "unknown" follows what the writer wrote; '
+          'into a language that makes every sentence choose a level, such as Korean, Japanese '
+          'or Hindi, the fish then uses the polite everyday forms, not the intimate ones.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 4),
@@ -1500,7 +1501,10 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
             isExpanded: true,
             onChanged: (how) => setState(() => person.formality = how ?? ''),
             items: [
-              const DropdownMenuItem(value: '', child: Text('as written')),
+              // Die Vorgabe sagt, was der Gastgeber weiß: nichts. Nemesus am
+              // 23.11.2026: ein solches Feld braucht „unbekannt", und das ist
+              // oft die Vorgabe.
+              const DropdownMenuItem(value: '', child: Text('unknown')),
               const DropdownMenuItem(value: familiarFormality, child: Text('familiar')),
               const DropdownMenuItem(value: respectfulFormality, child: Text('respectful')),
               // Ein Wert, den diese Maske nicht kennt, bleibt stehen: sonst

@@ -45,9 +45,12 @@ fn a_person_can_be_addressed_respectfully_or_in_the_familiar_way() {
 
     let familiar = PROFILE.replace("\"respectful\"", "\"Familiar\"");
     assert_eq!(Config::parse(&familiar).unwrap().people["7"].formality, Some(Formality::Familiar));
-    // Ein leerer Eintrag heißt wie ein fehlender.
-    let empty = PROFILE.replace("\"respectful\"", "\"\"");
-    assert_eq!(Config::parse(&empty).unwrap().people["7"].formality, None);
+    // Ein leerer Eintrag heißt wie ein fehlender, und das Wort der Maske für
+    // die Vorgabe auch: unbekannt.
+    for unknown in ["", "unknown", "Unknown"] {
+        let text = PROFILE.replace("\"respectful\"", &format!("\"{unknown}\""));
+        assert_eq!(Config::parse(&text).unwrap().people["7"].formality, None, "{unknown:?}");
+    }
 }
 
 #[test]
@@ -68,7 +71,7 @@ fn any_other_word_is_refused_with_what_to_write_instead() {
             .unwrap_err();
         assert!(err.contains("`formality` for person 7"), "{bad}: {err}");
         assert!(err.contains("\"familiar\" or \"respectful\""), "{bad}: {err}");
-        assert!(err.contains("leave it out"), "{bad}: {err}");
+        assert!(err.contains("leave it out if you do not know"), "{bad}: {err}");
     }
 }
 
