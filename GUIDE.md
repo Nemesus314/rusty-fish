@@ -432,13 +432,18 @@ Limits of a mixed room:
   young people expect, only someone who lives the language can say; only
   the forms were read off, by someone who does not speak these languages.
   Every other language is translated as before: "du" stayed "ты" in Russian.
-- The other way round the fish follows the writer, as before, and that can
-  come out stiff: everyday polite Japanese became "Sie" in German in 2 of 2
-  runs, everyday polite Korean "du" in one run and "Sie" in another. Someone
-  who writes in the ordinary polite way of those languages may so be read
-  with a formal "Sie". A reader who wants "du" sets their own formality to
-  "familiar": with that, the same Japanese and Korean sentences came out as
-  "du" (one run each).
+- The other way round the fish follows the writer, as before, and that
+  comes out stiff. Measured for Korean on 24 November 2026 with gpt-6-luna,
+  four everyday polite sentences, three runs each: "Sie" in German in 10 of
+  12, "du" in 2. Formal Korean became "Sie" (2 of 2), intimate Korean "du"
+  (2 of 2). Everyday polite Japanese became "Sie" in 2 of 2. Someone who
+  writes in the ordinary polite way of those languages is so read with a
+  formal "Sie". A reader who wants "du" sets their own formality to
+  "familiar": with that, the four Korean sentences came out as "du" (4 of
+  4), and the Japanese one too. A sentence that makes the AI treat such
+  everyday politeness as "du" by itself was tried and not built: it also
+  turned clearly formal Korean into "du" (2 of 2). So the choice stays with
+  the reader.
 - Mandarin and Cantonese are not on the list and need no rule: a German
   "du" became 你 and "Sie" became 您, and back again the same way (one run
   each). "Mandarin" as the language of a seat gave simplified characters,
