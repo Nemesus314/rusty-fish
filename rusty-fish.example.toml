@@ -1,5 +1,6 @@
 # Rusty Fish, settings for one profile. This example stands at the Discord
-# door; what a profile at the Matrix door says instead is noted at each place.
+# door; what a table at the Matrix door says instead is noted at each place.
+# One room may have tables at both doors (a mixed room, see below).
 # Copy this file to rusty-fish.toml, fill it in, then: rusty-fish run
 #
 # Secrets do not belong here. Store them once with:
@@ -29,6 +30,7 @@ model = "put-a-model-name-here"
 # channel.
 # In Discord: Settings -> Advanced -> Developer Mode, then right-click yourself -> Copy User ID.
 # At the Matrix door: your Matrix user id, like "@name:server", or your name below.
+# In a profile with tables at both doors one id is enough, at either door.
 host = "000000000000000000"
 
 # Optional: a name for the AI. With a name, you and the people you invited can
@@ -66,7 +68,11 @@ context_lines = 10
   # Discord: right-click a channel -> Copy Channel ID.
   # Matrix: `matrix = "!..."` instead, the internal id of the room (in Element:
   # room settings -> Advanced), not its #alias. Invite the fish's account into
-  # the room. All seats of one profile stand at the same door.
+  # the room.
+  # The seats of one room may stand at different doors: a mixed room, for
+  # example a Discord channel in German and a Matrix room in English. Such a
+  # profile needs both the bot token and the Matrix login, and it runs at both
+  # doors or not at all. See "A mixed room" in GUIDE.md for its limits.
   [[room.seat]]
   discord = "000000000000000001"
   lang = "German"
@@ -86,6 +92,13 @@ context_lines = 10
   # invited below; at all others it only reads along.
   # owner = "Robin"
 
+  # A seat at the Matrix door in the same room makes it a mixed room. What is
+  # written there appears at the Discord seats under "Name (Matrix)", and the
+  # other way round with the Discord name in front of the sentence.
+  # [[room.seat]]
+  # matrix = "!abcdefghijklmnopqr"
+  # lang = "English"
+
 # Optional, as often as you like: what you know about one person.
 # [[person]]
 # A name of your choosing, so you can see whose table is whose. It stays in
@@ -95,8 +108,9 @@ context_lines = 10
 # can leave it out until you have it: the table, the language and the
 # invitation work without. A name or an id is required.
 # discord = "000000000000000003"
-# The person's Matrix user id, for a profile at the Matrix door. A person may
-# carry both; the one at the door of the profile counts.
+# The person's Matrix user id, for tables at the Matrix door. A person may
+# carry both. In a mixed room each counts at its own door, and agreement is
+# asked for at each: it belongs to an account, not to a person.
 # matrix = "@robin:example.org"
 # The same grammar hint as at a seat. A person's own entry goes before the
 # gender of the seat, so people keep their own forms at someone else's seat.

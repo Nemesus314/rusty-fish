@@ -141,9 +141,10 @@ account there.
    - AI: call names, if people should be able to talk to the AI.
    - Limits: translation tokens per day for everyone together, and questions
      to the AI per guest per day.
-   - Rooms: one seat per channel with its Channel ID and its language, and
-     whose table it is. Also the neutral language and how many earlier
-     messages the AI sees for context.
+   - Rooms: one seat per channel with its door (Discord, unless you use
+     Matrix), its Channel ID and its language, and whose table it is. Also
+     the neutral language and how many earlier messages the AI sees for
+     context.
    - People: for each person a name of your choosing, their Discord user ID,
      mother tongue, neutral languages, grammatical form, and whether you
      invite them. The name is only your label, so you can see whose table is
@@ -171,10 +172,10 @@ times for several. `rusty-fish --help` lists everything.
 
 ## The Matrix door
 
-Rusty Fish can also work in Matrix rooms instead of Discord channels. A
-profile stands at one of the two doors; profiles at Discord and profiles at
-Matrix run side by side in the same fish. One conversation with tables at
-both doors is not built.
+Rusty Fish can also work in Matrix rooms instead of Discord channels. Every
+table stands at one of the two doors. Profiles at Discord and profiles at
+Matrix run side by side in the same fish, and one conversation can have
+tables at both; see "A mixed room".
 
 The fish needs a Matrix account of its own, separate from yours. It is an
 ordinary account at any Matrix server that accepts a login with a password;
@@ -203,11 +204,11 @@ your own.
    into each. It joins by itself as soon as a running profile names the room,
    and it joins no other room. A space is not a room: nobody can write
    there, and the fish does not join one.
-3. In the profile, under General, choose the door "Matrix". A seat then asks
-   for the Matrix room ID: the internal ID of the room, which starts with `!`
-   (in Element: room settings, Advanced), not its #alias. You and the other
-   people are entered with their Matrix user IDs. In a settings file it is
-   `matrix = "..."` where a Discord profile says `discord = "..."`.
+3. In the profile, under Rooms, choose the door "Matrix" at each seat. The
+   seat then asks for the Matrix room ID: the internal ID of the room, which
+   starts with `!` (in Element: room settings, Advanced), not its #alias. You
+   and the other people are entered with their Matrix user IDs. In a settings
+   file it is `matrix = "..."` where a Discord seat says `discord = "..."`.
 
 What is different from Discord:
 
@@ -270,6 +271,61 @@ Limits of the Matrix door:
   was asked for agreement there and was translated after tapping "OK", and
   the fish wrote its lines on being switched on and off. Not yet seen in a
   real room: the budget notice. It has run against a simulated server only.
+
+## A mixed room
+
+One conversation can have tables at both doors: for example a Discord channel
+in German and a Matrix room in English. What is written at one table appears
+translated at the others, whichever door they stand at.
+
+To set one up, give each seat its own door under Rooms. People then have two
+ID fields, one per door; a person needs an ID only where they write. For
+yourself, one ID is enough, at either door. Such a profile needs both the bot
+token and the Matrix login. If one of them is missing, the profile does not
+start at all and the output says which.
+
+How it behaves:
+
+- The rules are the same as in every room: who is asked, who is invited, the
+  budget, the neutral language.
+- The request for agreement comes at the table where the person wrote, in
+  the way of that door: a button on Discord, the sign "OK" in Matrix.
+- Agreement belongs to an account, not to a person. Someone who writes at
+  both doors is asked once at each, and has the daily questions to the AI at
+  each. You as the host are the host at every door where you carry an ID.
+- On Discord, whoever writes in the Matrix room appears with "(Matrix)"
+  behind the name, as in "Robin (Matrix)", and with the standard picture of
+  the webhook: a Matrix picture lies behind the login of its server, and
+  Discord cannot fetch it (by the rules of matrix.org; not measured here).
+  In the Matrix room, the Discord name stands in front of the sentence, like
+  every name there, without a word about the door.
+- The notice about the used-up budget goes to the door of your own table:
+  the first seat in the profile that is yours. If you have no ID at that
+  door, it goes to the door where you have one.
+- A profile with tables at both doors runs at both or not at all. If one
+  door refuses it or closes while the fish is on, the fish stops that
+  profile at the other door too and says so in the output. The other
+  profiles keep running.
+- In the Matrix room the fish says when it is switched on and off, as in
+  every Matrix room. On Discord the bot turns grey only when the whole fish
+  is off.
+
+Limits of a mixed room:
+
+- It is as open as its most open table. What is written in an encrypted
+  Matrix room appears translated in the Discord channel, where Discord can
+  read it. The card of the profile says so.
+- Pictures and files from Discord arrive in the Matrix room as an address.
+  Nothing of that kind is carried from Matrix to Discord.
+- After a pause each door catches up on its own tables. Within one door the
+  order is the order of writing; between the two doors it may not be.
+- While one door waits for its service, the whole profile waits: the tables
+  of a conversation take their turn one message at a time.
+- When a changed profile is reloaded, each door takes it up for itself, one
+  a moment before the other.
+- A mixed room has run against a simulated Discord and a simulated Matrix
+  server, each door for itself. Not yet seen: a mixed room at the real
+  services.
 
 ## Limits
 

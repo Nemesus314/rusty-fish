@@ -368,3 +368,20 @@ fn an_invitation_is_due_at_the_table_of_the_invited_whatever_its_door() {
     house.invitations_told(pending, &reached).unwrap();
     assert!(house.invitations(&config).is_none());
 }
+
+// --- die Beispieldatei -----------------------------------------------------------
+
+#[test]
+fn the_example_file_shows_how_a_room_becomes_a_mixed_room() {
+    // Ausgefüllt, wie es jemand tun würde: die eigene Kennung statt der Nullen.
+    let example = include_str!("../../rusty-fish.example.toml")
+        .replace("host = \"000000000000000000\"", "host = \"42\"");
+    assert_eq!(Config::parse(&example).unwrap().doors, [Door::Discord], "as it stands");
+    let seat = "  # [[room.seat]]\n  # matrix = \"!abcdefghijklmnopqr\"\n  # lang = \"English\"\n";
+    assert!(example.contains(seat), "the example names a seat at the Matrix door");
+    let mixed = example.replace(seat, &seat.replace("  # ", "  "));
+    let c = Config::parse(&mixed).unwrap();
+    assert_eq!(c.doors, [Door::Discord, Door::Matrix]);
+    assert_eq!(c.rooms[0].seats.len(), 3);
+    assert_eq!(c.host_door(), Door::Discord);
+}
