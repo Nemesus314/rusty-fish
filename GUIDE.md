@@ -125,8 +125,8 @@ account there.
 ## Setting up the program
 
 1. Open the window (`rusty_fish_desk.exe`). The title bar shows "AI keys",
-   "Bot token" and "Matrix"; each opens a window of its own. Store your API
-   key under "AI keys" and your bot token under "Bot token". They are kept in
+   "Discord" and "Matrix"; each opens a window of its own. Store your API
+   key under "AI keys" and your bot token under "Discord". They are kept in
    the Windows Credential Manager, not in a file, and the window never shows
    them again. With the token stored, the window of the bot token offers
    "Copy the link that brings this bot onto a server". Open that link

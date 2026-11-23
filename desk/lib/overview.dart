@@ -331,7 +331,7 @@ class _OverviewPageState extends State<OverviewPage> {
                 padding: const EdgeInsets.only(right: 8),
                 child: _SecretIndicator(
                   key: const ValueKey('chip-bot-token'),
-                  text: '$botTokenLabel: ${keys == null ? 'checking' : (keys.discord ? 'stored' : 'not stored')}',
+                  text: '$discordChipLabel: ${keys == null ? 'checking' : (keys.discord ? 'stored' : 'not stored')}',
                   good: keys?.discord,
                   onPressed: () => _secrets(SecretsPart.discord),
                 ),
@@ -485,7 +485,7 @@ class _OverviewPageState extends State<OverviewPage> {
   }
 }
 
-/// „Bot token: stored". Zeigt nur, ob ein Geheimnis liegt, nie den Wert.
+/// „Discord: stored". Zeigt nur, ob ein Geheimnis liegt, nie den Wert.
 class _SecretIndicator extends StatelessWidget {
   const _SecretIndicator({
     super.key,

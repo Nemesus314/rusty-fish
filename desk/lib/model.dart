@@ -656,8 +656,14 @@ class ProfileList {
 /// der KI-Dienste liegen unter der Kennung ihres Dienstes ([Provider.id]).
 const String botTokenEntry = 'discord';
 
-/// So heißt der Token des Bots in der Oberfläche.
-const String botTokenLabel = 'Bot token';
+/// So heißt der Token des Bots in seinem Fenster.
+const String botTokenLabel = 'Discord bot token';
+
+/// So heißt die Anzeige des Tokens in der Titelleiste: nach der Tür, zu der
+/// er gehört, wie „Matrix" daneben. Bis zum 23.11.2026 stand dort „Bot
+/// token"; seit es zwei Türen gibt, sagte das nicht mehr, wozu er gehört
+/// (Nemesus an dem Tag: „Discord: stored ist gut").
+const String discordChipLabel = 'Discord';
 
 /// Der Eintrag der Ablage, unter dem der Zugang zum Matrix-Konto des Fischs
 /// liegt. Er entsteht beim Anmelden und wird nie eingefügt.

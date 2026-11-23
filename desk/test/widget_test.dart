@@ -160,7 +160,7 @@ void main() {
     // Vier Dienste brauchen einen Schlüssel, einer davon liegt. Das eigene
     // Modell zählt nicht mit, weil es keinen braucht.
     expect(find.text('AI keys: 1 of 4 stored'), findsOneWidget);
-    expect(find.text('Bot token: not stored'), findsOneWidget);
+    expect(find.text('Discord: not stored'), findsOneWidget);
   });
 
   group('the guide for an AI', () {
@@ -429,8 +429,11 @@ void main() {
     await open(tester, fake);
     const secret = 'tok-very-secret-123';
 
-    await tester.tap(find.text('Bot token: not stored'));
+    // Die Anzeige heißt nach der Tür, wie „Matrix" daneben (Nemesus am
+    // 23.11.2026); das Fenster dahinter sagt, was dort liegt.
+    await tester.tap(find.text('Discord: not stored'));
     await tester.pumpAndSettle();
+    expect(find.text('Discord bot token'), findsOneWidget);
     await tester.enterText(find.byKey(const ValueKey('secret-discord')), secret);
     await tester.tap(find.byKey(const ValueKey('store-discord')));
     await tester.pumpAndSettle();
@@ -440,7 +443,7 @@ void main() {
     for (final field in tester.widgetList<EditableText>(find.byType(EditableText))) {
       expect(field.controller.text, isNot(contains('very-secret')));
     }
-    expect(find.text('Bot token: stored'), findsOneWidget);
+    expect(find.text('Discord: stored'), findsOneWidget);
   });
 
   testWidgets('forgetting a secret asks first', (tester) async {
