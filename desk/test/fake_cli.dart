@@ -197,11 +197,27 @@ class FakeCli implements FishCli {
   final matrixRecoveries = <String>[];
   int matrixLogouts = 0;
 
+  /// Was der Server über das Gerät des Fischs zeigt, wenn die Maske danach
+  /// fragt. Ohne Angabe sagt das Programm dazu nichts (älterer Stand).
+  String? matrixDevice;
+
+  /// Wie oft die Maske den Server nach dem Gerät fragen ließ.
+  int matrixAsks = 0;
+
   @override
-  Future<MatrixStatus> matrixStatus() async {
+  Future<MatrixStatus> matrixStatus({bool ask = false}) async {
     final unknown = matrixUnknown;
     if (unknown != null) {
       throw CliException(unknown);
+    }
+    if (ask && matrix.loggedIn) {
+      matrixAsks++;
+      return MatrixStatus(
+        loggedIn: true,
+        user: matrix.user,
+        homeserver: matrix.homeserver,
+        device: matrixDevice,
+      );
     }
     return matrix;
   }

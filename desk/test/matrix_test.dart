@@ -122,6 +122,16 @@ void main() {
       final out = MatrixStatus.fromJson({'logged_in': false, 'user': null, 'homeserver': null});
       expect(out.loggedIn, isFalse);
       expect(out.user, isNull);
+      // Ohne die Frage an den Server steht zum Gerät nichts da.
+      expect(status.device, isNull);
+      final asked = MatrixStatus.fromJson({
+        'logged_in': true,
+        'user': '@fish:example.org',
+        'device': 'unknown',
+        'device_note': 'cannot reach the Matrix server',
+      });
+      expect(asked.device, deviceUnknown);
+      expect(asked.deviceNote, 'cannot reach the Matrix server');
       // Ein älteres Programm nennt den Eintrag nicht: dann ist er nicht angemeldet.
       expect(const KeyStatus({'discord': true}).matrix, isFalse);
       expect(const KeyStatus({'matrix': true}).matrix, isTrue);
@@ -281,6 +291,92 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('unrecognized'), findsNothing);
       expect(find.byKey(const ValueKey('store-discord')), findsOneWidget);
+    });
+
+    // Nemesus am 23.11.2026, nach der Anmeldung mit dem
+    // Wiederherstellungsschlüssel: „Ein Haken, dass der Bot autorisiert ist,
+    // als dauerhafte Anzeige, wäre schön."
+    FakeCli loggedIn(String? device) => FakeCli(
+        entries: [entryOf(matrixDoc('tea'))],
+        keys: const KeyStatus({'openai': true, 'discord': true, 'matrix': true}),
+      )
+      ..matrix = const MatrixStatus(loggedIn: true, user: '@fish:example.org')
+      ..matrixDevice = device;
+
+    testWidgets('a device its account has signed gets its check, in the title bar and the window', (
+      tester,
+    ) async {
+      await open(tester, loggedIn(deviceVerified));
+      expect(find.text('Matrix: verified'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('chip-matrix')),
+          matching: find.byIcon(Icons.verified_outlined),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(find.text('Verified device of its account'), findsOneWidget);
+    });
+
+    testWidgets('an unverified device stays at logged in and says how to change that', (
+      tester,
+    ) async {
+      await open(tester, loggedIn(deviceUnverified));
+      expect(find.text('Matrix: logged in'), findsOneWidget);
+      expect(find.byIcon(Icons.verified_outlined), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Not a verified device'), findsOneWidget);
+      expect(find.textContaining('recovery key of the account'), findsOneWidget);
+    });
+
+    // Aus dem ersten echten Lauf am 22.11.2026: der Server nahm den Zugang
+    // nicht mehr an, und die Maske zeigte weiter „logged in".
+    testWidgets('an access the server refuses is not shown as logged in', (tester) async {
+      await open(tester, loggedIn(deviceRefused));
+      expect(find.text('Matrix: refused'), findsOneWidget);
+      expect(find.text('Matrix: logged in'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('no longer accepts this access'), findsOneWidget);
+      // Der Weg hinaus ist da.
+      expect(find.byKey(const ValueKey('matrix-logout')), findsOneWidget);
+    });
+
+    testWidgets('a program that says nothing about the device shows no line and no check', (
+      tester,
+    ) async {
+      await open(tester, loggedIn(null));
+      expect(find.text('Matrix: logged in'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('matrix-device')), findsNothing);
+      expect(find.byKey(const ValueKey('matrix-logout')), findsOneWidget);
+    });
+
+    testWidgets('the server is asked once per login, not whenever the overview renews', (
+      tester,
+    ) async {
+      final fake = loggedIn(deviceVerified);
+      await open(tester, fake);
+      expect(fake.matrixAsks, 1);
+      // Ein anderes Fenster erneuert die Übersicht, fragt den Server aber nicht.
+      await tester.tap(find.byKey(const ValueKey('chip-bot-token')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(fake.matrixAsks, 1);
+      // Das Fenster des Kontos fragt selbst, und danach die Titelleiste neu.
+      await tester.tap(find.byKey(const ValueKey('chip-matrix')));
+      await tester.pumpAndSettle();
+      expect(fake.matrixAsks, 2);
+      fake.matrixDevice = deviceRefused;
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(fake.matrixAsks, 3);
+      expect(find.text('Matrix: refused'), findsOneWidget);
     });
   });
 

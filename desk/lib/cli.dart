@@ -73,7 +73,11 @@ abstract class FishCli {
 
   /// Ob und als wer der Fisch bei Matrix angemeldet ist. Ein älteres
   /// Programm kennt den Aufruf nicht und lehnt ihn ab.
-  Future<MatrixStatus> matrixStatus();
+  ///
+  /// Mit [ask] fragt das Programm dazu den Server, ob das Gerät des Fischs
+  /// vom Konto gegengezeichnet ist und ob der Zugang noch gilt. Das braucht
+  /// das Netz und kann einige Sekunden dauern.
+  Future<MatrixStatus> matrixStatus({bool ask = false});
 
   /// Meldet den Fisch an seinem Matrix-Konto an. Das Passwort geht über die
   /// Standardeingabe hinein und wird vom Programm nicht aufbewahrt. Zurück
@@ -191,7 +195,16 @@ class ProcessFishCli implements FishCli {
   }
 
   @override
-  Future<MatrixStatus> matrixStatus() async {
+  Future<MatrixStatus> matrixStatus({bool ask = false}) async {
+    if (ask) {
+      try {
+        final out = await _call(['matrix', 'status', '--json', '--ask']);
+        return MatrixStatus.fromJson(_object(out));
+      } on CliException {
+        // Ein Programm vom Stand vor dem 23.11.2026 kennt die Frage an den
+        // Server nicht. Dann bleibt, was es ohne sie sagt.
+      }
+    }
     final out = await _call(['matrix', 'status', '--json']);
     return MatrixStatus.fromJson(_object(out));
   }

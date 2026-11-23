@@ -232,6 +232,9 @@ class _OverviewPageState extends State<OverviewPage> {
         onChanged: _state.refresh,
       ),
     );
+    if (part == SecretsPart.matrix) {
+      _state.askDeviceAgain();
+    }
     await _state.refresh();
   }
 
@@ -344,18 +347,27 @@ class _OverviewPageState extends State<OverviewPage> {
                 padding: const EdgeInsets.only(right: 8),
                 child: _SecretIndicator(
                   key: const ValueKey('chip-matrix'),
+                  // Der Haken dafür, dass das Konto das Gerät des Fischs
+                  // gegengezeichnet hat (Nemesus, 23.11.2026): „verified"
+                  // statt „logged in". Nimmt der Server den Zugang nicht mehr
+                  // an, steht auch das hier, statt eines falschen Hakens.
                   text: switch (keys) {
                     null => 'Matrix',
-                    final keys when keys.matrix => 'Matrix: logged in',
+                    final keys when keys.matrix => switch (_state.matrixDevice) {
+                      deviceVerified => 'Matrix: verified',
+                      deviceRefused => 'Matrix: refused',
+                      _ => 'Matrix: logged in',
+                    },
                     _ when _usesMatrix(list) => 'Matrix: not logged in',
                     _ => 'Matrix',
                   },
                   good: switch (keys) {
                     null => null,
-                    final keys when keys.matrix => true,
+                    final keys when keys.matrix => _state.matrixDevice != deviceRefused,
                     _ when _usesMatrix(list) => false,
                     _ => null,
                   },
+                  verified: keys?.matrix == true && _state.matrixDevice == deviceVerified,
                   onPressed: () => _secrets(SecretsPart.matrix),
                 ),
               ),
@@ -480,9 +492,14 @@ class _SecretIndicator extends StatelessWidget {
     required this.text,
     required this.good,
     required this.onPressed,
+    this.verified = false,
   });
 
   final String text;
+
+  /// Mehr als „da": von anderer Seite bestätigt. Dann steht statt des Kreises
+  /// mit Haken das Siegel mit Haken.
+  final bool verified;
 
   /// Ob alles da ist, was gebraucht wird. Ohne Angabe wird noch nachgesehen,
   /// oder es wird nichts gebraucht: dann fehlt auch nichts.
@@ -495,6 +512,7 @@ class _SecretIndicator extends StatelessWidget {
     return ActionChip(
       avatar: Icon(
         switch (good) {
+          true when verified => Icons.verified_outlined,
           true => Icons.check_circle_outline,
           false => Icons.error_outline,
           null => Icons.radio_button_unchecked,

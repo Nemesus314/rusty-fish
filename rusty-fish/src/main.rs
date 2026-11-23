@@ -185,6 +185,10 @@ enum MatrixAction {
         /// Print the status as JSON
         #[arg(long)]
         json: bool,
+        /// Also ask the Matrix server whether the fish's device is verified
+        /// by its account, and whether the stored access still holds
+        #[arg(long)]
+        ask: bool,
     },
     /// Log the fish out and empty its device store
     Logout,
@@ -560,10 +564,17 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
             }
             Ok(())
         }
-        MatrixAction::Status { json } => {
+        MatrixAction::Status { json, ask } => {
+            use rusty_fish_matrix::session::Device;
             let access = match keys::load(secrets::MATRIX)? {
                 Some(secret) => Some(rusty_fish_matrix::session::Access::parse(secret.expose())?),
                 None => None,
+            };
+            // Ohne --ask bleibt der Befehl ohne Netz: er sagt, was hier
+            // gespeichert ist. Mit --ask sagt er dazu, was der Server zeigt.
+            let device = match (&access, ask) {
+                (Some(access), true) => Some(rusty_fish_matrix::session::device(access).await),
+                _ => None,
             };
             if json {
                 println!(
@@ -572,6 +583,16 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
                         "logged_in": access.is_some(),
                         "user": access.as_ref().map(|a| a.user_id().to_string()),
                         "homeserver": access.as_ref().map(|a| a.homeserver().to_owned()),
+                        "device": device.as_ref().map(|device| match device {
+                            Device::Verified => "verified",
+                            Device::Unverified => "unverified",
+                            Device::Refused => "refused",
+                            Device::Unknown(_) => "unknown",
+                        }),
+                        "device_note": match &device {
+                            Some(Device::Unknown(why)) => Some(why.as_str()),
+                            _ => None,
+                        },
                     }))
                 );
                 return Ok(());
@@ -581,6 +602,18 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
                     println!("Matrix: logged in as {} at {}.", access.user_id(), access.homeserver())
                 }
                 None => println!("Matrix: not logged in."),
+            }
+            match device {
+                Some(Device::Verified) => println!("Device: verified by its account."),
+                Some(Device::Unverified) => println!(
+                    "Device: not verified; some apps show a warning at the fish's messages."
+                ),
+                Some(Device::Refused) => println!(
+                    "Device: the Matrix server no longer accepts the stored access; log out and \
+                     log in again."
+                ),
+                Some(Device::Unknown(why)) => println!("Device: not known ({why})."),
+                None => {}
             }
             Ok(())
         }

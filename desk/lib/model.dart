@@ -656,18 +656,46 @@ const String matrixEntry = 'matrix';
 /// Ob und als wer der Fisch bei Matrix angemeldet ist (`matrix status --json`).
 /// Die Kennung des Kontos und die Adresse des Servers sind keine Geheimnisse.
 class MatrixStatus {
-  const MatrixStatus({required this.loggedIn, this.user, this.homeserver});
+  const MatrixStatus({
+    required this.loggedIn,
+    this.user,
+    this.homeserver,
+    this.device,
+    this.deviceNote,
+  });
 
   final bool loggedIn;
   final String? user;
   final String? homeserver;
 
+  /// Was der Server über das Gerät des Fischs zeigt, wenn er gefragt wurde
+  /// (`--ask`): [deviceVerified], [deviceUnverified], [deviceRefused] oder
+  /// [deviceUnknown]. Ohne Frage, oder von einem älteren Programm: nichts.
+  final String? device;
+
+  /// Warum es sich nicht klären ließ, im Wortlaut des Programms.
+  final String? deviceNote;
+
   factory MatrixStatus.fromJson(Map<String, dynamic> json) => MatrixStatus(
     loggedIn: json['logged_in'] == true,
     user: _text(json['user']),
     homeserver: _text(json['homeserver']),
+    device: _text(json['device']),
+    deviceNote: _text(json['device_note']),
   );
 }
+
+/// Das Konto hat das Gerät des Fischs gegengezeichnet.
+const String deviceVerified = 'verified';
+
+/// Der Server zeigt das Gerät ohne gültige Unterschrift des Kontos.
+const String deviceUnverified = 'unverified';
+
+/// Der Server nimmt den gespeicherten Zugang nicht mehr an.
+const String deviceRefused = 'refused';
+
+/// Der Server ließ sich nicht fragen.
+const String deviceUnknown = 'unknown';
 
 /// Welche Geheimnisse in der Ablage des Systems liegen. Die Werte selbst
 /// kommen nie in die Oberfläche zurück.

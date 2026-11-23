@@ -1,8 +1,11 @@
 //! Die Sitzung des Fischs gegen einen nachgestellten Matrix-Server: kein
 //! Netz, kein Konto.
 
+use matrix_sdk::ruma::CanonicalJsonValue;
 use matrix_sdk::test_utils::mocks::MatrixMockServer;
-use rusty_fish_matrix::session::{Access, connect, login, logout};
+use matrix_sdk_crypto::vodozemac::{Curve25519PublicKey, Curve25519SecretKey, Ed25519SecretKey};
+use rusty_fish_matrix::session::{Access, Device, connect, device, login, logout};
+use serde_json::{Value, json};
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, ResponseTemplate};
 use std::path::{Path, PathBuf};
@@ -107,4 +110,156 @@ async fn a_recovery_key_for_an_account_without_recovery_does_not_stop_the_login(
     assert!(!notes.contains("not a key"), "a note never repeats what was typed");
     assert!(!kept(&store).is_empty(), "the device has its store");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Der Zugang eines Fischs an diesem Server. Kein echter.
+fn access_at(uri: &str) -> Access {
+    let secret = json!({
+        "h": uri, "u": "@fish:localhost", "d": "DEVICEID", "t": "not-a-real-token",
+        "p": "not-a-real-passphrase",
+    });
+    Access::parse(&secret.to_string()).unwrap()
+}
+
+/// Das Gerät des Fischs, wie ein Server es zeigt: mit frisch gewürfelten
+/// Schlüsseln, und gezeichnet mit `signer`, wenn es einen gibt.
+fn shown_device(signer: Option<&Ed25519SecretKey>) -> Value {
+    let own = Ed25519SecretKey::new();
+    let curve = Curve25519PublicKey::from(&Curve25519SecretKey::new());
+    let mut shown = json!({
+        "user_id": "@fish:localhost",
+        "device_id": "DEVICEID",
+        "algorithms": ["m.olm.v1.curve25519-aes-sha2", "m.megolm.v1.aes-sha2"],
+        "keys": {
+            "curve25519:DEVICEID": curve.to_base64(),
+            "ed25519:DEVICEID": own.public_key().to_base64(),
+        },
+    });
+    // Jedes Gerät zeichnet sich selbst; das allein weist es nicht aus.
+    let canonical = CanonicalJsonValue::try_from(shown.clone()).unwrap().to_string();
+    let mut signatures = serde_json::Map::new();
+    signatures.insert(
+        "ed25519:DEVICEID".to_owned(),
+        own.sign(canonical.as_bytes()).to_base64().into(),
+    );
+    if let Some(signer) = signer {
+        signatures.insert(
+            format!("ed25519:{}", signer.public_key().to_base64()),
+            signer.sign(canonical.as_bytes()).to_base64().into(),
+        );
+    }
+    shown["signatures"] = json!({ "@fish:localhost": signatures });
+    shown
+}
+
+/// Der Schlüssel, mit dem ein Konto seine Geräte zeichnet, wie ein Server
+/// ihn nennt.
+fn signing_key(key: &Ed25519SecretKey) -> Value {
+    let public = key.public_key().to_base64();
+    let id = format!("ed25519:{public}");
+    json!({ "user_id": "@fish:localhost", "usage": ["self_signing"], "keys": { id: public } })
+}
+
+/// Der Server antwortet auf die Frage nach den Geräten mit `body`.
+async fn answers(server: &MatrixMockServer, status: u16, body: Value) {
+    Mock::given(method("POST"))
+        .and(path("/_matrix/client/v3/keys/query"))
+        .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .mount(server.server())
+        .await;
+}
+
+/// Nemesus am 23.11.2026, nach der Anmeldung mit dem
+/// Wiederherstellungsschlüssel: ein Haken als dauerhafte Anzeige, dass der
+/// Fisch ausgewiesen ist. Dafür fragt das Programm den Server.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_the_account_has_signed_counts_as_verified() {
+    let server = MatrixMockServer::new().await;
+    let account = Ed25519SecretKey::new();
+    answers(
+        &server,
+        200,
+        json!({
+            "device_keys": { "@fish:localhost": { "DEVICEID": shown_device(Some(&account)) } },
+            "self_signing_keys": { "@fish:localhost": signing_key(&account) },
+        }),
+    )
+    .await;
+    assert_eq!(device(&access_at(&server.uri())).await, Device::Verified);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_nobody_has_signed_counts_as_unverified() {
+    let server = MatrixMockServer::new().await;
+    let account = Ed25519SecretKey::new();
+    answers(
+        &server,
+        200,
+        json!({
+            "device_keys": { "@fish:localhost": { "DEVICEID": shown_device(None) } },
+            "self_signing_keys": { "@fish:localhost": signing_key(&account) },
+        }),
+    )
+    .await;
+    assert_eq!(device(&access_at(&server.uri())).await, Device::Unverified);
+}
+
+/// Eine Unterschrift, die nicht vom Schlüssel des Kontos stammt, zählt nicht:
+/// der Haken hängt an der geprüften Unterschrift, nicht daran, dass eine da
+/// ist.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_signature_from_another_key_does_not_count() {
+    let server = MatrixMockServer::new().await;
+    let account = Ed25519SecretKey::new();
+    let stranger = Ed25519SecretKey::new();
+    // Gezeichnet vom Fremden, aber unter dem Namen des Kontoschlüssels.
+    let mut shown = shown_device(Some(&stranger));
+    let theirs = format!("ed25519:{}", stranger.public_key().to_base64());
+    let forged = shown["signatures"]["@fish:localhost"]
+        .as_object_mut()
+        .unwrap()
+        .remove(&theirs)
+        .unwrap();
+    let id = format!("ed25519:{}", account.public_key().to_base64());
+    shown["signatures"]["@fish:localhost"][id] = forged;
+    answers(
+        &server,
+        200,
+        json!({
+            "device_keys": { "@fish:localhost": { "DEVICEID": shown } },
+            "self_signing_keys": { "@fish:localhost": signing_key(&account) },
+        }),
+    )
+    .await;
+    assert_eq!(device(&access_at(&server.uri())).await, Device::Unverified);
+}
+
+/// Aus dem ersten echten Lauf am 22.11.2026: der Server nahm den Zugang nicht
+/// mehr an, und die Maske zeigte weiter „logged in". Die Frage an den Server
+/// sagt es jetzt.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_access_the_server_refuses_is_told_apart() {
+    let server = MatrixMockServer::new().await;
+    answers(
+        &server,
+        401,
+        json!({ "errcode": "M_UNKNOWN_TOKEN", "error": "Invalid access token passed." }),
+    )
+    .await;
+    assert_eq!(device(&access_at(&server.uri())).await, Device::Refused);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_does_not_answer_leaves_the_question_open() {
+    // Die Adresse eines Servers, den es nicht mehr gibt.
+    let uri = {
+        let server = MatrixMockServer::new().await;
+        server.uri()
+    };
+    match device(&access_at(&uri)).await {
+        Device::Unknown(why) => {
+            assert!(!why.contains("not-a-real-token"), "the reason never shows the access: {why}")
+        }
+        other => panic!("expected an open question, got {other:?}"),
+    }
 }

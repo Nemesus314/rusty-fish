@@ -136,6 +136,13 @@ class DeskState extends ChangeNotifier {
       list = fresh;
       keys = freshKeys;
       loadError = null;
+      if (!freshKeys.matrix) {
+        matrixDevice = null;
+        _deviceAsked = false;
+      } else if (!_deviceAsked) {
+        _deviceAsked = true;
+        unawaited(_askDevice());
+      }
     } on CliException catch (e) {
       loadError = e.message;
     } finally {
@@ -143,6 +150,31 @@ class DeskState extends ChangeNotifier {
       _changed();
     }
   }
+
+  /// Was der Server über das Gerät des Fischs bei Matrix zeigt
+  /// ([deviceVerified] und die anderen); nichts, solange er nicht gefragt
+  /// wurde oder nicht geantwortet hat.
+  String? matrixDevice;
+  bool _deviceAsked = false;
+
+  /// Fragt den Server einmal je Anmeldung, nicht im Takt der Übersicht: die
+  /// Frage geht ins Netz, und die Antwort ändert sich nur, wenn sich am Konto
+  /// etwas ändert.
+  Future<void> _askDevice() async {
+    try {
+      final status = await cli.matrixStatus(ask: true);
+      matrixDevice = status.device;
+    } on CliException {
+      matrixDevice = null;
+    }
+    if (!_disposed) {
+      _changed();
+    }
+  }
+
+  /// Nach dem Fenster des Matrix-Kontos: beim nächsten Erneuern wird der
+  /// Server wieder gefragt.
+  void askDeviceAgain() => _deviceAsked = false;
 
   /// Schaltet den Fisch an: er bedient alle Profile, die sich starten lassen.
   /// Eines, das sich nicht starten lässt, sagt an seiner Karte, warum, und

@@ -11,6 +11,9 @@ getrandom = "0.4.3"
 # nötig ist. Ende-zu-Ende-Verschlüsselung und die SQLite-Ablage sind von Haus
 # aus an.
 matrix-sdk = { version = "0.19.1", features = ["bundled-sqlite"] }
+# Dieselbe Fassung, die matrix-sdk mitbringt; hier nur für die Prüfung der
+# Unterschrift eines Geräts (`session::device`).
+matrix-sdk-crypto = "0.19.1"
 rusty-fish-core = { path = "../rusty-fish-core" }
 rusty-fish-house = { path = "../rusty-fish-house" }
 rusty-fish-room = { path = "../rusty-fish-room" }

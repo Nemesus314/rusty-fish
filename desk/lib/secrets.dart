@@ -130,6 +130,9 @@ class _SecretsDialogState extends State<SecretsDialog> {
   /// Ob und als wer der Fisch bei Matrix angemeldet ist.
   MatrixStatus? _matrix;
 
+  /// Ob der Server gerade nach dem Gerät des Fischs gefragt wird.
+  bool _asking = false;
+
   /// Das Programm kennt Matrix nicht (ein älterer Stand).
   bool _matrixUnknown = false;
 
@@ -200,6 +203,24 @@ class _SecretsDialogState extends State<SecretsDialog> {
           _matrix = matrix;
           _matrixUnknown = false;
         });
+      }
+      // Erst was hier gespeichert ist, das geht sofort. Dann, nur im Fenster
+      // des Kontos, die Frage an den Server: sie braucht das Netz, und die
+      // Felder zum Anmelden sollen nicht auf sie warten.
+      if (matrix.loggedIn && widget.part == SecretsPart.matrix) {
+        if (mounted) {
+          setState(() => _asking = true);
+        }
+        try {
+          final asked = await widget.cli.matrixStatus(ask: true);
+          if (mounted) {
+            setState(() => _matrix = asked);
+          }
+        } finally {
+          if (mounted) {
+            setState(() => _asking = false);
+          }
+        }
       }
     } on CliException {
       // Ein älteres Programm kennt den Aufruf nicht. Das ist kein Fehler des
@@ -475,6 +496,7 @@ class _SecretsDialogState extends State<SecretsDialog> {
                 ),
               ),
             ),
+          if (loggedIn == true) ?_deviceLine(theme, status),
           if (loggedIn == true)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -498,6 +520,62 @@ class _SecretsDialogState extends State<SecretsDialog> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(note, style: theme.textTheme.bodySmall),
             ),
+        ],
+      ),
+    );
+  }
+
+  /// Was der Server über das Gerät des Fischs zeigt, als Zeile mit Zeichen.
+  ///
+  /// Nemesus am 23.11.2026, nachdem er den Fisch mit dem
+  /// Wiederherstellungsschlüssel angemeldet hatte: „Ein Haken, dass der Bot
+  /// autorisiert ist, als dauerhafte Anzeige, wäre schön." Der Satz nach dem
+  /// Anmelden steht nur einmal da; diese Zeile bei jedem Öffnen.
+  Widget? _deviceLine(ThemeData theme, MatrixStatus? status) {
+    final scheme = theme.colorScheme;
+    final (IconData icon, Color color, String text) = switch (status?.device) {
+      deviceVerified => (
+        Icons.verified_outlined,
+        scheme.primary,
+        'Verified device of its account',
+      ),
+      deviceUnverified => (
+        Icons.shield_outlined,
+        scheme.onSurfaceVariant,
+        'Not a verified device: some apps show a warning at the fish\'s messages. To change '
+            'that, log out and log in with the recovery key of the account.',
+      ),
+      deviceRefused => (
+        Icons.error_outline,
+        scheme.error,
+        'The Matrix server no longer accepts this access. Log out and log in again.',
+      ),
+      deviceUnknown => (
+        Icons.help_outline,
+        scheme.onSurfaceVariant,
+        'Could not ask the Matrix server whether the device is verified'
+            '${status?.deviceNote == null ? '' : ' (${status?.deviceNote})'}.',
+      ),
+      _ when _asking => (
+        Icons.hourglass_empty,
+        scheme.onSurfaceVariant,
+        'Asking the Matrix server about the device',
+      ),
+      // Ein älteres Programm sagt dazu nichts; dann steht hier auch nichts.
+      _ => (Icons.help_outline, scheme.onSurfaceVariant, ''),
+    };
+    if (text.isEmpty) {
+      return null;
+    }
+    return Padding(
+      key: const ValueKey('matrix-device'),
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(color: color))),
         ],
       ),
     );

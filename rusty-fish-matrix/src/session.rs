@@ -32,6 +32,7 @@ use matrix_sdk::ruma::events::secret::request::SecretName;
 use matrix_sdk::ruma::{OwnedUserId, UserId};
 use matrix_sdk::store::RoomLoadSettings;
 use matrix_sdk::{Client, SessionMeta, SessionTokens};
+use matrix_sdk_crypto::types::{CrossSigningKey, DeviceKeys, SelfSigningPubkey};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -246,7 +247,8 @@ async fn cross_sign(client: &Client, user: &UserId, password: &str) -> Result<()
 /// Wiederherstellungsschlüssel öffnen würde, bleibt unberührt: der Fisch
 /// nimmt an ihr nicht teil.
 ///
-/// Stand 22.11.2026: gegen einen echten Server noch nicht gelaufen.
+/// Stand 23.11.2026: einmal gegen ein echtes Konto bei matrix.org gelaufen
+/// (Nemesus); der Server zeigt das Gerät seither als gegengezeichnet.
 async fn prove(client: &Client, user: &UserId, key: &str) -> Result<(), String> {
     let encryption = client.encryption();
     let secrets =
@@ -364,6 +366,95 @@ pub async fn logout(access: &Access, store: &Path) -> Result<Option<String>, Str
              account's own settings"
         )
     }))
+}
+
+/// Was der Server über das Gerät des Fischs zeigt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Device {
+    /// Das Konto hat dieses Gerät gegengezeichnet, und die Unterschrift stimmt.
+    Verified,
+    /// Der Server zeigt das Gerät ohne gültige Unterschrift des Kontos.
+    Unverified,
+    /// Der Server nimmt den gespeicherten Zugang nicht mehr an.
+    Refused,
+    /// Es ließ sich nicht klären; der Grund, ohne Geheimnis.
+    Unknown(String),
+}
+
+/// Wie lange auf die Antwort des Servers gewartet wird. Die Maske fragt beim
+/// Öffnen; sie soll daran nicht hängen.
+const ASK_FOR: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Fragt den Server, ob das Gerät des Fischs vom Konto gegengezeichnet ist.
+///
+/// Gewünscht von Nemesus am 23.11.2026, nachdem die Anmeldung mit dem
+/// Wiederherstellungsschlüssel am echten Konto gelaufen war: ein Haken als
+/// dauerhafte Anzeige, nicht nur der eine Satz nach dem Anmelden.
+///
+/// Gefragt wird mit einer einzelnen Anfrage, ohne die Ablage des Geräts und
+/// ohne die Sitzung der Bibliothek. So geht es auch, während der Fisch läuft,
+/// und nichts wird dabei beim Server verändert.
+///
+/// Geprüft wird die Unterschrift des Geräts mit dem Schlüssel, mit dem das
+/// Konto seine Geräte zeichnet, so wie der Server ihn nennt. Dass dieser
+/// Schlüssel selbst der richtige ist, prüft hier niemand; das tut ein Mensch,
+/// der das Konto in seinem eigenen Programm bestätigt.
+pub async fn device(access: &Access) -> Device {
+    let unknown = |why: String| Device::Unknown(why);
+    let http = match matrix_sdk::reqwest::Client::builder().timeout(ASK_FOR).build() {
+        Ok(http) => http,
+        Err(e) => return unknown(format!("cannot ask the Matrix server: {e}")),
+    };
+    let user = access.user_id.as_str();
+    let device = access.device_id.as_str();
+    let asked = serde_json::json!({ "device_keys": { user: [device] } });
+    let url = format!("{}/_matrix/client/v3/keys/query", access.homeserver.trim_end_matches('/'));
+    // Der Grund eines Fehlers nennt die Adresse, nie den Zugangsschlüssel:
+    // der steht in einer Kopfzeile, nicht in der Adresse.
+    let response = match http
+        .post(url)
+        .bearer_auth(&access.access_token)
+        .header("content-type", "application/json")
+        .body(asked.to_string())
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(e) => return unknown(format!("cannot reach the Matrix server: {e}")),
+    };
+    let status = response.status();
+    if status.as_u16() == 401 {
+        return Device::Refused;
+    }
+    if !status.is_success() {
+        return unknown(format!("the Matrix server answered {status}"));
+    }
+    let body: serde_json::Value = match response.bytes().await {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(body) => body,
+            Err(_) => return unknown("the answer of the Matrix server cannot be read".to_owned()),
+        },
+        Err(e) => return unknown(format!("the answer of the Matrix server broke off: {e}")),
+    };
+
+    let shown = &body["device_keys"][user][device];
+    if shown.is_null() {
+        return unknown("the Matrix server does not show the fish's device".to_owned());
+    }
+    let Ok(keys) = serde_json::from_value::<DeviceKeys>(shown.clone()) else {
+        return unknown("the fish's device, as the Matrix server shows it, cannot be read".to_owned());
+    };
+    // Ein Server, der ein anderes Gerät zeigt als das gefragte, beweist nichts.
+    if keys.user_id != access.user_id || keys.device_id.as_str() != device {
+        return Device::Unverified;
+    }
+    let signing = serde_json::from_value::<CrossSigningKey>(body["self_signing_keys"][user].clone())
+        .ok()
+        .and_then(|key| SelfSigningPubkey::try_from(key).ok());
+    match signing {
+        Some(signing) if signing.verify_device_keys(&keys).is_ok() => Device::Verified,
+        _ => Device::Unverified,
+    }
 }
 
 /// Leert die Ablage des Geräts: die Dateien, die die Matrix-Bibliothek dort

@@ -194,6 +194,11 @@ your own.
    it the fish shows itself as a verified device of its account. The key is
    used once and not kept. On the command line: add `--recovery-key`. A new
    account that only the fish uses needs none: the fish signs its own device.
+   Whether the device is verified is shown from then on: the title bar says
+   "Matrix: verified" instead of "Matrix: logged in", and the Matrix window
+   says it in a line of its own. For that the program asks the Matrix server
+   when the window starts and whenever the Matrix window is opened. On the
+   command line: `rusty-fish matrix status --ask`.
 2. Create one Matrix room per language and invite the account of the fish
    into each. It joins by itself as soon as a running profile names the room,
    and it joins no other room. A space is not a room: nobody can write
@@ -217,6 +222,11 @@ What is different from Discord:
   messages and other bots from people. Two fish in one room pass over each
   other, as on Discord.
 - Mentioning the fish at the start of a message counts like its call name.
+- Whether the fish is switched on cannot be seen in the room. On Discord a
+  bot that is off turns grey; a Matrix room lists its members, and the fish
+  stays in that list while it is off. Element shows for nobody at matrix.org
+  who is online (its own setting for that server, read on 23 November 2026).
+  What was written while the fish was off is caught up when it comes back.
 
 About encryption, said plainly: a Matrix room can be end-to-end encrypted,
 and the fish reads and writes there as a member with a device of its own.
@@ -244,16 +254,19 @@ Limits of the Matrix door:
   access", the server has ended the fish's session: log out and log in
   again. On 22 November 2026 this happened after the account of the fish had
   also been opened and confirmed in a Matrix app. Whether that was the cause
-  is not known.
-- The login with a recovery key has not run against a real server yet.
+  is not known. The window then says "Matrix: refused" in the title bar.
+- The login with a recovery key ran once against a real server, on 23
+  November 2026 with an account at matrix.org; the server has shown the
+  fish's device as verified since.
 - A message the fish cannot decrypt does not appear at the other tables; the
   output of the program says so.
 - The login needs a server that accepts a password. A server that only
   offers a login through the browser is not served.
 - On 22 November 2026 the Matrix door translated between German and English
-  in two real, encrypted rooms at matrix.org. Not yet seen in a real room:
-  the request for agreement with its sign "OK", and the budget notice. Those
-  two have run against a simulated server only.
+  in two real, encrypted rooms at matrix.org. On 23 November 2026 a guest
+  was asked for agreement there and was translated after tapping "OK". Not
+  yet seen in a real room: the budget notice. It has run against a simulated
+  server only.
 
 ## Limits
 
