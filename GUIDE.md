@@ -432,10 +432,16 @@ Limits of a mixed room:
   young people expect, only someone who lives the language can say; only
   the forms were read off, by someone who does not speak these languages.
   Every other language is translated as before: "du" stayed "ты" in Russian.
-- Not solved, and as it was before: the other way round. Everyday polite
-  Korean came out as "du" in one run and as "Sie" in another, without any
-  entry. A young Korean who writes politely may so be translated with a
-  stiff "Sie".
+- The other way round the fish follows the writer, as before, and that can
+  come out stiff: everyday polite Japanese became "Sie" in German in 2 of 2
+  runs, everyday polite Korean "du" in one run and "Sie" in another. Someone
+  who writes in the ordinary polite way of those languages may so be read
+  with a formal "Sie". A reader who wants "du" sets their own formality to
+  "familiar": with that, the same Japanese and Korean sentences came out as
+  "du" (one run each).
+- Mandarin is not on the list and needs no rule: a German "du" became 你
+  and "Sie" became 您, and back again the same way (one run each; "Mandarin"
+  as the language of a seat gave simplified characters).
 - The language of a seat is a free word, so a variant can be named:
   "Brazilian Portuguese" or "Traditional Chinese (Taiwan)" gave that variant
   in the same measurement, one run each; plain "Portuguese" came out
