@@ -85,7 +85,7 @@ use serenity::all::{
     ButtonStyle, Channel, ChannelId, ClientBuilder, ComponentInteraction, Context, CreateAllowedMentions,
     CreateButton, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage,
     CreateWebhook, EditInteractionResponse, EventHandler, ExecuteWebhook, GatewayIntents,
-    GetMessages, Http, Interaction, Message, MessageId, Ready, UserId, Webhook,
+    GetMessages, Http, HttpError, Interaction, Message, MessageId, Ready, UserId, Webhook,
 };
 use serenity::async_trait;
 use std::collections::HashMap;
@@ -356,6 +356,7 @@ where
         };
         served.say("serving");
         if ready && let Some(http) = http {
+            served.look_at_channels(http).await;
             served.tell_the_invited(http).await;
             served.catch_up(http, self.me.load(Ordering::Relaxed)).await;
         }
@@ -455,6 +456,8 @@ where
             list.clone()
         };
         for profile in served {
+            // Zuerst nachsehen, ob der Bot die Kanäle dieses Profils sieht.
+            profile.look_at_channels(&ctx.http).await;
             // Erst die Mitteilung, dann das Nachholen: wer eingeladen ist,
             // soll lesen, was der Fisch hier tut, bevor die ersten
             // Übersetzungen kommen.
@@ -791,6 +794,30 @@ where
         }
     }
 
+    /// Sieht nach, ob der Bot jeden Kanal dieses Profils sieht, und sagt, wo
+    /// nicht und was dann zu tun ist.
+    ///
+    /// Aus dem ersten echten Lauf eines gemischten Raums am 23.11.2026: im
+    /// Profil stand die Kennung des Servers statt des Kanals, und davor war
+    /// der Bot nicht auf dem Server. Beides sah gleich aus. Von Discord kam
+    /// schweigend nichts an, und was dorthin sollte, scheiterte erst beim
+    /// ersten Satz mit „cannot list webhooks ...: Unknown Channel". Die
+    /// Matrix-Tür sagt beim Start, in welchem Raum der Fisch fehlt; diese
+    /// tut es jetzt auch.
+    ///
+    /// Das Profil läuft trotzdem weiter: ein Kanal kann später dazukommen,
+    /// und die anderen Tische sollen nicht darauf warten.
+    async fn look_at_channels(&self, http: &Http) {
+        for seat in self.config.rooms.iter().flat_map(|room| room.seats.iter()) {
+            if self.config.door_of(&seat.channel) != Some(Door::Discord) {
+                continue;
+            }
+            if let Err(why) = look_at(http, &seat.channel).await {
+                self.say(format_args!("cannot see channel {}: {why}", seat.channel));
+            }
+        }
+    }
+
     /// Teilt Eingeladenen an ihrem Tisch mit, dass dieser Fisch sie jetzt
     /// bedient: einmal je Mensch, gemerkt in der Zustandsdatei.
     ///
@@ -964,9 +991,55 @@ async fn post(
     Ok(())
 }
 
+/// Sieht der Bot diesen Kanal? Wenn nicht, sagt die Meldung, woran es liegt
+/// und was zu tun ist.
+pub async fn look_at(http: &Http, channel: &str) -> Result<(), String> {
+    let id = channel.parse::<u64>().ok().filter(|id| *id > 0);
+    let Some(id) = id else { return Err("this is not a channel id".to_owned()) };
+    match ChannelId::new(id).to_channel(http).await {
+        // Eine Direktnachricht hat keine Webhooks; dort kann der Fisch nicht
+        // unter fremdem Namen schreiben.
+        Ok(Channel::Private(_)) => Err(
+            "this is a direct message, not a channel on a server; the fish needs a text channel"
+                .to_owned(),
+        ),
+        Ok(_) => Ok(()),
+        Err(why) => Err(why_not(&why)),
+    }
+}
+
+/// Die Fehler von Discord, die an einem falschen Eintrag im Profil oder an
+/// einem fehlenden Zugang liegen, in Worten, die sagen, was zu tun ist.
+/// Jeder andere Fehler bleibt, wie Discord ihn nennt.
+fn why_not(error: &serenity::Error) -> String {
+    const UNKNOWN_CHANNEL: isize = 10003;
+    const MISSING_ACCESS: isize = 50001;
+    let code = match error {
+        serenity::Error::Http(HttpError::UnsuccessfulRequest(response)) => response.error.code,
+        _ => 0,
+    };
+    match code {
+        UNKNOWN_CHANNEL => "Discord knows no channel with this id that the bot can see. Put the \
+                            id of the channel there (right-click the channel, Copy Channel ID), \
+                            not the id of the server, and bring the bot onto that server (the \
+                            link is in the Discord window)"
+            .to_owned(),
+        MISSING_ACCESS => "the bot may not see this channel. Add the bot to the channel if it \
+                           is private, or bring it onto that server (the link is in the Discord \
+                           window)"
+            .to_owned(),
+        _ => error.to_string(),
+    }
+}
+
 async fn find_or_create_hook(http: &Http, channel: ChannelId) -> Result<Webhook, String> {
-    let existing = channel.webhooks(http).await.map_err(|e| {
-        format!("cannot list webhooks (is the permission Manage Webhooks granted?): {e}")
+    let existing = channel.webhooks(http).await.map_err(|e| match why_not(&e) {
+        // Discord nennt nur seinen eigenen Namen für den Fehler: dann fehlt
+        // am ehesten das Recht.
+        plain if plain == e.to_string() => {
+            format!("cannot list webhooks (is the permission Manage Webhooks granted?): {e}")
+        }
+        clear => clear,
     })?;
     let ours = existing
         .into_iter()

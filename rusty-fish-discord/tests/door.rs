@@ -17,7 +17,7 @@
 use futures_util::{SinkExt, StreamExt};
 use rusty_fish_core::{Model, ModelError, Prompt, Reply};
 use rusty_fish_discord::buttons::CONSENT;
-use rusty_fish_discord::door::{Command, Profile, run_with};
+use rusty_fish_discord::door::{Command, Profile, look_at, run_with};
 use rusty_fish_house::between::{Errand, Lines, Shared, Writer, no_line};
 use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
@@ -133,6 +133,15 @@ impl Discord {
         let from_the_fish = message(5000, "111", bot.clone(), "");
         let answers = [
             ("GET", r"^/api/v10/gateway$", 200, json!({ "url": gateway })),
+            // Jeder Kanal, nach dem die Tür fragt, ist ein Textkanal auf einem
+            // Server, den der Bot sieht. Ein Test, der es anders braucht,
+            // stellt seine Antwort davor.
+            (
+                "GET",
+                r"^/api/v10/channels/\d+$",
+                200,
+                json!({ "id": "111", "type": 0, "guild_id": "1", "name": "table" }),
+            ),
             // Der Webhook des Fischs ist schon da.
             (
                 "GET",
@@ -177,6 +186,31 @@ impl Discord {
     /// Discord meldet der Tür etwas.
     fn tell(&self, kind: &str, data: Value) {
         self.events.send((kind.to_owned(), data)).unwrap();
+    }
+
+    /// Wonach die Tür bei Discord gefragt hat, ohne etwas abzusetzen.
+    async fn asked(&self) -> Vec<String> {
+        self.rest
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|request| request.method.as_str() == "GET")
+            .map(|request| request.url.path().to_owned())
+            .collect()
+    }
+
+    /// Discord antwortet auf die Frage nach diesem Kanal mit einem Fehler.
+    async fn refuses_channel(&self, channel: &str, status: u16, code: i64, message: &str) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v10/channels/{channel}")))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_json(json!({ "message": message, "code": code })),
+            )
+            .with_priority(1)
+            .mount(&self.rest)
+            .await;
     }
 
     /// Was die Tür bei Discord abgesetzt hat: Verb, Pfad, Inhalt. Ohne die
@@ -312,6 +346,17 @@ async fn a_conversation_at_discord_alone_takes_its_course_as_before() {
     tokio::time::timeout(Duration::from_secs(10), discord.identified.notified())
         .await
         .expect("the bot identifies itself");
+
+    // Beim Verbinden sieht die Tür nach, ob der Bot ihre Kanäle sieht.
+    for _ in 0..100 {
+        if discord.asked().await.iter().filter(|path| path.contains("/channels/")).count() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let asked = discord.asked().await;
+    assert!(asked.contains(&"/api/v10/channels/111".to_owned()), "got {asked:?}");
+    assert!(asked.contains(&"/api/v10/channels/222".to_owned()), "got {asked:?}");
 
     // Der Gastgeber schreibt: am anderen Tisch erscheint die Übersetzung
     // unter seinem Namen und mit seinem Bild.
@@ -508,4 +553,52 @@ async fn the_discord_door_shares_a_household_and_hands_over_what_belongs_to_matr
     let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
     assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Aus dem ersten echten Lauf eines gemischten Raums am 23.11.2026: im Profil
+/// stand die Kennung des Servers statt des Kanals, und davor war der Bot nicht
+/// auf dem Server. Die Ausgabe sagte nur „Unknown Channel", und erst beim
+/// ersten Satz. Jetzt sieht die Tür beim Start nach und sagt, was zu tun ist.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_channel_the_bot_cannot_see_is_named_with_what_to_do() {
+    let discord = Discord::start().await;
+    let http = discord.http();
+
+    // Ein Textkanal auf einem Server, den der Bot sieht.
+    assert_eq!(look_at(&http, "111").await, Ok(()));
+
+    // Die Kennung eines Servers, oder ein Kanal auf einem Server ohne den Bot.
+    discord.refuses_channel("404", 404, 10003, "Unknown Channel").await;
+    let why = look_at(&http, "404").await.unwrap_err();
+    assert!(why.contains("knows no channel with this id"), "got {why}");
+    assert!(why.contains("not the id of the server"), "got {why}");
+    assert!(why.contains("bring the bot onto that server"), "got {why}");
+
+    // Ein privater Kanal, zu dem der Bot nicht gehört.
+    discord.refuses_channel("403", 403, 50001, "Missing Access").await;
+    let why = look_at(&http, "403").await.unwrap_err();
+    assert!(why.contains("may not see this channel"), "got {why}");
+    assert!(why.contains("Add the bot to the channel"), "got {why}");
+
+    // Eine Direktnachricht ist kein Tisch.
+    Mock::given(method("GET"))
+        .and(path("/api/v10/channels/777"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "777", "type": 1, "last_message_id": null,
+            "recipients": [user("100", "nemo", "Nemo")],
+        })))
+        .with_priority(1)
+        .mount(&discord.rest)
+        .await;
+    let why = look_at(&http, "777").await.unwrap_err();
+    assert!(why.contains("direct message"), "got {why}");
+
+    // Was keine Kennung ist, fragt Discord gar nicht erst.
+    assert_eq!(look_at(&http, "!room:example.org").await, Err("this is not a channel id".to_owned()));
+    assert_eq!(look_at(&http, "0").await, Err("this is not a channel id".to_owned()));
+
+    // Ein anderer Fehler bleibt, wie Discord ihn nennt.
+    discord.refuses_channel("500", 500, 0, "Internal Server Error").await;
+    let why = look_at(&http, "500").await.unwrap_err();
+    assert!(why.contains("Internal Server Error"), "got {why}");
 }

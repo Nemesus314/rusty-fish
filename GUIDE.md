@@ -292,6 +292,11 @@ the messages in the Matrix room, and the output said "Unknown Channel".
 - The seat needs the ID of the channel (right-click the channel in the list),
   not the ID of the server.
 
+Since then the fish looks at its Discord channels when it connects. For each
+one the bot cannot see, the output says so and what to do (`cannot see
+channel ...`); the profile keeps running for its other tables. This check has
+run against a simulated Discord only.
+
 How it behaves:
 
 - The rules are the same as in every room: who is asked, who is invited, the
