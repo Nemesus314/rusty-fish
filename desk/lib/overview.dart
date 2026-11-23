@@ -142,6 +142,20 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
+  /// Legt das Protokoll eines Profils in die Zwischenablage, Zeile für
+  /// Zeile so, wie es an der Karte steht.
+  ///
+  /// Nemesus am 23.11.2026: „Wenn man die Logs aufklappt, sollte es da
+  /// ebenfalls einen Button geben, um die Logs zu kopieren."
+  Future<void> _copyLog(String name) async {
+    final lines = _state.logOf(name);
+    await Clipboard.setData(ClipboardData(text: lines.join('\n')));
+    _say(
+      'Log copied: ${lines.length} ${lines.length == 1 ? 'line' : 'lines'}, as shown. The fish '
+      'writes ids and reasons, never the text of a message.',
+    );
+  }
+
   void _say(String message) {
     if (!mounted) {
       return;
@@ -500,6 +514,7 @@ class _OverviewPageState extends State<OverviewPage> {
                                 onShare: () => _shareRooms(entry),
                                 onCopyForAi: (status, {required withPeople}) =>
                                     _copyForAi(entry, status, withPeople: withPeople),
+                                onCopyLog: () => _copyLog(entry.name),
                                 onDelete: () => _delete(entry.name),
                               ),
                           ],
@@ -603,6 +618,7 @@ class _ProfileCard extends StatelessWidget {
     required this.onDuplicate,
     required this.onShare,
     required this.onCopyForAi,
+    required this.onCopyLog,
     required this.onDelete,
   });
 
@@ -610,6 +626,9 @@ class _ProfileCard extends StatelessWidget {
   /// Zwischenablage, für eine KI, die bei der Fehlersuche hilft: mit dem
   /// Stand, wie die Karte ihn nennt, und mit oder ohne die Menschen.
   final void Function(String status, {required bool withPeople}) onCopyForAi;
+
+  /// Legt das Protokoll dieser Karte in die Zwischenablage, so wie es dasteht.
+  final VoidCallback onCopyLog;
 
   /// Legt die Räume dieses Profils als Text in die Zwischenablage, für
   /// jemanden, der seinen eigenen Fisch mitbringt.
@@ -833,7 +852,12 @@ class _ProfileCard extends StatelessWidget {
             // Jede Karte zeigt, was ihr Profil betrifft, und was den ganzen
             // Fisch betrifft, solange ihr Profil läuft.
             if (runningHere || starting || log.isNotEmpty)
-              _LogPanel(lines: log, path: state.logPathOf(entry.name)),
+              _LogPanel(
+                profile: entry.name,
+                lines: log,
+                path: state.logPathOf(entry.name),
+                onCopy: onCopyLog,
+              ),
           ],
         ),
       ),
@@ -1007,9 +1031,19 @@ class _FishSwitch extends StatelessWidget {
 /// Die letzten Meldungen des Fischs. Er schreibt nur Kennungen und Gründe,
 /// nie den Text einer Nachricht.
 class _LogPanel extends StatelessWidget {
-  const _LogPanel({required this.lines, required this.path});
+  const _LogPanel({
+    required this.profile,
+    required this.lines,
+    required this.path,
+    required this.onCopy,
+  });
 
+  /// Das Profil, zu dem das Protokoll gehört.
+  final String profile;
   final List<String> lines;
+
+  /// Legt die Zeilen in die Zwischenablage.
+  final VoidCallback onCopy;
 
   /// Die Datei, in der dieselben Zeilen stehen, wenn es eine gibt.
   final String? path;
@@ -1034,17 +1068,29 @@ class _LogPanel extends StatelessWidget {
             ),
           ),
         ),
-        if (path != null)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 8),
-              child: SelectableText(
-                'Also written to $path',
-                style: Theme.of(context).textTheme.bodySmall,
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 8),
+          child: Row(
+            children: [
+              // Die Zeilen, so wie sie dastehen. Wer mehr mitgeben will,
+              // nimmt die Knöpfe „Copy for an AI" an der Karte.
+              TextButton.icon(
+                key: ValueKey('copy-log-$profile'),
+                onPressed: lines.isEmpty ? null : onCopy,
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy log'),
               ),
-            ),
+              const SizedBox(width: 12),
+              if (path != null)
+                Expanded(
+                  child: SelectableText(
+                    'Also written to $path',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+            ],
           ),
+        ),
       ],
     );
   }

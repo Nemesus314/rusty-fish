@@ -171,7 +171,8 @@ account there.
    card. It leaves out the people: the names you give them, their user IDs
    and you as the host. "Copy for an AI, with people" adds the whole profile,
    names and user IDs included. Neither holds a key, a token or the text of a
-   message; the fish writes only IDs and reasons into its log.
+   message; the fish writes only IDs and reasons into its log. The opened log
+   of a card has "Copy log" for its lines alone.
 
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and

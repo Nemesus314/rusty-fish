@@ -214,6 +214,39 @@ void main() {
     });
   });
 
+  // Nemesus am 23.11.2026: „Wenn man die Logs aufklappt, sollte es da
+  // ebenfalls einen Button geben, um die Logs zu kopieren."
+  group('the opened log', () {
+    testWidgets('has a button that copies its lines as they stand', (tester) async {
+      final copied = clipboardOf(tester);
+      final cli = FakeCli(entries: [entryOf(bridge())]);
+      await open(tester, cli);
+      // Ohne Protokoll gibt es nichts aufzuklappen.
+      expect(find.byKey(const ValueKey('copy-log-bridge')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('fish-switch')));
+      await tester.pumpAndSettle();
+      cli.lastRun!.emit('rusty-fish: [bridge] serving');
+      cli.lastRun!.emit('rusty-fish: [bridge] joined room !english:example.org');
+      await tester.pumpAndSettle();
+      // Zugeklappt ist der Knopf nicht da.
+      expect(find.byKey(const ValueKey('copy-log-bridge')), findsNothing);
+
+      await tester.tap(inCard('bridge', find.textContaining('Log (2 lines)')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('copy-log-bridge')));
+      await tester.pumpAndSettle();
+
+      final lines = copied.single.split('\n');
+      expect(lines, hasLength(2));
+      expect(lines[0], endsWith('rusty-fish: [bridge] serving'));
+      expect(lines[1], endsWith('rusty-fish: [bridge] joined room !english:example.org'));
+      // Nur die Zeilen: kein Kopf, kein Profil.
+      expect(copied.single, isNot(contains('Status:')));
+      expect(find.textContaining('Log copied: 2 lines'), findsOneWidget);
+    });
+  });
+
   // Nemesus am 23.11.2026, beim Überfliegen der Karten mit der Maus: zwei
   // Hilfetexte gingen auf, „Das finde ich sehr störend."
   group('what a line cannot say', () {
