@@ -278,8 +278,8 @@ String connectionText(Room room) {
   return '$route · not end-to-end encrypted on ${open.join(' and ')}';
 }
 
-/// Was die Zeile über die Verbindung verschweigen würde, als Hinweis beim
-/// Darüberfahren.
+/// Was die Zeile über die Verbindung verschweigen würde. Steht hinter dem ⓘ
+/// an ihrem Ende.
 const connectionHint =
     'Whoever runs a door that does not encrypt end to end can read what is written there. '
     'The AI service reads every message it translates, whatever the door.';
@@ -303,16 +303,21 @@ class AiReach {
       AiReach(service: '${json['service'] ?? ''}', place: '${json['place'] ?? ''}');
 }
 
-/// Wo die KI liest, als eine Zeile für die Karte. Bei einem Ort, den diese
-/// Maske nicht kennt, nichts: lieber keine Aussage als eine geratene.
+/// Wohin der Fisch sendet, was er übersetzen lässt, als eine Zeile für die
+/// Karte. Bei einem Ort, den diese Maske nicht kennt, nichts: lieber keine
+/// Aussage als eine geratene.
+///
+/// Bis zum 23.11.2026 stand hier „AI runs on this PC". Das behauptet mehr,
+/// als der Fisch weiß: er kennt die Adresse, an die er sendet, nicht was
+/// dahinter läuft. Entschieden von Nemesus an dem Tag: ehrlicher formulieren.
 String? aiPlaceText(AiReach ai) => switch (ai.place) {
-  'this_machine' => 'AI runs on this PC · ${ai.service}',
-  'own_network' => 'AI runs in your own network · ${ai.service}',
-  'outside' => 'AI reads at an outside service · ${ai.service}',
+  'this_machine' => 'Sends to this PC · ${ai.service}',
+  'own_network' => 'Sends to your own network · ${ai.service}',
+  'outside' => 'Sends to an outside service · ${ai.service}',
   _ => null,
 };
 
-/// Was die Zeile nicht beweisen kann, als Hinweis beim Darüberfahren.
+/// Was die Zeile nicht beweisen kann. Steht hinter dem ⓘ an ihrem Ende.
 const aiPlaceHint =
     'This is where the fish sends what it translates. It goes by the address alone: '
     'what runs behind that address, and whether the model is open source, the fish cannot check.';

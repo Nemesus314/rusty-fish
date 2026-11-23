@@ -164,6 +164,15 @@ account there.
    profile; no key, no token, and nothing about their AI. You still choose
    your own AI service, your own model and your own call name.
 
+5. When a profile does not do what you expect, its card has two buttons that
+   put its state on the clipboard, to paste into a chat with an AI assistant
+   you trust. "Copy for an AI" holds the status, the rooms by door and
+   language, where the fish sends what it translates, and the log of the
+   card. It leaves out the people: the names you give them, their user IDs
+   and you as the host. "Copy for an AI, with people" adds the whole profile,
+   names and user IDs included. Neither holds a key, a token or the text of a
+   message; the fish writes only IDs and reasons into its log.
+
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 `rusty-fish run --all`, which serves every profile as the window does.
@@ -356,8 +365,10 @@ Limits of a mixed room:
   written in its channels. At either door the AI service reads every message
   it translates; for Matrix see "The Matrix door". The
   window says for each room over which service it runs, and for each profile
-  where its AI reads: on this PC, in your own network or at an outside
-  service. It judges by the address alone. With a model on your own PC
+  where the fish sends what it translates: to this PC, to your own network or
+  to an outside service. It judges by the address alone and cannot check what
+  runs behind that address; the small sign at the end of the line says so
+  when clicked. With a model on your own PC
   ("Own model or other service" with a local address) no outside AI service
   reads along.
 - The fish runs only while the window is open and the PC is awake. Everyone,

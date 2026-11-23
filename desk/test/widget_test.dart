@@ -1373,12 +1373,11 @@ void startRequests() {
       await open(tester, fake);
 
       expect(
-        inCard('cloud', find.text('AI reads at an outside service · api.openai.com')),
+        inCard('cloud', find.text('Sends to an outside service · api.openai.com')),
         findsOneWidget,
       );
-      expect(inCard('home', find.text('AI runs on this PC · localhost:11434')), findsOneWidget);
-      expect(inCard('old', find.textContaining('AI runs')), findsNothing);
-      expect(inCard('old', find.textContaining('AI reads')), findsNothing);
+      expect(inCard('home', find.text('Sends to this PC · localhost:11434')), findsOneWidget);
+      expect(inCard('old', find.textContaining('Sends to')), findsNothing);
     });
   });
 

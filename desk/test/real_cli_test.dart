@@ -271,7 +271,7 @@ void main() {
     // Wo die KI liest, sagt das Programm nach der Adresse.
     expect(listed.ai!.place, 'this_machine');
     expect(listed.ai!.service, 'localhost:11434');
-    expect(aiPlaceText(listed.ai!), 'AI runs on this PC · localhost:11434');
+    expect(aiPlaceText(listed.ai!), 'Sends to this PC · localhost:11434');
   }, skip: skip);
 
   // Braucht ein Programm, das Tische, Muttersprachen und Einladungen schon

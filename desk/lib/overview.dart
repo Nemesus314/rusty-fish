@@ -13,6 +13,7 @@ import 'desk_state.dart';
 import 'editor.dart';
 import 'log_file.dart';
 import 'model.dart';
+import 'report.dart';
 import 'secrets.dart';
 import 'share.dart';
 import 'start.dart';
@@ -112,6 +113,32 @@ class _OverviewPageState extends State<OverviewPage> {
     _say(
       'Rooms copied. The text holds the channels or rooms, the user ids and the names from '
       'this profile. No key, no token, nothing about your AI.',
+    );
+  }
+
+  /// Legt Stand und Protokoll eines Profils als Text in die Zwischenablage,
+  /// für eine KI, die bei der Fehlersuche hilft.
+  Future<void> _copyForAi(
+    ProfileEntry entry,
+    String status, {
+    required bool withPeople,
+  }) async {
+    final doc = entry.doc;
+    final text = reportForAi(
+      entry: entry,
+      status: status,
+      log: _state.logOf(entry.name),
+      runError: _state.runErrorOf(entry.name),
+      service: doc == null ? null : _state.providerOf(doc.provider).label,
+      withPeople: withPeople,
+    );
+    await Clipboard.setData(ClipboardData(text: text));
+    _say(
+      withPeople
+          ? 'Copied with the full profile: it holds the names you give people and their user '
+                'ids. No key, no token, no message text.'
+          : 'Copied: status, rooms and log of this profile. No people, no key, no token, no '
+                'message text.',
     );
   }
 
@@ -471,6 +498,8 @@ class _OverviewPageState extends State<OverviewPage> {
                                 onEdit: () => _edit(entry.name),
                                 onDuplicate: () => _duplicate(entry.name),
                                 onShare: () => _shareRooms(entry),
+                                onCopyForAi: (status, {required withPeople}) =>
+                                    _copyForAi(entry, status, withPeople: withPeople),
                                 onDelete: () => _delete(entry.name),
                               ),
                           ],
@@ -573,8 +602,14 @@ class _ProfileCard extends StatelessWidget {
     required this.onEdit,
     required this.onDuplicate,
     required this.onShare,
+    required this.onCopyForAi,
     required this.onDelete,
   });
+
+  /// Legt den Stand und das Protokoll dieses Profils als Text in die
+  /// Zwischenablage, für eine KI, die bei der Fehlersuche hilft: mit dem
+  /// Stand, wie die Karte ihn nennt, und mit oder ohne die Menschen.
+  final void Function(String status, {required bool withPeople}) onCopyForAi;
 
   /// Legt die Räume dieses Profils als Text in die Zwischenablage, für
   /// jemanden, der seinen eigenen Fisch mitbringt.
@@ -612,6 +647,12 @@ class _ProfileCard extends StatelessWidget {
     final keyMissing =
         provider != null && keys != null && provider.needsKey && !keys.has(provider.id);
 
+    final status = !entry.ok
+        ? 'Invalid'
+        : starting
+        ? 'Starting'
+        : (running ? 'Running' : 'Stopped');
+
     return Card(
       key: ValueKey('profile-${entry.name}'),
       margin: const EdgeInsets.only(bottom: 12),
@@ -626,11 +667,7 @@ class _ProfileCard extends StatelessWidget {
                   child: Text(entry.name, style: theme.textTheme.titleLarge),
                 ),
                 _StatusLabel(
-                  text: !entry.ok
-                      ? 'Invalid'
-                      : starting
-                      ? 'Starting'
-                      : (running ? 'Running' : 'Stopped'),
+                  text: status,
                   kind: !entry.ok
                       ? _StatusKind.invalid
                       : (running ? _StatusKind.running : _StatusKind.stopped),
@@ -655,9 +692,10 @@ class _ProfileCard extends StatelessWidget {
                 ),
                 // Über welche Türen der Raum läuft. Daran hängt, ob das
                 // Gespräch unterwegs verschlüsselt ist.
-                Tooltip(
-                  message: connectionHint,
-                  child: Text(connectionText(room), style: theme.textTheme.bodySmall),
+                _HintLine(
+                  key: ValueKey('hint-door-${entry.name}-${doc.rooms.indexOf(room)}'),
+                  text: connectionText(room),
+                  hint: connectionHint,
                 ),
               ],
               const SizedBox(height: 4),
@@ -668,9 +706,10 @@ class _ProfileCard extends StatelessWidget {
               // oder zu einem fremden Dienst.
               if (entry.ai case final ai?)
                 if (aiPlaceText(ai) case final where?)
-                  Tooltip(
-                    message: aiPlaceHint,
-                    child: Text(where, style: theme.textTheme.bodySmall),
+                  _HintLine(
+                    key: ValueKey('hint-ai-${entry.name}'),
+                    text: where,
+                    hint: aiPlaceHint,
                   ),
               const SizedBox(height: 4),
               // Für wen dieser Fisch übersetzt. Seit dem 20.11.2026 schreibt
@@ -761,6 +800,22 @@ class _ProfileCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                // Zwei Knöpfe, damit der Gastgeber wählt, was er einer KI
+                // gibt (Nemesus am 23.11.2026). Der erste lässt die Menschen
+                // weg; der zweite gibt das ganze Profil mit. Ein Profil, das
+                // das Programm ablehnt, hat nur seinen Grund und sein
+                // Protokoll: dort gibt es den zweiten nicht.
+                OutlinedButton(
+                  key: ValueKey('copy-ai-${entry.name}'),
+                  onPressed: () => onCopyForAi(status, withPeople: false),
+                  child: const Text('Copy for an AI'),
+                ),
+                if (doc != null)
+                  OutlinedButton(
+                    key: ValueKey('copy-ai-people-${entry.name}'),
+                    onPressed: () => onCopyForAi(status, withPeople: true),
+                    child: const Text('Copy for an AI, with people'),
+                  ),
                 Tooltip(
                   // Einem laufenden Fisch die Dateien wegzunehmen hieße, dass
                   // er seinen Zustand an einen Ort schreibt, den es nicht
@@ -813,6 +868,65 @@ class _ProfileCard extends StatelessWidget {
     }
     return '${groupThousands(usage.translationTokens)} of '
         '${groupThousands(usage.allowedToday)} tokens today';
+  }
+}
+
+/// Eine Zeile der Karte mit einem ⓘ am Ende. Was die Zeile nicht sagen
+/// kann, erscheint erst nach einem Klick darauf, unter der Zeile, und
+/// verschwindet mit dem nächsten.
+///
+/// Bis zum 23.11.2026 ging der Text auf, sobald die Maus über der Zeile
+/// stand. Nemesus an dem Tag, beim Überfliegen der Karten: „Das finde ich
+/// sehr störend."
+class _HintLine extends StatefulWidget {
+  const _HintLine({super.key, required this.text, required this.hint});
+
+  final String text;
+  final String hint;
+
+  @override
+  State<_HintLine> createState() => _HintLineState();
+}
+
+class _HintLineState extends State<_HintLine> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: Text(widget.text, style: theme.textTheme.bodySmall)),
+            const SizedBox(width: 4),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() => _open = !_open),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  semanticLabel: 'What this line cannot say',
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (_open)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 6),
+            child: Text(
+              widget.hint,
+              style: theme.textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+            ),
+          ),
+      ],
+    );
   }
 }
 

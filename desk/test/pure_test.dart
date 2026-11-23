@@ -691,15 +691,15 @@ void main() {
     test('the card says it in words, by what the program found', () {
       expect(
         aiPlaceText(const AiReach(service: 'api.openai.com', place: 'outside')),
-        'AI reads at an outside service · api.openai.com',
+        'Sends to an outside service · api.openai.com',
       );
       expect(
         aiPlaceText(const AiReach(service: 'localhost:11434', place: 'this_machine')),
-        'AI runs on this PC · localhost:11434',
+        'Sends to this PC · localhost:11434',
       );
       expect(
         aiPlaceText(const AiReach(service: '192.168.1.20:8000', place: 'own_network')),
-        'AI runs in your own network · 192.168.1.20:8000',
+        'Sends to your own network · 192.168.1.20:8000',
       );
       // Ein Ort, den diese Maske nicht kennt: lieber nichts als etwas Geratenes.
       expect(aiPlaceText(const AiReach(service: 'x', place: 'on the moon')), isNull);
