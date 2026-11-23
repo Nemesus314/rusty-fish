@@ -657,6 +657,49 @@ class ProfileList {
   );
 }
 
+/// Ein gelöschtes Profil im Papierkorb des Programms.
+class Trashed {
+  const Trashed({
+    required this.id,
+    required this.name,
+    required this.deleted,
+    required this.state,
+  });
+
+  /// Woran das Programm den Eintrag erkennt: Name und Zeitpunkt.
+  final String id;
+
+  /// Wie das Profil hieß.
+  final String name;
+
+  /// Wann es gelöscht wurde, etwa „2026-11-20 07:01:02 UTC".
+  final String deleted;
+
+  /// Ob auch liegt, was der Fisch sich dazu gemerkt hat.
+  final bool state;
+
+  factory Trashed.fromJson(Map<String, dynamic> json) => Trashed(
+    id: '${json['id'] ?? ''}',
+    name: '${json['name'] ?? ''}',
+    deleted: '${json['deleted'] ?? ''}',
+    state: json['state'] == true,
+  );
+}
+
+/// Der Papierkorb, wie das Programm ihn auflistet (`profile trash --json`):
+/// das zuletzt Gelöschte zuerst.
+class Trash {
+  const Trash({required this.dir, required this.deleted});
+
+  final String dir;
+  final List<Trashed> deleted;
+
+  factory Trash.fromJson(Map<String, dynamic> json) => Trash(
+    dir: '${json['dir'] ?? ''}',
+    deleted: _maps(json['deleted']).map(Trashed.fromJson).toList(),
+  );
+}
+
 /// Der Eintrag der Ablage, unter dem der Token des Bots liegt. Die Schlüssel
 /// der KI-Dienste liegen unter der Kennung ihres Dienstes ([Provider.id]).
 const String botTokenEntry = 'discord';

@@ -102,6 +102,50 @@ fn no_such_profile(name: &str) -> String {
     format!("there is no profile named \"{name}\"")
 }
 
+/// Liest die Kennung eines Eintrags im Papierkorb: den Namen des Profils und
+/// wann es gelöscht wurde, etwa `tea-time-20261120-070102` oder, bei zwei
+/// Löschungen in derselben Sekunde, `tea-time-20261120-070102-2`.
+///
+/// Die Kennung ist der Dateiname ohne Endung. Sie kommt von außen (aus der
+/// Maske oder vom Terminal); alles, was nicht so aussieht, wird abgelehnt,
+/// damit niemand damit auf eine Datei außerhalb des Papierkorbs zeigt.
+fn trashed(id: &str) -> Result<(String, String), String> {
+    let not_one = || format!("{id:?} is no entry of the trash");
+    let allowed = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_';
+    if id.is_empty() || id.len() > 80 || !id.chars().all(allowed) {
+        return Err(not_one());
+    }
+    let digits = |part: &str, len: usize| part.len() == len && part.chars().all(|c| c.is_ascii_digit());
+    let parts: Vec<&str> = id.split('-').collect();
+    let n = parts.len();
+    // Mit Zähler am Ende, oder ohne.
+    let stamp_at = if n >= 4
+        && digits(parts[n - 3], 8)
+        && digits(parts[n - 2], 6)
+        && parts[n - 1].chars().all(|c| c.is_ascii_digit())
+        && !digits(parts[n - 1], 6)
+    {
+        n - 3
+    } else if n >= 3 && digits(parts[n - 2], 8) && digits(parts[n - 1], 6) {
+        n - 2
+    } else {
+        return Err(not_one());
+    };
+    let name = parts[..stamp_at].join("-");
+    valid_name(&name).map_err(|_| not_one())?;
+    let (date, time) = (parts[stamp_at], parts[stamp_at + 1]);
+    let deleted = format!(
+        "{}-{}-{} {}:{}:{} UTC",
+        &date[..4],
+        &date[4..6],
+        &date[6..],
+        &time[..2],
+        &time[2..4],
+        &time[4..]
+    );
+    Ok((name, deleted))
+}
+
 /// Schreibt eine Datei so, dass ein Absturz mittendrin keine halbe Datei unter
 /// dem richtigen Namen hinterlässt: erst daneben schreiben, dann umbenennen.
 fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -286,7 +330,7 @@ impl Folder {
             return Err(format!("profile \"{name}\" is running; stop it before deleting it"));
         }
 
-        let trash = self.dir.join("trash");
+        let trash = self.trash_dir();
         std::fs::create_dir_all(&trash)
             .map_err(|e| format!("cannot create {}: {e}", trash.display()))?;
         // Zwei Löschungen in derselben Sekunde dürfen einander nicht überschreiben.
@@ -308,6 +352,102 @@ impl Folder {
                 .map_err(|e| format!("cannot move {}: {e}", state.display()))?;
         }
         Ok(moved)
+    }
+
+    fn trash_dir(&self) -> PathBuf {
+        self.dir.join("trash")
+    }
+
+    /// Was im Papierkorb liegt, als das JSON, das `profile trash --json`
+    /// ausgibt: das zuletzt Gelöschte zuerst.
+    ///
+    /// Nemesus am 23.11.2026: „gibt es auch einen Weg, das gelöschte Profil
+    /// vom Papierkorb zurück zu bringen oder endgültig zu löschen?" Bis dahin
+    /// ging beides nur von Hand im Ordner.
+    pub fn trash(&self) -> Result<Value, String> {
+        let trash = self.trash_dir();
+        let mut found: Vec<(String, String, String, bool)> = Vec::new();
+        match std::fs::read_dir(&trash) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let file = entry.file_name().to_string_lossy().into_owned();
+                    let Some(id) = file.strip_suffix(".toml") else { continue };
+                    // Was nicht aussieht wie von `delete` abgelegt, ist kein
+                    // Eintrag: die Maske soll nichts anbieten, was das
+                    // Programm danach nicht zurückholen kann.
+                    let Ok((name, deleted)) = trashed(id) else { continue };
+                    let state = trash.join(format!("{id}.state.json")).is_file();
+                    found.push((id.to_owned(), name, deleted, state));
+                }
+            }
+            // Den Ordner gibt es erst, wenn das erste Profil gelöscht ist.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot read {}: {e}", trash.display())),
+        }
+        // Nach dem Zeitpunkt, das Neueste zuerst; bei gleichem nach Namen.
+        found.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
+        let deleted: Vec<Value> = found
+            .into_iter()
+            .map(|(id, name, deleted, state)| {
+                json!({ "id": id, "name": name, "deleted": deleted, "state": state })
+            })
+            .collect();
+        Ok(json!({ "dir": trash.to_string_lossy(), "deleted": deleted }))
+    }
+
+    /// Holt ein gelöschtes Profil samt Zustand aus dem Papierkorb zurück,
+    /// unter seinem alten Namen oder unter `name`. Liefert den Namen, unter
+    /// dem es jetzt steht.
+    ///
+    /// Es wird verschoben, nicht kopiert: danach liegt es nicht mehr im
+    /// Papierkorb. Ein Profil, das es unter dem Namen schon gibt, wird nie
+    /// ersetzt.
+    pub fn restore(&self, id: &str, name: Option<&str>) -> Result<String, String> {
+        let (old_name, _) = trashed(id)?;
+        let name = name.unwrap_or(&old_name);
+        valid_name(name)?;
+        let trash = self.trash_dir();
+        let config = trash.join(format!("{id}.toml"));
+        if !config.is_file() {
+            return Err(format!("there is nothing named \"{id}\" in the trash"));
+        }
+        if self.config_path(name).exists() || self.state_path(name).exists() {
+            return Err(format!(
+                "a profile named \"{name}\" already exists; put this one back under another name"
+            ));
+        }
+        // Erst der Zustand, dann die Einstellungen: ein Profil gilt erst als
+        // da, wenn seine Einstellungsdatei da ist.
+        let state = trash.join(format!("{id}.state.json"));
+        if state.is_file() {
+            std::fs::rename(&state, self.state_path(name))
+                .map_err(|e| format!("cannot move {}: {e}", state.display()))?;
+        }
+        std::fs::rename(&config, self.config_path(name))
+            .map_err(|e| format!("cannot move {}: {e}", config.display()))?;
+        Ok(name.to_owned())
+    }
+
+    /// Löscht ein Profil im Papierkorb endgültig: seine Einstellungen und
+    /// was der Fisch sich dazu gemerkt hat. Das lässt sich nicht
+    /// zurücknehmen.
+    ///
+    /// Benannte Grenze: das Protokoll des Profils im Ordner `logs` bleibt
+    /// liegen. Es gehört zum Namen, nicht zu dieser einen Löschung, und die
+    /// Maske führt es weiter, wenn es wieder ein Profil dieses Namens gibt.
+    pub fn erase(&self, id: &str) -> Result<(), String> {
+        trashed(id)?;
+        let trash = self.trash_dir();
+        let config = trash.join(format!("{id}.toml"));
+        if !config.is_file() {
+            return Err(format!("there is nothing named \"{id}\" in the trash"));
+        }
+        let state = trash.join(format!("{id}.state.json"));
+        if state.is_file() {
+            std::fs::remove_file(&state)
+                .map_err(|e| format!("cannot erase {}: {e}", state.display()))?;
+        }
+        std::fs::remove_file(&config).map_err(|e| format!("cannot erase {}: {e}", config.display()))
     }
 
     /// Übernimmt eine vorhandene Einstellungsdatei Byte für Byte als Profil,
@@ -795,6 +935,127 @@ mod tests {
         assert!(trash.join("tea-20261120-070102.state.json").exists());
         // Der Papierkorb ist kein Profil.
         assert_eq!(f.list().unwrap()["profiles"].as_array().unwrap().len(), 0);
+        clean(&f);
+    }
+
+    // --- der Papierkorb, seit dem 23.11.2026 -------------------------------
+
+    #[test]
+    fn the_trash_lists_what_was_deleted_the_latest_first() {
+        let f = temp("trash-list");
+        assert_eq!(f.trash().unwrap()["deleted"], json!([]), "no trash folder yet");
+        for name in ["tea", "tea-time"] {
+            f.save(name, DOC).unwrap();
+        }
+        std::fs::write(f.state_path("tea"), "{}").unwrap();
+        f.delete("tea", "20261120-070102").unwrap();
+        f.delete("tea-time", "20261121-080000").unwrap();
+        // Ein zweites Profil gleichen Namens, in derselben Sekunde gelöscht.
+        f.save("tea", DOC).unwrap();
+        f.delete("tea", "20261120-070102").unwrap();
+        // Was nicht von `delete` stammt, ist kein Eintrag.
+        std::fs::write(f.dir().join("trash").join("notes.toml"), "x").unwrap();
+        std::fs::write(f.dir().join("trash").join("readme.txt"), "x").unwrap();
+
+        let trash = f.trash().unwrap();
+        assert_eq!(trash["dir"], f.dir().join("trash").to_string_lossy().into_owned());
+        assert_eq!(
+            trash["deleted"],
+            json!([
+                { "id": "tea-time-20261121-080000", "name": "tea-time",
+                  "deleted": "2026-11-21 08:00:00 UTC", "state": false },
+                { "id": "tea-20261120-070102", "name": "tea",
+                  "deleted": "2026-11-20 07:01:02 UTC", "state": true },
+                { "id": "tea-20261120-070102-2", "name": "tea",
+                  "deleted": "2026-11-20 07:01:02 UTC", "state": false },
+            ])
+        );
+        clean(&f);
+    }
+
+    #[test]
+    fn a_deleted_profile_comes_back_with_its_state() {
+        let f = temp("trash-restore");
+        f.save("tea", DOC).unwrap();
+        let state = br#"{"consented":["7"]}"#;
+        std::fs::write(f.state_path("tea"), state).unwrap();
+        let config = std::fs::read(f.config_path("tea")).unwrap();
+        f.delete("tea", "20261120-070102").unwrap();
+
+        assert_eq!(f.restore("tea-20261120-070102", None).unwrap(), "tea");
+        assert_eq!(std::fs::read(f.config_path("tea")).unwrap(), config);
+        assert_eq!(std::fs::read(f.state_path("tea")).unwrap(), state);
+        // Verschoben, nicht kopiert: der Papierkorb ist danach leer.
+        assert_eq!(f.trash().unwrap()["deleted"], json!([]));
+        assert_eq!(f.names().unwrap(), ["tea"]);
+        // Ein zweites Mal gibt es nichts zurückzuholen.
+        let err = f.restore("tea-20261120-070102", None).unwrap_err();
+        assert!(err.contains("nothing named \"tea-20261120-070102\" in the trash"), "got {err}");
+        clean(&f);
+    }
+
+    #[test]
+    fn putting_back_never_replaces_a_profile_that_is_there() {
+        let f = temp("trash-taken");
+        f.save("tea", DOC).unwrap();
+        f.delete("tea", "20261120-070102").unwrap();
+        // Inzwischen gibt es wieder ein Profil dieses Namens.
+        f.save("tea", DOC).unwrap();
+        let err = f.restore("tea-20261120-070102", None).unwrap_err();
+        assert!(err.contains("a profile named \"tea\" already exists"), "got {err}");
+        assert!(err.contains("under another name"), "the message says what to do: {err}");
+        // Unter einem anderen Namen geht es.
+        assert_eq!(f.restore("tea-20261120-070102", Some("tea-old")).unwrap(), "tea-old");
+        assert_eq!(f.names().unwrap(), ["tea", "tea-old"]);
+        // Ein Name, den das Programm nicht annimmt, auch hier nicht.
+        f.delete("tea-old", "20261122-090000").unwrap();
+        assert!(f.restore("tea-old-20261122-090000", Some("Tea Old")).is_err());
+        clean(&f);
+    }
+
+    #[test]
+    fn erasing_removes_settings_and_state_for_good() {
+        let f = temp("trash-erase");
+        f.save("tea", DOC).unwrap();
+        std::fs::write(f.state_path("tea"), "{}").unwrap();
+        f.save("probe", DOC).unwrap();
+        f.delete("tea", "20261120-070102").unwrap();
+        f.delete("probe", "20261120-070103").unwrap();
+
+        f.erase("tea-20261120-070102").unwrap();
+        let trash = f.dir().join("trash");
+        assert!(!trash.join("tea-20261120-070102.toml").exists());
+        assert!(!trash.join("tea-20261120-070102.state.json").exists());
+        // Der andere Eintrag bleibt.
+        let left = f.trash().unwrap();
+        assert_eq!(left["deleted"].as_array().unwrap().len(), 1);
+        assert_eq!(left["deleted"][0]["name"], "probe");
+        let err = f.erase("tea-20261120-070102").unwrap_err();
+        assert!(err.contains("nothing named"), "got {err}");
+        clean(&f);
+    }
+
+    #[test]
+    fn only_entries_of_the_trash_can_be_put_back_or_erased() {
+        let f = temp("trash-ids");
+        f.save("tea", DOC).unwrap();
+        // Ein gespeichertes Profil ist kein Eintrag des Papierkorbs, und kein
+        // Weg führt aus dem Ordner hinaus.
+        for id in [
+            "tea",
+            "../tea",
+            "..\\tea",
+            "tea-20261120-070102/../../tea",
+            "tea-2026112-070102",
+            "-20261120-070102",
+            "TEA-20261120-070102",
+            "",
+        ] {
+            let err = f.erase(id).unwrap_err();
+            assert!(err.contains("is no entry of the trash"), "{id:?}: {err}");
+            assert!(f.restore(id, None).is_err(), "{id:?}");
+        }
+        assert!(f.config_path("tea").exists(), "nothing happened to the saved profile");
         clean(&f);
     }
 

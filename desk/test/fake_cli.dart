@@ -127,9 +127,64 @@ class FakeCli implements FishCli {
     ];
   }
 
+  /// Was im Papierkorb liegt, das Neueste zuerst, und die Profile dazu.
+  final trashed = <Trashed>[];
+  final _inTrash = <String, ProfileEntry>{};
+  final restored = <String>[];
+  final erased = <String>[];
+
+  /// Gesetzt: das Programm kennt den Papierkorb nicht (älterer Stand).
+  String? trashError;
+
+  @override
+  Future<Trash> trash() async {
+    final error = trashError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return Trash(dir: r'C:\fish\profiles\trash', deleted: List.of(trashed));
+  }
+
+  @override
+  Future<String> restoreProfile(String id, {String? name}) async {
+    final entry = _inTrash[id];
+    if (entry == null) {
+      throw CliException('there is nothing named "$id" in the trash');
+    }
+    final back = name ?? entry.name;
+    if (entries.any((other) => other.name == back)) {
+      throw CliException(
+        'a profile named "$back" already exists; put this one back under another name',
+      );
+    }
+    _inTrash.remove(id);
+    trashed.removeWhere((item) => item.id == id);
+    restored.add(back);
+    final doc = entry.doc;
+    entries = [...entries, if (doc != null) entryOf(doc.renamed(back)) else entry];
+    return back;
+  }
+
+  @override
+  Future<void> eraseProfile(String id) async {
+    if (_inTrash.remove(id) == null) {
+      throw CliException('there is nothing named "$id" in the trash');
+    }
+    trashed.removeWhere((item) => item.id == id);
+    erased.add(id);
+  }
+
   @override
   Future<void> deleteProfile(String name) async {
     deleted.add(name);
+    for (final entry in entries.where((entry) => entry.name == name)) {
+      final id = '$name-20261123-12000${trashed.length}';
+      _inTrash[id] = entry;
+      trashed.insert(
+        0,
+        Trashed(id: id, name: name, deleted: '2026-11-23 12:00:0${trashed.length} UTC', state: true),
+      );
+    }
     entries = [
       for (final entry in entries)
         if (entry.name != name) entry,

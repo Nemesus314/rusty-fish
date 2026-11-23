@@ -18,6 +18,7 @@ import 'secrets.dart';
 import 'share.dart';
 import 'start.dart';
 import 'theme_choice.dart';
+import 'trash.dart';
 
 class OverviewPage extends StatefulWidget {
   const OverviewPage({
@@ -225,8 +226,8 @@ class _OverviewPageState extends State<OverviewPage> {
       builder: (context) => AlertDialog(
         title: Text('Delete $name?'),
         content: const Text(
-          'The profile is moved to the trash folder of rusty-fish. '
-          'It is not erased, and you can put it back by hand.',
+          'The profile is moved to the trash of rusty-fish. It is not erased: under "Trash" '
+          'you can put it back, or erase it for good.',
         ),
         actions: [
           TextButton(
@@ -249,6 +250,19 @@ class _OverviewPageState extends State<OverviewPage> {
       _say(e.message);
     }
     await _state.refresh();
+  }
+
+  /// Öffnet den Papierkorb. Was dort zurückgeholt wird, erscheint danach
+  /// wieder als Karte; ist der Fisch an, nimmt er es gleich auf.
+  Future<void> _openTrash() async {
+    final restored = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => TrashDialog(cli: widget.cli, existingNames: _names),
+    );
+    await _state.refresh();
+    for (final name in restored ?? const <String>[]) {
+      _state.saved(name);
+    }
   }
 
   /// Legt die Beschreibung des Programms in die Zwischenablage. Wer sie einer
@@ -467,6 +481,15 @@ class _OverviewPageState extends State<OverviewPage> {
                       onPressed: () => _openEditor(ProfileDoc.blank(), isNew: true),
                       icon: const Icon(Icons.add),
                       label: const Text('New profile'),
+                    ),
+                    const SizedBox(width: 4),
+                    // Der Papierkorb: gelöschte Profile zurückholen oder
+                    // endgültig löschen.
+                    TextButton.icon(
+                      key: const ValueKey('open-trash'),
+                      onPressed: _openTrash,
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text('Trash'),
                     ),
                   ],
                 ),

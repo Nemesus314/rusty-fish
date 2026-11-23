@@ -174,6 +174,18 @@ account there.
    message; the fish writes only IDs and reasons into its log. The opened log
    of a card has "Copy log" for its lines alone.
 
+6. "Delete" on a card moves the profile to the trash of rusty-fish, together
+   with what the fish remembered for it: who agreed, how far it has read,
+   today's use. Nothing is erased, and it works only while the fish is off.
+   "Trash", next to "New profile", lists what was deleted. "Put back" brings
+   a profile back as it was; if its name is taken again, the window asks for
+   another one and replaces nothing. "Erase" removes it for good, after
+   asking; that cannot be undone. The trash is a folder of its own next to
+   the profiles (`trash`), not the Windows recycle bin, and it never empties
+   itself. The log file of a profile stays in the `logs` folder either way.
+   On the command line: `rusty-fish profile trash`, `rusty-fish profile
+   restore ID` and `rusty-fish profile erase ID`.
+
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 `rusty-fish run --all`, which serves every profile as the window does.

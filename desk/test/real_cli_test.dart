@@ -64,6 +64,74 @@ void main() {
     expect(after.profiles.where((entry) => entry.name == name), isEmpty);
   }, skip: skip);
 
+  // Seit dem 23.11.2026: der Papierkorb. Ein gelöschtes Profil kommt mit
+  // allem zurück, was der Fisch sich gemerkt hat, oder es wird endgültig
+  // gelöscht.
+  test('a deleted profile comes back from the trash, or is erased for good', () async {
+    final cli = ProcessFishCli(exe!);
+    const name = 'desk-probe-trash';
+    final doc = profile(name);
+    // Reste eines früheren, abgebrochenen Laufs sollen nicht stören.
+    try {
+      await cli.deleteProfile(name);
+    } on CliException {
+      // Es gab keines.
+    }
+    final before = (await cli.trash()).deleted.where((entry) => entry.name == name).length;
+
+    await cli.saveProfile(doc);
+    // Was der Fisch sich gemerkt hat, liegt neben dem Profil.
+    final sep = Platform.pathSeparator;
+    final state = File('${home!}${sep}profiles$sep$name.state.json');
+    state.writeAsStringSync('{"consented":["7"]}');
+    await cli.deleteProfile(name);
+    expect((await cli.listProfiles()).profiles.where((entry) => entry.name == name), isEmpty);
+
+    var trash = await cli.trash();
+    expect(trash.dir, endsWith('trash'));
+    final entry = trash.deleted.firstWhere((entry) => entry.name == name);
+    expect(entry.id, startsWith('$name-'));
+    expect(entry.deleted, endsWith('UTC'));
+    expect(entry.state, isTrue);
+
+    // Zurückholen: unter dem alten Namen, mit dem Zustand.
+    expect(await cli.restoreProfile(entry.id), name);
+    expect((await cli.showProfile(name)).toJson(), doc.toJson());
+    expect(state.readAsStringSync(), '{"consented":["7"]}');
+    trash = await cli.trash();
+    expect(trash.deleted.where((entry) => entry.name == name).length, before);
+
+    // Noch einmal löschen. Ein Profil gleichen Namens, das es inzwischen
+    // wieder gibt, wird beim Zurückholen nicht ersetzt.
+    await cli.deleteProfile(name);
+    await cli.saveProfile(doc);
+    final again = (await cli.trash()).deleted.firstWhere((entry) => entry.name == name);
+    await expectLater(
+      cli.restoreProfile(again.id),
+      throwsA(isA<CliException>().having((e) => e.message, 'message', contains('already exists'))),
+    );
+    // Unter einem anderen Namen geht es.
+    expect(await cli.restoreProfile(again.id, name: '$name-2'), '$name-2');
+    expect((await cli.showProfile('$name-2')).rooms.single.seats.first.channel, '7');
+
+    // Endgültig löschen: danach ist der Eintrag fort, und kein zweites Mal.
+    await cli.deleteProfile('$name-2');
+    final last = (await cli.trash()).deleted.firstWhere((entry) => entry.name == '$name-2');
+    await cli.eraseProfile(last.id);
+    expect((await cli.trash()).deleted.where((entry) => entry.id == last.id), isEmpty);
+    await expectLater(
+      cli.eraseProfile(last.id),
+      throwsA(isA<CliException>().having((e) => e.message, 'message', contains('in the trash'))),
+    );
+    // Ein gespeichertes Profil ist kein Eintrag des Papierkorbs.
+    await expectLater(
+      cli.eraseProfile(name),
+      throwsA(isA<CliException>().having((e) => e.message, 'message', contains('no entry'))),
+    );
+    expect((await cli.showProfile(name)).toJson(), doc.toJson());
+    await cli.deleteProfile(name);
+  }, skip: skip);
+
   test('what the program refuses comes back in its own words', () async {
     final cli = ProcessFishCli(exe!);
     const oneSeat = ProfileDoc(

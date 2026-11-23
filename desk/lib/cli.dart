@@ -48,6 +48,17 @@ abstract class FishCli {
   /// Verschiebt das Profil in den Papierkorb des Programms.
   Future<void> deleteProfile(String name);
 
+  /// Was im Papierkorb liegt. Ein älteres Programm kennt den Aufruf nicht
+  /// und lehnt ihn ab.
+  Future<Trash> trash();
+
+  /// Holt einen Eintrag des Papierkorbs zurück, unter seinem alten Namen oder
+  /// unter [name]. Liefert den Namen, unter dem das Profil jetzt steht.
+  Future<String> restoreProfile(String id, {String? name});
+
+  /// Löscht einen Eintrag des Papierkorbs endgültig.
+  Future<void> eraseProfile(String id);
+
   Future<KeyStatus> keyStatus();
 
   /// Die KI-Dienste, die das Programm kennt. Die Maske zeigt genau diese
@@ -131,6 +142,25 @@ class ProcessFishCli implements FishCli {
   @override
   Future<void> deleteProfile(String name) async {
     await _call(['profile', 'delete', name]);
+  }
+
+  @override
+  Future<Trash> trash() async {
+    final out = await _call(['profile', 'trash', '--json']);
+    return Trash.fromJson(_object(out));
+  }
+
+  @override
+  Future<String> restoreProfile(String id, {String? name}) async {
+    final out = await _call(['profile', 'restore', id, if (name != null) ...['--name', name]]);
+    // „Profile "tea" is back." Der Name steht zwischen den Anführungszeichen.
+    final said = RegExp('"([^"]+)"').firstMatch(out)?.group(1);
+    return said ?? name ?? id;
+  }
+
+  @override
+  Future<void> eraseProfile(String id) async {
+    await _call(['profile', 'erase', id]);
   }
 
   @override

@@ -215,6 +215,25 @@ enum ProfileAction {
     Save { name: String },
     /// Move a profile and its state to the trash folder; nothing is erased
     Delete { name: String },
+    /// List the deleted profiles in the trash folder
+    Trash {
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put a deleted profile and its state back, out of the trash folder
+    Restore {
+        /// The entry as `profile trash` lists it, for example tea-20261120-070102
+        id: String,
+        /// Put it back under this name instead of its old one
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Erase a deleted profile and its state for good; this cannot be undone
+    Erase {
+        /// The entry as `profile trash` lists it
+        id: String,
+    },
     /// Take an existing settings file, and the state next to it, as a new profile
     Import {
         /// The settings file to copy
@@ -712,6 +731,35 @@ fn profile(action: ProfileAction) -> Result<(), String> {
         ProfileAction::Delete { name } => {
             let moved = folder.delete(&name, &profiles::stamp(now()))?;
             println!("Profile \"{name}\" moved to {}", moved.display());
+            Ok(())
+        }
+        ProfileAction::Trash { json } => {
+            let trash = folder.trash()?;
+            if json {
+                println!("{}", pretty(&trash));
+                return Ok(());
+            }
+            let deleted = trash["deleted"].as_array().cloned().unwrap_or_default();
+            if deleted.is_empty() {
+                println!("The trash is empty.");
+            }
+            for entry in deleted {
+                println!(
+                    "{:<60}  deleted {}",
+                    entry["id"].as_str().unwrap_or("?"),
+                    entry["deleted"].as_str().unwrap_or("?")
+                );
+            }
+            Ok(())
+        }
+        ProfileAction::Restore { id, name } => {
+            let name = folder.restore(&id, name.as_deref())?;
+            println!("Profile \"{name}\" is back.");
+            Ok(())
+        }
+        ProfileAction::Erase { id } => {
+            folder.erase(&id)?;
+            println!("\"{id}\" is erased.");
             Ok(())
         }
         ProfileAction::Import { path, name } => {
