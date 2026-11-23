@@ -284,6 +284,14 @@ yourself, one ID is enough, at either door. Such a profile needs both the bot
 token and the Matrix login. If one of them is missing, the profile does not
 start at all and the output says which.
 
+Two things went wrong in the first real run, on 23 November 2026, and both
+looked the same: nothing arrived on Discord, the fish set a warning sign at
+the messages in the Matrix room, and the output said "Unknown Channel".
+- The bot has to be on the server of the channel. It is added to each server
+  separately, with the link from the "Discord" window.
+- The seat needs the ID of the channel (right-click the channel in the list),
+  not the ID of the server.
+
 How it behaves:
 
 - The rules are the same as in every room: who is asked, who is invited, the
@@ -323,9 +331,19 @@ Limits of a mixed room:
   of a conversation take their turn one message at a time.
 - When a changed profile is reloaded, each door takes it up for itself, one
   a moment before the other.
-- A mixed room has run against a simulated Discord and a simulated Matrix
-  server, each door for itself. Not yet seen: a mixed room at the real
-  services.
+- On 23 November 2026 a mixed room ran at the real services, with a Discord
+  channel in German and a room at matrix.org in English. Seen
+  there: a sentence from Discord arrived translated in the Matrix room, one
+  from the Matrix room arrived translated on Discord under "Name (Matrix)",
+  a guest in the Matrix room was asked for agreement and was translated on
+  Discord after tapping "OK", Russian stayed Russian as the neutral language,
+  and the fish wrote its lines on being switched on and off. Not seen there:
+  the sentence a guest wrote before agreeing arriving at the other door
+  afterwards (the Discord seat was still wrong at that moment), a guest
+  agreeing on the Discord side of a mixed room, the budget notice, pictures
+  and files, catching up after a pause, and a door failing while the other
+  runs. Those have run against a simulated Discord and a simulated Matrix
+  server only, each door for itself.
 
 ## Limits
 
