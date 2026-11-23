@@ -442,6 +442,10 @@ async fn the_fish_says_at_its_tables_when_it_is_switched_on_and_off() {
     assert_eq!(all[0].2["msgtype"], "m.notice");
 
     // --- neu geladen: an den Tischen steht dazu nichts --------------------------
+    // Erst wenn der Start durch ist, also auch die Mitteilung an die
+    // Eingeladene abgesetzt ist. Bis zum 23.11.2026 zählte der Test manchmal
+    // zu früh und scheiterte dann, obwohl nichts doppelt gesagt wurde.
+    sent_at_least(&server, 1).await;
     let before = everything_sent(&server).await.len();
     to_door.send(Command::Restart(Box::new(profile()))).unwrap();
     tokio::time::sleep(Duration::from_millis(1500)).await;

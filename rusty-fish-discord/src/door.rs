@@ -120,6 +120,16 @@ struct Served<M> {
     house: Arc<Mutex<Household>>,
     /// Die Leitungen zu den anderen Türen, wenn das Profil auch dort steht.
     lines: Option<Arc<Lines>>,
+    /// Dieses Profil ist aus dem Lauf genommen, etwa weil es neu geladen
+    /// wurde. Was es noch vorhatte (Eingeladenen etwas mitteilen, nachholen),
+    /// lässt es dann: das tut der neue Stand.
+    ///
+    /// Gemessen am 23.11.2026 an einem Test, der in einem von sechs Läufen
+    /// scheiterte: wurde ein Profil genau dann neu geladen, während der alte
+    /// Stand die Mitteilung an Eingeladene absetzte, las der neue die
+    /// Zustandsdatei, bevor der alte gespeichert hatte, und teilte dasselbe
+    /// noch einmal mit.
+    retired: AtomicBool,
     /// Die Webhooks der Kanäle, in die der Fisch schon geschrieben hat. Ein
     /// eigenes Schloss: auch was eine andere Tür zureicht, wird hier
     /// abgesetzt, während jene das Schloss des Haushalts hält.
@@ -330,6 +340,7 @@ where
             service: profile.service,
             house,
             lines,
+            retired: AtomicBool::new(false),
             hooks: Mutex::new(HashMap::new()),
         });
         // Prüfen und Aufnehmen unter einem Schloss, zusammen mit der Frage,
@@ -371,9 +382,20 @@ where
     /// einen Kanal mit einem anderen laufenden Profil teilt, läuft danach
     /// keines von beiden: das alte gälte nicht mehr, und das neue darf nicht.
     async fn restart(&self, http: &Http, profile: Profile<M>) -> Result<(), String> {
+        let mut gone: Vec<Arc<Served<M>>> = Vec::new();
         if let Some(name) = profile.name.as_deref() {
             let mut list = self.served.write().await;
+            gone = list.iter().filter(|s| s.name.as_deref() == Some(name)).cloned().collect();
             list.retain(|served| served.name.as_deref() != Some(name));
+        }
+        // Der alte Stand lässt, was er noch vorhatte, und was er gerade tut,
+        // bringt er zu Ende: erst dann liest der neue die Zustandsdatei. So
+        // findet der neue wirklich vor, was der alte gespeichert hat.
+        for old in &gone {
+            old.retired.store(true, Ordering::Relaxed);
+        }
+        for old in &gone {
+            drop(old.house.lock().await);
         }
         let started = self.start(Some(http), profile).await;
         if started.is_err() {
@@ -387,6 +409,9 @@ where
     async fn stop(&self, name: &str) -> usize {
         let mut list = self.served.write().await;
         let before = list.len();
+        for gone in list.iter().filter(|served| served.name.as_deref() == Some(name)) {
+            gone.retired.store(true, Ordering::Relaxed);
+        }
         list.retain(|served| served.name.as_deref() != Some(name));
         if list.len() < before {
             eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
@@ -826,6 +851,10 @@ where
     /// Systemnachricht mitgeteilt werden."
     async fn tell_the_invited(&self, http: &Http) {
         let mut house = self.house.lock().await;
+        // Inzwischen aus dem Lauf genommen: das tut der neue Stand.
+        if self.retired.load(Ordering::Relaxed) {
+            return;
+        }
         // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
         let Some(pending) = house.invitations(&self.config) else { return };
 
@@ -944,6 +973,11 @@ where
             self.say(format_args!("catching up on {from_people} missed message(s)"));
         }
         for msg in &missed {
+            // Inzwischen aus dem Lauf genommen: der neue Stand holt nach,
+            // von der Lesemarke an, die dieser hier gespeichert hat.
+            if self.retired.load(Ordering::Relaxed) {
+                break;
+            }
             self.handle(http, msg, me).await;
         }
     }

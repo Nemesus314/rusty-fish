@@ -133,6 +133,16 @@ struct Served<M> {
     /// Ob der Fisch an den Tischen dieses Profils gesagt hat, dass er
     /// eingeschaltet ist. Nur dann sagt er beim Anhalten, dass er geht.
     said_on: AtomicBool,
+    /// Dieses Profil ist aus dem Lauf genommen, etwa weil es neu geladen
+    /// wurde. Was es noch vorhatte (Eingeladenen etwas mitteilen, nachholen),
+    /// lässt es dann: das tut der neue Stand.
+    ///
+    /// Gemessen am 23.11.2026 an einem Test, der in einem von sechs Läufen
+    /// scheiterte: wurde ein Profil genau dann neu geladen, während der alte
+    /// Stand die Mitteilung an Eingeladene absetzte, las der neue die
+    /// Zustandsdatei, bevor der alte gespeichert hatte, und teilte dasselbe
+    /// noch einmal mit.
+    retired: AtomicBool,
     /// Was der Fisch sich merkt, und was nach einer Nachricht zu geschehen
     /// hat. Sein Schloss lässt die Nachrichten des Profils einzeln durch.
     /// Steht das Profil auch an einer anderen Tür, ist es derselbe Haushalt
@@ -471,6 +481,7 @@ where
             since: now_ms(),
             entered: std::sync::Mutex::new(HashMap::new()),
             said_on: AtomicBool::new(said_on),
+            retired: AtomicBool::new(false),
             house,
             lines,
             inner: Mutex::new(Inner {
@@ -510,13 +521,25 @@ where
         // Neu geladen ist nicht aus- und wieder eingeschaltet: an den Tischen
         // steht dazu nichts, wenn dort schon steht, dass der Fisch da ist.
         let mut said_on = false;
+        let mut gone: Vec<Arc<Served<M>>> = Vec::new();
         if let Some(name) = profile.name.as_deref() {
             let mut list = fish.served.write().await;
-            said_on = list
+            gone = list
                 .iter()
                 .filter(|entry| entry.served.name.as_deref() == Some(name))
-                .any(|entry| entry.served.said_on.load(Ordering::SeqCst));
+                .map(|entry| entry.served.clone())
+                .collect();
+            said_on = gone.iter().any(|served| served.said_on.load(Ordering::SeqCst));
             list.retain(|entry| entry.served.name.as_deref() != Some(name));
+        }
+        // Der alte Stand lässt, was er noch vorhatte, und was er gerade tut,
+        // bringt er zu Ende: erst dann liest der neue die Zustandsdatei. So
+        // findet der neue wirklich vor, was der alte gespeichert hat.
+        for old in &gone {
+            old.retired.store(true, Ordering::SeqCst);
+        }
+        for old in &gone {
+            drop(old.house.lock().await);
         }
         let started = Fish::start(fish, profile, said_on).await;
         if started.is_err() {
@@ -536,6 +559,9 @@ where
                 .map(|entry| entry.served.clone())
                 .collect();
             list.retain(|entry| entry.served.name.as_deref() != Some(name));
+            for old in &gone {
+                old.retired.store(true, Ordering::SeqCst);
+            }
             if gone.is_empty() {
                 eprintln!("rusty-fish: {}was not running at the Matrix door", label_of(Some(name)));
             } else {
@@ -997,6 +1023,9 @@ where
     /// Fisch eingeladen ist, sagen, in welchen er fehlt, und Eingeladenen
     /// mitteilen, dass er sie bedient.
     async fn settle(&self, fish: &Fish<M>) {
+        if self.retired.load(Ordering::SeqCst) {
+            return;
+        }
         for seat in self.config.rooms.iter().flat_map(|room| room.seats.iter()) {
             // Ein Tisch an einer anderen Tür ist kein Raum dieser Tür.
             if self.config.door_of(&seat.channel) != Some(Door::Matrix) {
@@ -1013,6 +1042,9 @@ where
                 )),
             }
         }
+        if self.retired.load(Ordering::SeqCst) {
+            return;
+        }
         fish.announce(&[self], true).await;
         self.tell_the_invited(fish).await;
     }
@@ -1021,6 +1053,10 @@ where
     /// bedient: einmal je Mensch, gemerkt in der Zustandsdatei.
     async fn tell_the_invited(&self, fish: &Fish<M>) {
         let mut house = self.house.lock().await;
+        // Inzwischen aus dem Lauf genommen: das tut der neue Stand.
+        if self.retired.load(Ordering::SeqCst) {
+            return;
+        }
         // Nichts fällig und niemand zu vergessen: die Datei bleibt, wie sie ist.
         let Some(pending) = house.invitations(&self.config) else { return };
 
