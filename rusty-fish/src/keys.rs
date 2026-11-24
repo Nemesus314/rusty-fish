@@ -33,6 +33,7 @@ const SERVICE: &str = "rusty-fish";
 /// die an einer der beiden Stellen fehlen kann. Den Namen des Ordners und den
 /// des Befehls (`key store file`) hat Nemesus am 24.11.2026 bestätigt („Ja, so
 /// lassen").
+#[cfg(any(unix, test))]
 pub const FOLDER: &str = "secrets";
 
 /// Wo die Geheimnisse liegen.
