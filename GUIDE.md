@@ -566,8 +566,9 @@ machine.
 
 ## Who made this
 
-Rusty Fish is made by Nemesus. He also builds Cluster One, a set of plugins
-for WordPress.
+Rusty Fish is made by Nemesus. He codes, writes and makes videos. What
+drives him is the wish for meaningful connections between people,
+worldwide. He also builds Cluster One, a set of plugins for WordPress.
 
 - His site: https://christianermisch.com
 - On GitHub: https://github.com/Nemesus314 (Rusty Fish itself is not
