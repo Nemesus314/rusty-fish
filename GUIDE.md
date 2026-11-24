@@ -97,15 +97,16 @@ account there.
   Linux server; see "A Linux server" for what has been measured there. macOS
   has not been tested.
 - The program. It has two parts: the fish itself (`rusty-fish.exe`, a command
-  line program) and a window to manage it (`rusty_fish_desk.exe`). Rusty Fish
-  is not published yet; until it is, you get it from the person who gave you
-  this text. It is free software under the GNU Affero General Public
-  License, version 3 or (at your option) any later version, and comes
-  without any warranty. Copyright (C) 2026 Christian Ermisch (Nemesus). The
-  full text of the license is in the file `LICENSE` next to the source. In
-  short: you may use, change and pass on the fish under those terms, and
-  whoever runs a changed fish that others talk to over a network owes them
-  its source.
+  line program) and a window to manage it (`rusty_fish_desk.exe`). Its
+  source is at https://github.com/Nemesus314/rusty-fish. There is nothing
+  ready to download there yet: you build the program from the source, or
+  you get it from the person who gave you this text. It is free software
+  under the GNU Affero General Public License, version 3 or (at your option)
+  any later version, and comes without any warranty. Copyright (C) 2026
+  Christian Ermisch (Nemesus). The full text of the license is in the file
+  `LICENSE` next to the source. In short: you may use, change and pass on
+  the fish under those terms, and whoever runs a changed fish that others
+  talk to over a network owes them its source.
 - A Discord account and a server where you may add a bot. Your own server is
   the simplest; creating one is free.
 - A Discord bot of your own. It is free and is created in Discord's developer
@@ -604,8 +605,7 @@ drives him is the wish for meaningful connections between people,
 worldwide. He also builds Cluster One, a set of plugins for WordPress.
 
 - His site: https://christianermisch.com
-- On GitHub: https://github.com/Nemesus314 (Rusty Fish itself is not
-  published there yet)
+- The source of Rusty Fish: https://github.com/Nemesus314/rusty-fish
 - Videos in German: https://www.youtube.com/@NemesusDE
 - Videos in English: https://www.youtube.com/@NemesusEN
 - Experiments, in German: https://www.youtube.com/@Nemesus314

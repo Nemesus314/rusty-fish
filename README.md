@@ -75,6 +75,7 @@ drives him is the wish for meaningful connections between people,
 worldwide.
 
 - His site: https://christianermisch.com
+- The source of Rusty Fish: https://github.com/Nemesus314/rusty-fish
 - Videos in German: https://www.youtube.com/@NemesusDE
 - Videos in English: https://www.youtube.com/@NemesusEN
 - Experiments, in German: https://www.youtube.com/@Nemesus314
