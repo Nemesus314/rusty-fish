@@ -144,8 +144,7 @@ pub async fn login(
         return Err("nothing entered, nothing done".to_owned());
     }
     clear(store)?;
-    std::fs::create_dir_all(store)
-        .map_err(|e| format!("cannot create {}: {e}", store.display()))?;
+    create_private(store).map_err(|e| format!("cannot create {}: {e}", store.display()))?;
     let passphrase = passphrase()?;
 
     let builder = Client::builder().sqlite_store(store, Some(&passphrase));
@@ -477,6 +476,21 @@ pub fn clear(store: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Legt die Ablage des Geräts an. Unter Unix nur für das Konto des Fischs
+/// (0700), wie das Programm seine übrigen Ordner anlegt; ein Ordner, den es
+/// schon gibt, bleibt, wie er ist.
+fn create_private(store: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(store)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(store)
+    }
 }
 
 /// Ein zufälliges Kennwort für die Ablage des Geräts.

@@ -70,7 +70,7 @@ fn paths(profiles: &Path, bot: &str) -> (PathBuf, PathBuf) {
 pub fn acquire(profiles: &Path, bot: &str, who: &Running) -> Result<Held, String> {
     let (lock_path, info_path) = paths(profiles, bot);
     if let Some(dir) = lock_path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        crate::profiles::create_private(dir)?;
     }
     let file = OpenOptions::new()
         .read(true)

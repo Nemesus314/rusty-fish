@@ -148,6 +148,29 @@ fn trashed(id: &str) -> Result<(String, String), String> {
 
 /// Schreibt eine Datei so, dass ein Absturz mittendrin keine halbe Datei unter
 /// dem richtigen Namen hinterlässt: erst daneben schreiben, dann umbenennen.
+/// Legt einen Ordner des Fischs an, samt allem darüber, was noch fehlt.
+///
+/// Unter Unix nur für das Konto des Fischs (0700). In den Profilen und ihrem
+/// Zustand stehen Namen und Kennungen von Menschen; auf einem Server mit
+/// mehreren Konten soll sie niemand sonst lesen. Bis zum 24.11.2026 entstanden
+/// die Ordner dort mit den üblichen Rechten (gemessen: 0755, Dateien 0644),
+/// und nur der Leitfaden riet zu `chmod 700`.
+///
+/// Benannte Grenze: ein Ordner, den es schon gibt, bleibt, wie er ist. Wer
+/// den Fisch mit `RUSTY_FISH_HOME` in einen offenen Ordner setzt, hat ihn
+/// selbst geöffnet; die Ordner darin legt der Fisch trotzdem geschlossen an.
+/// Unter Windows gilt, was der Ordner des Nutzers ohnehin vorgibt.
+pub fn create_private(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    let created = {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+    };
+    #[cfg(not(unix))]
+    let created = std::fs::create_dir_all(dir);
+    created.map_err(|e| format!("cannot create {}: {e}", dir.display()))
+}
+
 fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut tmp = path.to_owned().into_os_string();
     tmp.push(".tmp");
@@ -311,8 +334,7 @@ impl Folder {
         // Eine Wahrheit: das Dokument wird zu TOML und dann gelesen wie jede
         // Datei. Was der Fisch beim Start ablehnen würde, wird nie gespeichert.
         let (toml, _) = Document::from_json(json)?.check()?;
-        std::fs::create_dir_all(&self.dir)
-            .map_err(|e| format!("cannot create {}: {e}", self.dir.display()))?;
+        create_private(&self.dir)?;
         write_whole(&self.config_path(name), toml.as_bytes())
     }
 
@@ -331,8 +353,7 @@ impl Folder {
         }
 
         let trash = self.trash_dir();
-        std::fs::create_dir_all(&trash)
-            .map_err(|e| format!("cannot create {}: {e}", trash.display()))?;
+        create_private(&trash)?;
         // Zwei Löschungen in derselben Sekunde dürfen einander nicht überschreiben.
         let mut base = format!("{name}-{stamp}");
         let mut n = 1;
@@ -475,8 +496,7 @@ impl Folder {
             None
         };
 
-        std::fs::create_dir_all(&self.dir)
-            .map_err(|e| format!("cannot create {}: {e}", self.dir.display()))?;
+        create_private(&self.dir)?;
         // Erst der Zustand, dann die Einstellungen: ein Profil gilt erst als
         // da, wenn seine Einstellungsdatei da ist.
         if let Some(state) = state {
@@ -515,6 +535,39 @@ mod tests {
         ]}],
         "people": [{"id": "100", "gender": "male"}]
     }"#;
+
+    /// In den Profilen stehen Namen und Kennungen von Menschen. Auf einem
+    /// Server mit mehreren Konten soll sie niemand sonst lesen.
+    #[test]
+    #[cfg(unix)]
+    fn the_folders_the_fish_creates_are_for_its_account_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+
+        let f = temp("private");
+        let home = f.dir().parent().unwrap().to_path_buf();
+        f.save("tea", DOC).unwrap();
+        assert_eq!(mode(&home), 0o700, "the fish's folder");
+        assert_eq!(mode(f.dir()), 0o700, "the profiles");
+        f.delete("tea", "20261124-010203").unwrap();
+        assert_eq!(mode(&f.dir().join("trash")), 0o700, "the trash");
+        let who = Running { profiles: Vec::new(), pid: 1, started: 1 };
+        let held = lock::acquire(f.dir(), BOT, &who).unwrap();
+        assert_eq!(mode(&f.dir().join(".locks")), 0o700, "the locks");
+        drop(held);
+        clean(&f);
+
+        // Ein Ordner, den es schon gab, bleibt, wie er ist; was der Fisch
+        // darin anlegt, ist trotzdem nur für ihn.
+        let f = temp("open-home");
+        let home = f.dir().parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        f.save("tea", DOC).unwrap();
+        assert_eq!(mode(&home), 0o755);
+        assert_eq!(mode(f.dir()), 0o700);
+        clean(&f);
+    }
 
     #[test]
     fn the_list_says_where_the_ai_of_a_profile_reads() {

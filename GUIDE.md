@@ -394,8 +394,8 @@ rusty-fish`). Everything is done on the command line.
 1. Give the fish an account of its own on the server and work as that
    account. `rusty-fish profile dir` shows where the profiles lie; the
    fish's folder is the one above it (`~/.config/rusty-fish`). Profiles hold
-   names and ids of people, so keep other accounts out: `chmod 700` on that
-   folder.
+   names and ids of people, so under Linux the fish creates its folders for
+   its own account only. A folder that was there before stays as it was.
 2. A server without a desktop has no credential store, and every command
    that needs a secret says so. Run `rusty-fish key store file` once. From
    then on the secrets are kept in files, in the folder `secrets` next to
