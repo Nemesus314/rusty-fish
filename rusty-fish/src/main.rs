@@ -1107,6 +1107,25 @@ mod tests {
         assert!(text.contains("Do not add anything about him that is not written here."));
     }
 
+    /// Entschieden von Nemesus am 24.11.2026: die AGPL 3, „Version 3 oder
+    /// später", mit beiden Namen im Vermerk. Der Wortlaut liegt unverändert im
+    /// Repository, und der Leitfaden nennt Lizenz und Urheber.
+    #[test]
+    fn the_license_is_the_agpl_3_and_the_guide_says_so() {
+        let license = include_str!("../../LICENSE");
+        assert!(license.trim_start().starts_with("GNU AFFERO GENERAL PUBLIC LICENSE"));
+        assert!(license.contains("Version 3, 19 November 2007"));
+        assert!(license.contains("13. Remote Network Interaction"));
+        assert!(license.contains("END OF TERMS AND CONDITIONS"));
+        assert_eq!(env!("CARGO_PKG_LICENSE"), "AGPL-3.0-or-later");
+
+        let text = guide().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains(
+            "GNU Affero General Public License, version 3 or (at your option) any later version"
+        ));
+        assert!(text.contains("Copyright (C) 2026 Christian Ermisch (Nemesus)."));
+    }
+
     #[test]
     fn the_guide_ends_with_the_version_it_describes() {
         let text = guide();

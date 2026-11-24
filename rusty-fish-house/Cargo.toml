@@ -4,6 +4,8 @@ description = "The household of a Rusty Fish: the profile, what it remembers, it
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 rusty-fish-core = { path = "../rusty-fish-core" }

@@ -4,6 +4,8 @@ description = "Rusty Fish provider for OpenAI and every service that speaks the 
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }

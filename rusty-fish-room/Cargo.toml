@@ -4,6 +4,8 @@ description = "Room logic of Rusty Fish: who receives what, in which language. K
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+authors.workspace = true
 
 [dependencies]
 rusty-fish-core = { path = "../rusty-fish-core" }

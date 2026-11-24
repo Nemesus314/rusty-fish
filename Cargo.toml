@@ -16,6 +16,15 @@ members = [
 version = "0.3.0"
 edition = "2024"
 publish = false
+# Entschieden von Nemesus am 24.11.2026: die AGPL 3, „Version 3 oder später".
+# Die GPL 2 seiner WordPress-Plugins ginge hier nicht: 29 der fremden
+# Bausteine stehen nur unter Apache 2.0 (gemessen am selben Tag), und die
+# verträgt sich erst mit der dritten Fassung. Die AGPL statt der GPL, weil
+# Gäste mit einem Fisch über ein Netz sprechen, den sie nicht selbst
+# betreiben: wer einen veränderten Fisch betreibt, schuldet ihnen den
+# Quelltext. Der Wortlaut steht in LICENSE, unverändert von gnu.org.
+license = "AGPL-3.0-or-later"
+authors = ["Christian Ermisch (Nemesus)"]
 
 # Die Ablage der Matrix-Geräteschlüssel ist mit einem Kennwort verschlossen;
 # daraus den Schlüssel abzuleiten kostet absichtlich viele Rechenschritte.
