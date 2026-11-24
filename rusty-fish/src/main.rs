@@ -270,13 +270,23 @@ enum ProfileAction {
         /// The entry as `profile trash` lists it
         id: String,
     },
-    /// Take an existing settings file, and the state next to it, as a new profile
-    Import {
-        /// The settings file to copy
+    /// Write all profiles, each with its state, into one file: to move them
+    /// to another machine, or to keep a copy. The file holds no secrets
+    Export {
+        /// The file to write; an existing file is never replaced
         path: PathBuf,
-        /// Name of the new profile
+    },
+    /// Take the profiles of a file written by `profile export`. With --name:
+    /// take one existing settings file, and the state next to it, as a new profile
+    Import {
+        /// The file to read
+        path: PathBuf,
+        /// Name of the new profile, for a single settings file
         #[arg(long)]
-        name: String,
+        name: Option<String>,
+        /// Print what was taken and what was refused as JSON
+        #[arg(long, conflicts_with = "name")]
+        json: bool,
     },
 }
 
@@ -897,9 +907,79 @@ fn profile(action: ProfileAction) -> Result<(), String> {
             println!("\"{id}\" is erased.");
             Ok(())
         }
-        ProfileAction::Import { path, name } => {
+        ProfileAction::Export { path } => {
+            let (document, count) = folder.export(now())?;
+            profiles::write_new(&path, document.as_bytes())?;
+            let word = if count == 1 { "profile" } else { "profiles" };
+            println!("{count} {word} written to {}", path.display());
+            println!(
+                "Note: the file holds the names and ids of the people in them, readable by \
+                 whoever has it. It holds no secrets and nothing of the Matrix account."
+            );
+            // Was der laufende Fisch von jetzt an lernt, steht nicht mehr in
+            // der Datei: wer umzieht, schaltet ihn vorher aus.
+            if lock::running(folder.dir(), profiles::BOT).is_some() {
+                println!(
+                    "Note: the fish is running here. What it learns from now on (who agreed, \
+                     what was read) is not in the file; to move, switch it off first and export \
+                     again."
+                );
+            }
+            Ok(())
+        }
+        ProfileAction::Import { path, name: Some(name), .. } => {
+            // Eine Datei mit mehreren Profilen würde so als ein kaputtes
+            // Profil übernommen; lieber sagen, wie es gemeint ist.
+            if std::fs::read_to_string(&path).is_ok_and(|text| profiles::is_export(&text)) {
+                return Err(format!(
+                    "{} holds several profiles, each under its own name; leave out `--name`",
+                    path.display()
+                ));
+            }
             folder.import(&path, &name)?;
             println!("Profile \"{name}\" created from {}", path.display());
+            Ok(())
+        }
+        ProfileAction::Import { path, name: None, json } => {
+            let cannot = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
+            let size = std::fs::metadata(&path).map_err(cannot)?.len();
+            if size > profiles::EXPORT_LIMIT {
+                return Err(format!(
+                    "{} is larger than a file of profiles can be; nothing was changed",
+                    path.display()
+                ));
+            }
+            let document = std::fs::read_to_string(&path).map_err(cannot)?;
+            let imported = folder.import_all(&document).map_err(|why| {
+                // Eine einzelne Einstellungsdatei ist kein Fehler der Datei:
+                // ihr fehlt nur der Name.
+                if why.starts_with("this is not a file") {
+                    format!("{why}. For a single settings file, give `--name NAME`")
+                } else {
+                    why
+                }
+            })?;
+            if json {
+                println!("{}", pretty(&imported.json()));
+                return Ok(());
+            }
+            for name in &imported.created {
+                println!("Profile \"{name}\" taken.");
+            }
+            for (name, why) in &imported.refused {
+                println!("Profile \"{name}\" refused: {why}.");
+            }
+            println!("{} taken, {} refused.", imported.created.len(), imported.refused.len());
+            if !imported.created.is_empty() {
+                println!(
+                    "Note: secrets are not part of the file. Store them here with `rusty-fish \
+                     key set`, and log the fish in to Matrix with `rusty-fish matrix login`."
+                );
+                println!(
+                    "Note: one bot runs in one place only. Switch the fish off where the file \
+                     came from before you switch it on here, or everything is translated twice."
+                );
+            }
             Ok(())
         }
     }

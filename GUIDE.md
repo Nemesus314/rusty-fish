@@ -411,11 +411,17 @@ rusty-fish`). Everything is done on the command line.
    the Matrix door: `rusty-fish matrix login --user @name:server`. That
    login is a new device of the fish's account; nothing is carried over from
    a PC.
-4. Bring a profile over. On the PC, `rusty-fish profile dir` shows the
-   folder of the profiles. Copy `NAME.toml` from there to the server, and
-   `NAME.state.json` with it to keep what the profile has learned; without
-   it the profile starts fresh, and guests are asked for their agreement
-   again. On the server: `rusty-fish profile import NAME.toml --name NAME`.
+4. Bring the profiles over. On the PC, with the fish switched off:
+   `rusty-fish profile export FILE` writes all profiles into one file, each
+   with what it has learned (who agreed, what was read), so nobody is asked
+   for agreement again. Copy the file to the server, and there:
+   `rusty-fish profile import FILE`. The file holds no secrets and nothing
+   of the Matrix account; step 3 stays work by hand. It does hold the names
+   and ids of the people in the profiles, readable by whoever has it. A
+   profile whose name already exists is refused and named, never replaced;
+   to replace it, delete it first (it goes to the trash). The same two
+   commands bring the profiles back to the PC, and the file is also a copy
+   to keep. On the command line only; the window has no button for it yet.
    One bot runs in one place only, on the PC or on the server: two fish
    with the same bot would both translate everything.
 5. Start it with `rusty-fish run --all`. To run it as a service of systemd,
@@ -448,6 +454,9 @@ Measured on 24 November 2026, in one place only: Ubuntu 26.04 inside Windows
 tests passed. With the secrets in files, a secret was stored, found again by
 a new start of the program, and forgotten. A fish at the Matrix door with a
 made-up account, started as a service of systemd, was stopped by it cleanly.
+Three made-up profiles were written to a file on Windows, read in on Linux,
+written out there and read in on Windows again; every file arrived as it
+had been, byte for byte.
 
 Not measured: a fish with real accounts on Linux, at either door, and so
 also the line at the tables after `systemctl stop`; a real server (WSL is

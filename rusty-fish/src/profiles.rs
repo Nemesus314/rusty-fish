@@ -146,8 +146,6 @@ fn trashed(id: &str) -> Result<(String, String), String> {
     Ok((name, deleted))
 }
 
-/// Schreibt eine Datei so, dass ein Absturz mittendrin keine halbe Datei unter
-/// dem richtigen Namen hinterlässt: erst daneben schreiben, dann umbenennen.
 /// Legt einen Ordner des Fischs an, samt allem darüber, was noch fehlt.
 ///
 /// Unter Unix nur für das Konto des Fischs (0700). In den Profilen und ihrem
@@ -171,6 +169,8 @@ pub fn create_private(dir: &Path) -> Result<(), String> {
     created.map_err(|e| format!("cannot create {}: {e}", dir.display()))
 }
 
+/// Schreibt eine Datei so, dass ein Absturz mittendrin keine halbe Datei unter
+/// dem richtigen Namen hinterlässt: erst daneben schreiben, dann umbenennen.
 fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut tmp = path.to_owned().into_os_string();
     tmp.push(".tmp");
@@ -504,6 +504,206 @@ impl Folder {
         }
         write_whole(&self.config_path(name), &settings)
     }
+
+    /// Alle Profile mit ihrem Zustand als ein Dokument, für den Umzug auf einen
+    /// anderen Rechner und als Sicherung. Liefert das Dokument und die Zahl der
+    /// Profile darin.
+    ///
+    /// Nemesus am 24.11.2026: „Wie wäre es mit einer Import Export Funktion?
+    /// Dann könnte ich alle angelegten Profile mit einem Klick übertragen?"
+    ///
+    /// Im Dokument steht kein Geheimnis und nichts zum Matrix-Konto des
+    /// Fischs: die legt man am neuen Ort neu ab. Entschieden von ihm am selben
+    /// Tag, nachdem eine Fassung mit Geheimnissen besprochen war („dann machen
+    /// wir es, wie du es vorschlägst"). Die Namen der beiden Befehle,
+    /// `profile export` und `profile import` ohne `--name`, hat er bestätigt
+    /// („Ja, so lassen").
+    ///
+    /// Einstellungen und Zustand stehen als Text darin, Zeichen für Zeichen
+    /// wie in den Dateien: so bleiben die Kommentare einer Einstellungsdatei
+    /// erhalten, wie bei [`Folder::import`]. Der Papierkorb reist nicht mit.
+    pub fn export(&self, now: u64) -> Result<(String, usize), String> {
+        let names = self.names()?;
+        if names.is_empty() {
+            return Err(format!("there is no profile to export in {}", self.dir.display()));
+        }
+        let mut profiles = Vec::new();
+        for name in &names {
+            let settings = self.read_config(name)?;
+            let state_path = self.state_path(name);
+            let state = match std::fs::read_to_string(&state_path) {
+                Ok(text) => Value::String(text),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
+                Err(e) => return Err(format!("cannot read {}: {e}", state_path.display())),
+            };
+            profiles.push(json!({ "name": name, "settings": settings, "state": state }));
+        }
+        let of_day = now % 86_400;
+        let written = format!(
+            "{}T{:02}:{:02}:{:02}Z",
+            utc_date(now),
+            of_day / 3_600,
+            of_day % 3_600 / 60,
+            of_day % 60
+        );
+        // Der Kopf steht vorn, damit man einer Datei ansieht, was sie ist und
+        // von wann, ohne durch alle Profile zu blättern. Die Bibliothek würde
+        // die Angaben nach dem Alphabet ordnen und die Profile dazwischenstellen;
+        // deshalb ist die äußere Klammer von Hand gesetzt. In einer JSON-
+        // Zeichenkette steht nie ein Zeilenumbruch, also rückt das Ersetzen
+        // nur das Gerüst ein.
+        let list = serde_json::to_string_pretty(&profiles)
+            .map_err(|e| format!("cannot write the profiles down: {e}"))?
+            .replace('\n', "\n  ");
+        let text = format!(
+            "{{\n  \"format\": {},\n  \"version\": {EXPORT_VERSION},\n  \"written\": {},\n  \
+             \"program\": {},\n  \"profiles\": {list}\n}}\n",
+            json!(EXPORT_FORMAT),
+            json!(written),
+            json!(env!("CARGO_PKG_VERSION")),
+        );
+        Ok((text, names.len()))
+    }
+
+    /// Nimmt die Profile eines Dokuments von [`Folder::export`] auf, jedes
+    /// unter seinem Namen.
+    ///
+    /// Die Regeln stammen aus Paciolis Ausfuhr, wie Neo sie am 24.11.2026 für
+    /// den Fisch aufgeschrieben hat:
+    /// - Die Fassung muss genau stimmen. Eine spätere wird nicht gelesen: sie
+    ///   müsste geraten werden.
+    /// - Kein stilles Umbenennen und kein stilles Ersetzen. Gibt es einen
+    ///   Namen hier schon, wird dieses Profil abgelehnt und mit seinem Grund
+    ///   genannt; die übrigen werden aufgenommen. Wer ein Profil ersetzen
+    ///   will, löscht es vorher selbst (es geht in den Papierkorb).
+    /// - Erst wird alles geprüft, dann geschrieben: ein Dokument, das sich
+    ///   nicht lesen lässt, verändert nichts.
+    pub fn import_all(&self, document: &str) -> Result<Imported, String> {
+        let not_one = "this is not a file written by `rusty-fish profile export`";
+        let document: Value = serde_json::from_str(document.trim_start_matches('\u{feff}'))
+            .map_err(|_| not_one.to_owned())?;
+        if document["format"] != EXPORT_FORMAT {
+            return Err(not_one.to_owned());
+        }
+        if document["version"] != EXPORT_VERSION {
+            return Err(format!(
+                "this file is written in form {} of the export; this program reads form \
+                 {EXPORT_VERSION} only. Nothing was changed",
+                document["version"]
+            ));
+        }
+        let entries = document["profiles"].as_array().ok_or_else(|| not_one.to_owned())?;
+
+        let mut taken: Vec<(String, &str, Option<&str>)> = Vec::new();
+        let mut refused = Vec::new();
+        for entry in entries {
+            let name = match entry["name"].as_str() {
+                Some(name) => name.to_owned(),
+                // Ohne Namen lässt sich nicht einmal sagen, was abgelehnt wurde.
+                None => return Err(not_one.to_owned()),
+            };
+            let why = if let Err(why) = valid_name(&name) {
+                Some(why)
+            } else if taken.iter().any(|(seen, _, _)| *seen == name) {
+                Some("the file holds this name twice".to_owned())
+            } else if self.config_path(&name).exists() || self.state_path(&name).exists() {
+                Some(
+                    "a profile of this name already exists here; delete it first to replace it"
+                        .to_owned(),
+                )
+            } else {
+                None
+            };
+            let state = match &entry["state"] {
+                Value::Null => Some(None),
+                Value::String(text) => Some(Some(text.as_str())),
+                _ => None,
+            };
+            match (why, entry["settings"].as_str(), state) {
+                (Some(why), _, _) => refused.push((name, why)),
+                (None, Some(settings), Some(state)) => taken.push((name, settings, state)),
+                (None, _, _) => refused.push((name, "its settings or its state cannot be read".to_owned())),
+            }
+        }
+
+        let mut created = Vec::new();
+        if !taken.is_empty() {
+            create_private(&self.dir)?;
+        }
+        for (name, settings, state) in taken {
+            // Erst der Zustand, dann die Einstellungen: ein Profil gilt erst
+            // als da, wenn seine Einstellungsdatei da ist.
+            let written = match state {
+                Some(state) => write_whole(&self.state_path(&name), state.as_bytes()),
+                None => Ok(()),
+            }
+            .and_then(|()| write_whole(&self.config_path(&name), settings.as_bytes()));
+            if let Err(why) = written {
+                return Err(if created.is_empty() {
+                    why
+                } else {
+                    format!("{why}; taken before that: {}", created.join(", "))
+                });
+            }
+            created.push(name);
+        }
+        Ok(Imported { created, refused })
+    }
+}
+
+/// Woran der Fisch ein Dokument von `profile export` erkennt.
+pub const EXPORT_FORMAT: &str = "rusty-fish-profiles";
+/// Die Fassung des Dokuments. Eine andere wird nicht gelesen.
+pub const EXPORT_VERSION: u64 = 1;
+/// Größer wird eine Datei mit Profilen nicht; alles darüber wird nicht erst
+/// in den Speicher gelesen.
+pub const EXPORT_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// Was beim Einlesen eines Dokuments mit mehreren Profilen geschah.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Imported {
+    /// Die Namen der Profile, die jetzt da sind.
+    pub created: Vec<String>,
+    /// Die abgelehnten, jedes mit seinem Grund.
+    pub refused: Vec<(String, String)>,
+}
+
+impl Imported {
+    /// Als das JSON, das `profile import --json` ausgibt.
+    pub fn json(&self) -> Value {
+        let refused: Vec<Value> =
+            self.refused.iter().map(|(name, why)| json!({ "name": name, "why": why })).collect();
+        json!({ "created": self.created, "refused": refused })
+    }
+}
+
+/// Ob dieser Text ein Dokument von `profile export` ist, in welcher Fassung
+/// auch immer.
+pub fn is_export(text: &str) -> bool {
+    serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}'))
+        .is_ok_and(|document| document["format"] == EXPORT_FORMAT)
+}
+
+/// Schreibt eine neue Datei und ersetzt dabei nie eine vorhandene. Unter Unix
+/// nur für dieses Konto lesbar (0600): in einer Datei mit Profilen stehen
+/// Namen und Kennungen von Menschen.
+pub fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("{} already exists; choose another name, nothing is replaced", path.display())
+        } else {
+            format!("cannot write {}: {e}", path.display())
+        }
+    })?;
+    file.write_all(bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -566,6 +766,200 @@ mod tests {
         f.save("tea", DOC).unwrap();
         assert_eq!(mode(&home), 0o755);
         assert_eq!(mode(f.dir()), 0o700);
+        clean(&f);
+    }
+
+    /// Eine Einstellungsdatei, wie jemand sie von Hand schreibt: mit
+    /// Kommentar und mit den Zeilenenden von Windows.
+    const BY_HAND: &str = "# tea in the evening\r\nmodel = \"some-model\"\r\nhost = \"100\"\r\n\r\n[[room]]\r\n  [[room.seat]]\r\n  discord = \"111\"\r\n  lang = \"German\"\r\n  [[room.seat]]\r\n  discord = \"222\"\r\n  lang = \"Russian\"\r\n";
+
+    /// Ein Ordner mit drei Profilen: eines aus der Maske, eines von Hand
+    /// geschrieben, eines mit Zustand.
+    fn three(name: &str) -> Folder {
+        let f = temp(name);
+        f.save("rooms", DOC).unwrap();
+        f.save("tea", DOC).unwrap();
+        std::fs::write(f.state_path("tea"), "{\"agreed\":[\"100\"],\"read\":{\"111\":\"9\"}}").unwrap();
+        let by_hand = f.dir().parent().unwrap().join("by-hand.toml");
+        std::fs::write(&by_hand, BY_HAND).unwrap();
+        f.import(&by_hand, "evening").unwrap();
+        f
+    }
+
+    #[test]
+    fn all_profiles_travel_in_one_file_and_arrive_as_they_were() {
+        let here = three("export-here");
+        let (document, count) = here.export(1_800_000_000).unwrap();
+        assert_eq!(count, 3);
+
+        let head: Value = serde_json::from_str(&document).unwrap();
+        assert_eq!(head["format"], "rusty-fish-profiles");
+        assert_eq!(head["version"], 1);
+        assert_eq!(head["written"], "2027-01-15T08:00:00Z");
+        assert_eq!(head["program"], env!("CARGO_PKG_VERSION"));
+        assert!(is_export(&document));
+        // Der Kopf steht vorn, vor den Profilen.
+        assert!(
+            document.starts_with(
+                "{\n  \"format\": \"rusty-fish-profiles\",\n  \"version\": 1,\n  \"written\": \"2027-01-15T08:00:00Z\",\n"
+            ),
+            "got {}",
+            &document[..120]
+        );
+
+        // Der andere Rechner: dort gibt es noch nicht einmal den Ordner.
+        let there = temp("export-there");
+        let imported = there.import_all(&document).unwrap();
+        assert_eq!(imported.created, ["evening", "rooms", "tea"]);
+        assert!(imported.refused.is_empty());
+        for name in ["evening", "rooms", "tea"] {
+            assert_eq!(
+                std::fs::read(there.config_path(name)).unwrap(),
+                std::fs::read(here.config_path(name)).unwrap(),
+                "{name}"
+            );
+        }
+        // Von Hand Geschriebenes bleibt Zeichen für Zeichen, samt Kommentar.
+        assert_eq!(std::fs::read_to_string(there.config_path("evening")).unwrap(), BY_HAND);
+        // Der Zustand reist mit, wo es einen gibt, und nur dort.
+        assert_eq!(
+            std::fs::read(there.state_path("tea")).unwrap(),
+            std::fs::read(here.state_path("tea")).unwrap()
+        );
+        assert!(!there.state_path("rooms").exists());
+        // Und zurück: dasselbe Dokument noch einmal.
+        assert_eq!(there.export(1_800_000_000).unwrap().0, document);
+        clean(&here);
+        clean(&there);
+    }
+
+    #[test]
+    fn a_name_that_exists_is_refused_and_nothing_is_replaced() {
+        let here = three("export-clash-here");
+        let (document, _) = here.export(1_800_000_000).unwrap();
+        let there = temp("export-clash-there");
+        let other = DOC.replace("some-model", "another-model");
+        there.save("tea", &other).unwrap();
+        let before = std::fs::read(there.config_path("tea")).unwrap();
+
+        let imported = there.import_all(&document).unwrap();
+        assert_eq!(imported.created, ["evening", "rooms"]);
+        assert_eq!(imported.refused.len(), 1);
+        let (name, why) = &imported.refused[0];
+        assert_eq!(name, "tea");
+        assert!(why.contains("already exists here"), "got {why}");
+        // Das Profil hier ist, wie es war, und hat den fremden Zustand nicht bekommen.
+        assert_eq!(std::fs::read(there.config_path("tea")).unwrap(), before);
+        assert!(!there.state_path("tea").exists());
+        // Kein Profil unter einem ausgedachten Namen.
+        assert_eq!(there.names().unwrap(), ["evening", "rooms", "tea"]);
+
+        // Ein zweites Mal wird nichts mehr aufgenommen, und nichts geht kaputt.
+        let again = there.import_all(&document).unwrap();
+        assert!(again.created.is_empty());
+        assert_eq!(again.refused.len(), 3);
+        assert_eq!(
+            again.json()["refused"][0],
+            json!({"name": "evening", "why": "a profile of this name already exists here; delete it first to replace it"})
+        );
+
+        // Wer ersetzen will, löscht vorher selbst; das alte liegt im Papierkorb.
+        there.delete("tea", "20261124-010203").unwrap();
+        let replaced = there.import_all(&document).unwrap();
+        assert_eq!(replaced.created, ["tea"]);
+        assert_eq!(
+            std::fs::read(there.config_path("tea")).unwrap(),
+            std::fs::read(here.config_path("tea")).unwrap()
+        );
+        clean(&here);
+        clean(&there);
+    }
+
+    #[test]
+    fn a_file_in_another_form_is_not_guessed_at() {
+        let here = three("export-form-here");
+        let (document, _) = here.export(1_800_000_000).unwrap();
+        let there = temp("export-form-there");
+
+        let later = document.replace("\"version\": 1", "\"version\": 2");
+        assert_ne!(later, document);
+        let why = there.import_all(&later).unwrap_err();
+        assert!(why.contains("form 2"), "got {why}");
+        assert!(why.contains("Nothing was changed"), "got {why}");
+
+        for other in ["", "not json", BY_HAND, "{}", "[1, 2]", "{\"format\": \"something-else\", \"version\": 1}"] {
+            let why = there.import_all(other).unwrap_err();
+            assert!(why.contains("not a file written by `rusty-fish profile export`"), "got {why}");
+            assert!(!is_export(other));
+        }
+        let no_list = "{\"format\": \"rusty-fish-profiles\", \"version\": 1}";
+        assert!(there.import_all(no_list).is_err());
+        // Nichts davon hat etwas angelegt, nicht einmal den Ordner.
+        assert!(!there.dir().exists());
+
+        // Ein vorangestelltes BOM (etwa aus der PowerShell) gehört nicht dazu.
+        let with_bom = format!("\u{feff}{document}");
+        assert!(is_export(&with_bom));
+        assert_eq!(there.import_all(&with_bom).unwrap().created.len(), 3);
+        clean(&here);
+        clean(&there);
+    }
+
+    #[test]
+    fn names_from_a_file_are_checked_like_any_other() {
+        let there = temp("export-names");
+        let entry = |name: &str| json!({"name": name, "settings": BY_HAND, "state": null});
+        let document = json!({
+            "format": "rusty-fish-profiles",
+            "version": 1,
+            "profiles": [
+                entry("../outside"),
+                entry("con"),
+                entry("fine"),
+                entry("fine"),
+                {"name": "no-settings", "state": null},
+                {"name": "odd-state", "settings": BY_HAND, "state": {"agreed": []}},
+            ],
+        })
+        .to_string();
+        let imported = there.import_all(&document).unwrap();
+        assert_eq!(imported.created, ["fine"]);
+        let refused: Vec<&str> = imported.refused.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(refused, ["../outside", "con", "fine", "no-settings", "odd-state"]);
+        assert!(imported.refused[2].1.contains("twice"), "got {}", imported.refused[2].1);
+        assert_eq!(there.names().unwrap(), ["fine"]);
+        assert!(!there.dir().parent().unwrap().join("outside.toml").exists());
+
+        // Ein Eintrag ohne Namen: dann ist es keine solche Datei.
+        let nameless = json!({"format": "rusty-fish-profiles", "version": 1, "profiles": [{"settings": ""}]});
+        assert!(there.import_all(&nameless.to_string()).is_err());
+        clean(&there);
+    }
+
+    #[test]
+    fn an_empty_folder_has_nothing_to_export() {
+        let f = temp("export-empty");
+        let why = f.export(1_800_000_000).unwrap_err();
+        assert!(why.contains("no profile to export"), "got {why}");
+        clean(&f);
+    }
+
+    #[test]
+    fn a_new_file_never_replaces_one_that_is_there() {
+        let f = temp("export-file");
+        let home = f.dir().parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&home).unwrap();
+        let file = home.join("profiles.json");
+        write_new(&file, b"first").unwrap();
+        let why = write_new(&file, b"second").unwrap_err();
+        assert!(why.contains("already exists"), "got {why}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"first");
+        // In der Datei stehen Namen und Kennungen von Menschen.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         clean(&f);
     }
 
