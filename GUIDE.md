@@ -81,8 +81,9 @@ account there.
 
 ## What you need to run your own fish
 
-- A PC with Windows 11. Other systems have not been tested. Versions for
-  Linux and macOS are intended, without a date.
+- A PC with Windows 11. The fish itself, without the window, also runs on a
+  Linux server; see "A Linux server" for what has been measured there. macOS
+  has not been tested.
 - The program. It has two parts: the fish itself (`rusty-fish.exe`, a command
   line program) and a window to manage it (`rusty_fish_desk.exe`). Rusty Fish
   is not published yet; until it is, you get it from the person who gave you
@@ -382,6 +383,59 @@ Limits of a mixed room:
   and files, catching up after a pause, and a door failing while the other
   runs. Those have run against a simulated Discord and a simulated Matrix
   server only, each door for itself.
+
+## A Linux server
+
+The fish itself (`rusty-fish`, not the window) also runs under Linux, on a
+server without a desktop. There is no ready program for it yet: it is built
+from the source, with Rust and a C compiler (`cargo build --release -p
+rusty-fish`). Everything is done on the command line.
+
+1. Give the fish an account of its own on the server and work as that
+   account. `rusty-fish profile dir` shows where the profiles lie; the
+   fish's folder is the one above it (`~/.config/rusty-fish`). Profiles hold
+   names and ids of people, so keep other accounts out: `chmod 700` on that
+   folder.
+2. A server without a desktop has no credential store, and every command
+   that needs a secret says so. Run `rusty-fish key store file` once. From
+   then on the secrets are kept in files, in the folder `secrets` next to
+   the profiles, one file per secret, readable only by this account. They
+   are not encrypted: whoever is root on the server, or has a backup of that
+   folder or the disk, reads them. A file that other accounts can read is
+   refused. `rusty-fish key store` tells where the secrets are kept;
+   `rusty-fish key store system` goes back, once no secret is left there.
+   On Windows nothing of this applies: there the secrets stay in the
+   Credential Manager.
+3. Store the secrets: `rusty-fish key set discord`, and for the AI service
+   for example `rusty-fish key set openai`. Each asks with hidden input. For
+   the Matrix door: `rusty-fish matrix login --user @name:server`. That
+   login is a new device of the fish's account; nothing is carried over from
+   a PC.
+4. Bring a profile over. On the PC, `rusty-fish profile dir` shows the
+   folder of the profiles. Copy `NAME.toml` from there to the server, and
+   `NAME.state.json` with it to keep what the profile has learned; without
+   it the profile starts fresh, and guests are asked for their agreement
+   again. On the server: `rusty-fish profile import NAME.toml --name NAME`.
+   One bot runs in one place only, on the PC or on the server: two fish
+   with the same bot would both translate everything.
+5. Start it with `rusty-fish run --all`. As a service of systemd, a unit
+   needs no more than `ExecStart=` with that command, the account under
+   `User=`, and `Restart=on-failure`. What the fish says goes to the
+   journal. `systemctl stop` halts it the way `stop` does: it finishes what
+   it is doing and says at its tables that it is off.
+
+Measured on 24 November 2026, in one place only: Ubuntu 26.04 inside Windows
+(WSL), with Rust 1.100. The program built without a change, and all its
+tests passed. With the secrets in files, a secret was stored, found again by
+a new start of the program, and forgotten. A fish at the Matrix door with a
+made-up account, started as a service of systemd, was stopped by it cleanly.
+
+Not measured: a fish with real accounts on Linux, at either door, and so
+also the line at the tables after `systemctl stop`; a real server (WSL is
+not one); other Linux systems, and other processors than x86-64; a service
+of the whole system under an account of its own (the one measured ran in the
+session of a user). The window does not run there, and it cannot manage a
+fish on another machine.
 
 ## Limits
 
