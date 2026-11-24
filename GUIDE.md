@@ -57,9 +57,10 @@ different there, and what Matrix's encryption does and does not cover, is in
   ends without being switched off (the PC goes off, the network is gone), no
   line is written, and on switching off it waits at most five seconds for
   the line to get out. On Discord these lines are new since 24 November
-  2026. They were seen at the real Discord that day at one table, from a
-  fish on Linux; from Windows not yet. In Matrix rooms they were seen at the
-  real service.
+  2026. They were seen at the real Discord that day: on and off at one
+  table, from a fish on Linux, and the lines on switching on at the tables
+  of all profiles, from a fish on Windows. In Matrix rooms they were seen at
+  the real service.
 
 ## What a guest should know
 
@@ -480,7 +481,10 @@ Matrix door: the fish logged in to its account with `matrix login`, as a
 new device that was not verified, said at both tables of a profile that it
 is on, translated, and, stopped with SIGTERM, said in the room that it is
 off. A last run at the Discord door, with the lines built: both stood at
-the table, on at the start and off after SIGTERM.
+the table, on at the start and off after SIGTERM. Then the two profiles
+that had run on Linux were brought back to Windows with the same two
+commands, after the copies there had been deleted; the two other profiles
+were refused, as they still existed there.
 
 Not measured: a login with the recovery key on Linux; a real server (WSL is not
 one); other Linux systems, and other processors than x86-64; the file
