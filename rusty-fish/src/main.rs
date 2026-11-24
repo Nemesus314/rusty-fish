@@ -177,6 +177,22 @@ enum KeyAction {
         #[arg(value_enum, default_value_t = Which::Openai)]
         which: Which,
     },
+    /// Tell where the secrets are kept, or change it. A Linux server without
+    /// a desktop has no credential store; `file` keeps them in files in the
+    /// fish's own folder instead, readable only by this account, not encrypted
+    Store {
+        #[arg(value_enum)]
+        place: Option<Kept>,
+    },
+}
+
+/// Wo die Geheimnisse liegen sollen; siehe `keys`.
+#[derive(Clone, Copy, ValueEnum)]
+enum Kept {
+    /// In files in the fish's own folder; for a Linux server
+    File,
+    /// In this system's credential store
+    System,
 }
 
 #[derive(Subcommand)]
@@ -369,7 +385,42 @@ async fn run(command: Command) -> Result<(), String> {
                 return Err("nothing entered, nothing stored".to_owned());
             }
             keys::store(which.entry(), typed)?;
-            println!("{} stored in this system's credential store.", which.label());
+            println!("{} stored in {}.", which.label(), keys::described(&keys::place()));
+            Ok(())
+        }
+        Command::Key { action: KeyAction::Store { place } } => {
+            let home = home()?;
+            match place {
+                // Nie von selbst: die Dateien gelten erst, wenn jemand sie
+                // verlangt hat, und die Meldung sagt, was sie nicht leisten.
+                Some(Kept::File) => {
+                    let dir = keys::keep_in_files(&home)?;
+                    println!("From now on the secrets are kept in files in {}.", dir.display());
+                    println!(
+                        "Only this account can read them. They are not encrypted: whoever is root \
+                         on this system, or has a backup of that folder or the disk, reads them."
+                    );
+                    println!(
+                        "Nothing was moved there. Store each secret with `rusty-fish key set`, and \
+                         log the fish in to Matrix with `rusty-fish matrix login`."
+                    );
+                }
+                Some(Kept::System) => {
+                    keys::keep_in_system(&home)?;
+                    println!("From now on the secrets are kept in this system's credential store.");
+                }
+                None => match keys::place_in(&home) {
+                    keys::Place::System => {
+                        println!("The secrets are kept in this system's credential store.")
+                    }
+                    #[cfg(unix)]
+                    keys::Place::Files(dir) => println!(
+                        "The secrets are kept in files in {}, readable only by this account, not \
+                         encrypted.",
+                        dir.display()
+                    ),
+                },
+            }
             Ok(())
         }
         Command::Key { action: KeyAction::Status { which, json } } => {
@@ -658,7 +709,8 @@ async fn matrix(action: MatrixAction) -> Result<(), String> {
                 logged_in.access.homeserver()
             );
             println!(
-                "The access is in this system's credential store, the device keys are in {}.",
+                "The access is in {}, the device keys are in {}.",
+                keys::described(&keys::place()),
                 store.display()
             );
             for note in logged_in.notes {
