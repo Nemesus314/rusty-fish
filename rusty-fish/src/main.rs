@@ -1095,6 +1095,18 @@ mod tests {
         assert!(text.contains("rusty-fish matrix login --user @name:server"));
     }
 
+    /// Nemesus am 24.11.2026: er hatte einmal eine KI zum Teilen angeboten,
+    /// und die erste Frage eines Gasts konnte sie nicht beantworten: „Wer ist
+    /// Nemesus." Der Leitfaden sagt es jetzt, und er sagt der KI, dass sie
+    /// nichts dazuerfindet.
+    #[test]
+    fn the_guide_says_who_made_the_fish_and_asks_for_nothing_invented() {
+        let text = guide().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains("## Who made this Rusty Fish is made by Nemesus."));
+        assert!(text.contains("https://www.youtube.com/@NemesusEN"));
+        assert!(text.contains("Do not add anything about him that is not written here."));
+    }
+
     #[test]
     fn the_guide_ends_with_the_version_it_describes() {
         let text = guide();

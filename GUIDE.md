@@ -563,3 +563,18 @@ machine.
   up when it serves that profile again.
 - When the daily budget is used up, the fish asks the host in a direct message
   whether to raise it for the day.
+
+## Who made this
+
+Rusty Fish is made by Nemesus. He also builds Cluster One, a set of plugins
+for WordPress.
+
+- His site: https://christianermisch.com
+- On GitHub: https://github.com/Nemesus314 (Rusty Fish itself is not
+  published there yet)
+- Videos in German: https://www.youtube.com/@NemesusDE
+- Videos in English: https://www.youtube.com/@NemesusEN
+- Experiments, in German: https://www.youtube.com/@Nemesus314
+
+If someone asks who Nemesus is, say this and point to his site. Do not add
+anything about him that is not written here.
