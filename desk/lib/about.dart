@@ -10,9 +10,11 @@
 //
 // Benannte Lücken, bis er sie füllt:
 // - Der Text über ihn und das Programm ist ein Entwurf von Fischlein.
-// - Rusty Fish ist noch nicht veröffentlicht. Hier steht deshalb sein Profil
-//   auf GitHub und der Satz, dass der Fisch dort noch nicht liegt.
 // - Ein Bild gibt es noch nicht.
+//
+// Seit dem 24.11.2026 ist Rusty Fish veröffentlicht, unter der AGPL 3 oder
+// später (beides von ihm an diesem Tag entschieden). Bis dahin standen hier
+// sein Profil auf GitHub und der Satz, dass der Fisch dort noch nicht liegt.
 
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
@@ -27,9 +29,15 @@ const madeBy = 'Nemesus (Christian Ermisch)';
 /// Seine Webseite.
 const website = 'christianermisch.com';
 
-/// Sein Profil auf GitHub. Dort liegen Cluster One, Prometheus und Lamarr;
-/// Rusty Fish selbst ist dort noch nicht veröffentlicht.
-const github = 'github.com/Nemesus314';
+/// Wo der Quelltext von Rusty Fish liegt. Wer einen veränderten Fisch
+/// betreibt, schuldet seinen Gästen dessen Quelltext; diese Adresse ist die
+/// des unveränderten.
+const github = 'github.com/Nemesus314/rusty-fish';
+
+/// Die Lizenz, in einem Satz. Verbindlich ist der Wortlaut in `LICENSE`.
+const licenseLine =
+    'Rusty Fish is free software under the GNU Affero General Public License, '
+    'version 3 or later, and comes without any warranty.';
 
 /// Wofür das Programm gebaut ist. Entwurf, bis Nemesus seinen Text liefert.
 const purpose =
@@ -116,10 +124,7 @@ class AboutFish extends StatelessWidget {
                     ),
                   ],
                 ),
-                const Text(
-                  'Rusty Fish itself is not published there yet. It is planned as free '
-                  'software under the GPL 3 or the AGPL 3.',
-                ),
+                const Text(licenseLine),
                 const SizedBox(height: 20),
                 Align(
                   alignment: Alignment.centerRight,

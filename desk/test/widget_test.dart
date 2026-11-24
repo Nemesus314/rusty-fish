@@ -242,9 +242,9 @@ void main() {
       expect(find.textContaining('each in their own language'), findsOneWidget);
       expect(find.text('Nemesus (Christian Ermisch)'), findsOneWidget);
       expect(find.text('christianermisch.com'), findsOneWidget);
-      // Sein Profil steht da; dass der Fisch dort noch nicht liegt, auch.
-      expect(find.text('github.com/Nemesus314'), findsOneWidget);
-      expect(find.textContaining('not published there yet'), findsOneWidget);
+      // Wo der Quelltext liegt, und unter welcher Lizenz der Fisch steht.
+      expect(find.text('github.com/Nemesus314/rusty-fish'), findsOneWidget);
+      expect(find.textContaining('GNU Affero General Public License'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('copy-website')));
       await tester.pumpAndSettle();
