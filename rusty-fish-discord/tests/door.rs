@@ -21,6 +21,8 @@ use rusty_fish_discord::door::{Command, Profile, look_at, run_with};
 use rusty_fish_house::between::{Errand, Lines, Shared, Writer, no_line};
 use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
+use rusty_fish_house::texts::switched;
+use rusty_fish_room::tongue::Tongue;
 use rusty_fish_room::{Mark, Reason};
 use serde_json::{Value, json};
 use serenity::all::HttpBuilder;
@@ -77,6 +79,45 @@ host = "100"
   channel = "222"
   lang = "English"
 "#;
+
+/// Zwei Profile nebeneinander brauchen eigene Kanäle. Hier liest der
+/// Gastgeber Russisch, und der zweite Tisch gehört jemandem, der seinen
+/// eigenen Fisch mitbringt: dort schreibt dieser Fisch nicht.
+const OTHERS: &str = r#"
+model = "some-model"
+host = "nemo"
+
+[[room]]
+
+  [[room.seat]]
+  discord = "333"
+  lang = "Russian"
+  owner = "nemo"
+
+  [[room.seat]]
+  discord = "444"
+  lang = "English"
+  owner = "kim"
+
+[[person]]
+name = "nemo"
+discord = "100"
+
+[[person]]
+name = "kim"
+discord = "200"
+"#;
+
+/// Ist dies eine Zeile zum Ein- oder Ausschalten? Dann in welcher Sprache,
+/// und welche von beiden.
+fn switch_line(body: &Value) -> Option<(Tongue, bool)> {
+    // Die kleine graue Schrift von Discord.
+    let said = body["content"].as_str()?.strip_prefix("-# ")?;
+    [Tongue::German, Tongue::English, Tongue::Russian]
+        .into_iter()
+        .flat_map(|tongue| [(tongue, true), (tongue, false)])
+        .find(|(tongue, on)| said == switched(*tongue, *on))
+}
 
 /// Attrappe einer KI: antwortet sofort, immer dasselbe, und zählt mit.
 #[derive(Clone, Default)]
@@ -214,7 +255,9 @@ impl Discord {
     }
 
     /// Was die Tür bei Discord abgesetzt hat: Verb, Pfad, Inhalt. Ohne die
-    /// Fragen nach der Verbindung und nach Webhooks.
+    /// Fragen nach der Verbindung und nach Webhooks, und seit dem 24.11.2026
+    /// ohne die Zeilen zum Ein- und Ausschalten: die stehen in [`Self::lines`]
+    /// und haben ihre eigenen Tests.
     async fn sent(&self) -> Vec<(String, String, Value)> {
         let mut out = Vec::new();
         for request in self.rest.received_requests().await.unwrap_or_default() {
@@ -223,9 +266,44 @@ impl Discord {
                 continue;
             }
             let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+            if switch_line(&body).is_some() {
+                continue;
+            }
             out.push((verb, request.url.path().to_owned(), body));
         }
         out
+    }
+
+    /// Die Zeilen zum Ein- und Ausschalten, in der Reihenfolge, in der sie
+    /// ankamen: Kanal, Sprache, ein oder aus. Nur was der Bot selbst in einem
+    /// Kanal absetzt, nicht was über einen Webhook unter fremdem Namen kommt.
+    async fn lines(&self) -> Vec<(String, Tongue, bool)> {
+        let mut out = Vec::new();
+        for request in self.rest.received_requests().await.unwrap_or_default() {
+            let path = request.url.path();
+            let channel = path
+                .strip_prefix("/api/v10/channels/")
+                .and_then(|rest| rest.strip_suffix("/messages"));
+            let (Some(channel), "POST") = (channel, request.method.as_str()) else { continue };
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+            if let Some((tongue, on)) = switch_line(&body) {
+                // Die Zeile pingt niemanden an.
+                assert_eq!(body["allowed_mentions"]["parse"], json!([]), "got {body}");
+                out.push((channel.to_owned(), tongue, on));
+            }
+        }
+        out
+    }
+
+    async fn lines_at_least(&self, count: usize) -> Vec<(String, Tongue, bool)> {
+        for _ in 0..300 {
+            let all = self.lines().await;
+            if all.len() >= count {
+                return all;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the door said {:?}, expected {count} lines", self.lines().await);
     }
 
     async fn sent_at_least(&self, count: usize) -> Vec<(String, String, Value)> {
@@ -552,6 +630,177 @@ async fn the_discord_door_shares_a_household_and_hands_over_what_belongs_to_matr
     to_door.send(Command::StopAll).unwrap();
     let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
     assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn plain(dir: &std::path::Path, fake: &Fake) -> Profile<Fake> {
+    Profile {
+        name: Some("plain".to_owned()),
+        config: Config::parse(PLAIN).unwrap(),
+        state_path: dir.join("plain.state.json"),
+        model: fake.clone(),
+        service: "ai.example".to_owned(),
+        shared: None,
+    }
+}
+
+/// Nemesus am 24.11.2026, nach dem ersten echten Lauf unter Linux: er hielt
+/// den Fisch an und suchte an seinem Discord-Tisch die Zeile, die es bis
+/// dahin nur in Matrix gab. „Bitte nachrüsten, dass die Zeile auch in Discord
+/// kommt".
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fish_says_at_its_discord_tables_when_it_is_switched_on_and_off() {
+    let discord = Discord::start().await;
+    let dir = folder("switched");
+    let fake = Fake::default();
+    let (to_door, commands) = unbounded_channel();
+    let http = discord.http();
+    let profile = plain(&dir, &fake);
+    let door = tokio::spawn(async move {
+        run_with(http, vec![profile], false, commands, no_line(), Box::new(|_| {})).await
+    });
+
+    // Sobald die Verbindung steht: eine Zeile je Tisch, in dessen Sprache.
+    let mut on = discord.lines_at_least(2).await;
+    on.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        on,
+        [("111".to_owned(), Tongue::German, true), ("222".to_owned(), Tongue::English, true)]
+    );
+
+    // Übersetzt wird wie zuvor, und die Zeile steht kein zweites Mal da.
+    discord.tell("MESSAGE_CREATE", message(6001, "111", user("100", "nemo", "Nemo"), "Guten Morgen"));
+    let all = discord.sent_at_least(1).await;
+    assert_eq!(all[0].2["content"], "TRANSLATED");
+    assert_eq!(discord.lines().await.len(), 2);
+
+    // Angehalten, auf `stop` oder auf das Signal eines Servers: beides kommt
+    // als derselbe Befehl an. Wenn die Tür zu ist, stehen die Zeilen schon da;
+    // der Fisch sagt es, bevor er die Verbindung schließt.
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let mut off = discord.lines().await.split_off(2);
+    off.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        off,
+        [("111".to_owned(), Tongue::German, false), ("222".to_owned(), Tongue::English, false)]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Dieselben Regeln wie an der Matrix-Tür: neu geladen ist nicht aus- und
+/// eingeschaltet; ein Profil, das kommt oder geht, sagt es an seinen eigenen
+/// Tischen und nur dort; und am Tisch eines anderen Fischs sagt dieser nichts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reload_says_nothing_and_a_profile_speaks_at_its_own_tables_only() {
+    let discord = Discord::start().await;
+    let dir = folder("switched-own");
+    let fake = Fake::default();
+    let (to_door, commands) = unbounded_channel();
+    let http = discord.http();
+    let profile = plain(&dir, &fake);
+    // Die Tür sagt, wenn sich ändert, welche Profile sie bedient. Daran sieht
+    // der Test, dass ein Befehl angekommen ist, bevor er weitermacht.
+    let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = changes.clone();
+    let door = tokio::spawn(async move {
+        let on_change = Box::new(move |_: &[String]| {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        run_with(http, vec![profile], false, commands, no_line(), on_change).await
+    });
+    let changed = |count: usize| {
+        let changes = changes.clone();
+        async move {
+            for _ in 0..300 {
+                if changes.load(std::sync::atomic::Ordering::SeqCst) >= count {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            panic!("the door did not take the command");
+        }
+    };
+    assert_eq!(discord.lines_at_least(2).await.len(), 2);
+
+    // Neu geladen, etwa nach einer Änderung in der Maske. Dass der neue Stand
+    // läuft, zeigt die Übersetzung danach; an den Tischen steht nichts Neues.
+    to_door.send(Command::Restart(Box::new(plain(&dir, &fake)))).unwrap();
+    changed(2).await;
+    discord.tell("MESSAGE_CREATE", message(6001, "111", user("100", "nemo", "Nemo"), "Guten Morgen"));
+    let all = discord.sent_at_least(1).await;
+    assert_eq!(all[0].2["content"], "TRANSLATED");
+    assert_eq!(discord.lines().await.len(), 2, "got {:?}", discord.lines().await);
+
+    // Ein zweites Profil kommt im Lauf dazu: „ein" an seinem Tisch, in dessen
+    // Sprache. Am Tisch von Kim, die ihren eigenen Fisch mitbringt, nichts.
+    let others = Profile {
+        name: Some("others".to_owned()),
+        config: Config::parse(OTHERS).unwrap(),
+        state_path: dir.join("others.state.json"),
+        model: fake.clone(),
+        service: "ai.example".to_owned(),
+        shared: None,
+    };
+    assert!(!others.config.serves("444"), "the table of someone with a fish of their own");
+    to_door.send(Command::Start(Box::new(others))).unwrap();
+    let lines = discord.lines_at_least(3).await;
+    assert_eq!(lines[2], ("333".to_owned(), Tongue::Russian, true));
+
+    // Es geht wieder: „aus" an seinem Tisch. Das andere Profil läuft weiter
+    // und sagt nichts.
+    to_door.send(Command::Stop("others".to_owned())).unwrap();
+    let lines = discord.lines_at_least(4).await;
+    assert_eq!(lines[3], ("333".to_owned(), Tongue::Russian, false));
+    assert!(!door.is_finished(), "the other profile is still served");
+
+    // Ein Profil, das schon fort ist, sagt beim Anhalten des Fischs nichts mehr.
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    let mut last = discord.lines().await.split_off(4);
+    last.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        last,
+        [("111".to_owned(), Tongue::German, false), ("222".to_owned(), Tongue::English, false)]
+    );
+    assert!(discord.lines().await.iter().all(|(channel, _, _)| channel != "444"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Ein Kanal, den der Bot nicht erreicht, hält den Fisch nicht auf: die
+/// anderen Tische lesen ihre Zeile, und er läuft und hält an wie sonst.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_line_that_cannot_be_said_does_not_stop_the_fish() {
+    let discord = Discord::start().await;
+    // Am zweiten Tisch nimmt Discord nichts an.
+    Mock::given(method("POST"))
+        .and(path("/api/v10/channels/222/messages"))
+        .respond_with(
+            ResponseTemplate::new(403).set_body_json(json!({ "message": "Missing Access", "code": 50001 })),
+        )
+        .with_priority(1)
+        .mount(&discord.rest)
+        .await;
+    let dir = folder("switched-refused");
+    let fake = Fake::default();
+    let (to_door, commands) = unbounded_channel();
+    let http = discord.http();
+    let profile = plain(&dir, &fake);
+    let door = tokio::spawn(async move {
+        run_with(http, vec![profile], false, commands, no_line(), Box::new(|_| {})).await
+    });
+
+    // Versucht wird es an beiden Tischen.
+    assert_eq!(discord.lines_at_least(2).await.len(), 2);
+    discord.tell("MESSAGE_CREATE", message(6001, "111", user("100", "nemo", "Nemo"), "Guten Morgen"));
+    assert_eq!(discord.sent_at_least(1).await[0].2["content"], "TRANSLATED");
+
+    to_door.send(Command::StopAll).unwrap();
+    let ended = tokio::time::timeout(Duration::from_secs(10), door).await;
+    assert_eq!(ended.expect("the door stops when told").unwrap(), Ok(()));
+    assert_eq!(discord.lines().await.len(), 4);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

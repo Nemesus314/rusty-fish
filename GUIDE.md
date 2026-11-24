@@ -49,6 +49,16 @@ different there, and what Matrix's encryption does and does not cover, is in
   invited person is told so once in their channel.
 - What was written while the fish was not running is delivered at its next
   start.
+- The fish says at its tables when it is switched on and when it is switched
+  off: one line each, in the language of the table (German, English or
+  Russian; English for any other), on Discord in small grey print. At the
+  table of someone who brought a fish of their own it says nothing. A
+  profile that is only reloaded after a change says nothing. If the fish
+  ends without being switched off (the PC goes off, the network is gone), no
+  line is written, and on switching off it waits at most five seconds for
+  the line to get out. On Discord these lines are new since 24 November
+  2026 and have run against a simulated Discord only; in Matrix rooms they
+  were seen at the real service.
 
 ## What a guest should know
 
@@ -258,13 +268,11 @@ What is different from Discord:
   other, as on Discord.
 - Mentioning the fish at the start of a message counts like its call name.
 - The fish says in its rooms when it is switched on and when it is switched
-  off, one line each, in the language of the table (German, English or
-  Russian; English for any other). On Discord a bot that is off turns grey;
-  a Matrix room lists its members, and the fish stays in that list while it
-  is off. Element shows for nobody at matrix.org who is online (its own
-  setting for that server, read on 23 November 2026). If the fish ends
-  without being switched off (the PC goes off, the network is gone), no line
-  is written. A profile that is only reloaded after a change says nothing.
+  off, as at its Discord tables (see "What it does"). Here the line is the
+  only sign: on Discord a bot that is off also turns grey, while a Matrix
+  room lists its members, and the fish stays in that list while it is off.
+  Element shows for nobody at matrix.org who is online (its own setting for
+  that server, read on 23 November 2026).
 
 About encryption, said plainly: a Matrix room can be end-to-end encrypted,
 and the fish reads and writes there as a member with a device of its own.
@@ -353,9 +361,9 @@ How it behaves:
   door refuses it or closes while the fish is on, the fish stops that
   profile at the other door too and says why, in the output and on the card
   of the profile. The other profiles keep running.
-- In the Matrix room the fish says when it is switched on and off, as in
-  every Matrix room. On Discord the bot turns grey only when the whole fish
-  is off.
+- The fish says when it is switched on and off at the tables of both doors,
+  each door at its own. On Discord the bot turns grey only when the whole
+  fish is off; the line stands there as soon as this profile is.
 
 Limits of a mixed room:
 
@@ -447,9 +455,8 @@ rusty-fish`). Everything is done on the command line.
    `systemctl enable --now rusty-fish` starts it, now and with every start
    of the server. What the fish says goes to the journal (`journalctl -u
    rusty-fish`). `systemctl stop rusty-fish` halts it the way `stop` does:
-   it finishes what it is doing and closes its doors. In its Matrix rooms
-   it says that it is off; on Discord the bot turns grey and no line is
-   written, as on Windows.
+   it finishes what it is doing, says at its tables that it is off, and
+   closes its doors; on Discord the bot then turns grey.
 
 Measured on 24 November 2026, in one place only: Ubuntu 26.04 inside Windows
 (WSL), with Rust 1.100. The program built without a change, and all its
@@ -466,10 +473,12 @@ door: four profiles brought over from Windows with `profile export` and
 of the AI service listed, one profile started. A sentence was translated
 and the AI answered when called. Stopped the way systemd stops a service
 (the signal SIGTERM), the fish closed its door and ended, and the bot
-turned grey.
+turned grey. That run was before the fish said at its Discord tables that
+it is on or off; no line stood there, and that is why it does now.
 
-Not measured: the Matrix door on Linux with a real account, and so the
-line in a Matrix room after `systemctl stop`; a real server (WSL is not
+Not measured: the lines at a Discord table at the real service, on any
+system; the Matrix door on Linux with a real account, and so the line in a
+Matrix room after `systemctl stop`; a real server (WSL is not
 one); other Linux systems, and other processors than x86-64; the file
 above as a service of the whole system under an account of its own (systemd
 checked its form, and the service measured ran in the session of a user).

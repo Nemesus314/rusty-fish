@@ -67,6 +67,10 @@
 //!   etwa „Robin (Matrix)", und mit dem Standardbild des Webhooks.
 //! - Nachgeholt werden nur die Kanäle dieser Tür.
 //!
+//! Seit dem 24.11.2026 sagt der Fisch auch hier an seinen Tischen, wenn er
+//! ein- und wenn er ausgeschaltet wird (siehe [`announce`]). Bis dahin tat er
+//! das nur in Matrix-Räumen; bei Discord galt der Punkt am Bot als Zeichen.
+//!
 //! In die Ausgabe des Programms gelangen nur Kanal-Kennungen und Fehlergründe,
 //! nie der Text einer Nachricht.
 
@@ -79,7 +83,7 @@ use rusty_fish_house::clock::today;
 use rusty_fish_house::config::{Config, Door};
 use rusty_fish_house::household::{Arrived, HostNotice, Household, Terms};
 use rusty_fish_house::served::{label_of, title_of};
-use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation};
+use rusty_fish_house::texts::{KEPT_NOTICE, NOT_THE_HOST, invitation, switched};
 use rusty_fish_room::{Delivery, Sender};
 use serenity::all::{
     ButtonStyle, Channel, ChannelId, ClientBuilder, ComponentInteraction, Context, CreateAllowedMentions,
@@ -91,6 +95,7 @@ use serenity::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, RwLock};
 
@@ -103,6 +108,11 @@ const WEBHOOK_NAME: &str = "Rusty Fish";
 /// Die Antwort auf einen Klick, zu dem gerade kein Profil läuft: der Knopf
 /// stammt von einem Profil, das inzwischen angehalten wurde.
 const NOT_RUNNING: &str = "The profile this button belongs to is not running right now.";
+
+/// So lange hat der Fisch beim Anhalten, um an seinen Tischen zu sagen, dass
+/// er geht: wer ihn ausschaltet, soll nicht auf Discord warten. Dieselbe
+/// Frist wie an der Matrix-Tür.
+const LEAVE_WITHIN: Duration = Duration::from_secs(5);
 
 /// Ein Profil im Lauf: seine Einstellungen, seine KI und alles, was sich
 /// ändert.
@@ -130,6 +140,9 @@ struct Served<M> {
     /// Zustandsdatei, bevor der alte gespeichert hatte, und teilte dasselbe
     /// noch einmal mit.
     retired: AtomicBool,
+    /// Ob der Fisch an den Tischen dieses Profils gesagt hat, dass er
+    /// eingeschaltet ist. Nur dann sagt er beim Anhalten, dass er geht.
+    said_on: AtomicBool,
     /// Die Webhooks der Kanäle, in die der Fisch schon geschrieben hat. Ein
     /// eigenes Schloss: auch was eine andere Tür zureicht, wird hier
     /// abgesetzt, während jene das Schloss des Haushalts hält.
@@ -208,7 +221,7 @@ where
     let mut any = false;
     for profile in first {
         let label = label_of(profile.name.as_deref());
-        match fish.start(None, profile).await {
+        match fish.start(None, profile, false).await {
             Ok(()) => any = true,
             Err(why) if lenient => eprintln!("rusty-fish: {label}cannot start: {why}"),
             Err(why) => return Err(why),
@@ -258,7 +271,7 @@ where
             match commands.recv().await {
                 Some(Command::Start(profile)) => {
                     let label = label_of(profile.name.as_deref());
-                    if let Err(why) = fish.start(Some(&http), *profile).await {
+                    if let Err(why) = fish.start(Some(&http), *profile, false).await {
                         eprintln!("rusty-fish: {label}cannot start: {why}");
                     }
                 }
@@ -269,12 +282,12 @@ where
                     }
                 }
                 Some(Command::Stop(name)) => {
-                    if fish.stop(&name).await == 0 {
+                    if fish.stop(&http, &name).await == 0 {
                         break;
                     }
                 }
                 Some(Command::Halt(name, why)) => {
-                    let left = fish.stop(&name).await;
+                    let left = fish.stop(&http, &name).await;
                     eprintln!("rusty-fish: {}stopped: {why}", label_of(Some(&name)));
                     if left == 0 {
                         break;
@@ -287,6 +300,12 @@ where
         }
         flag.store(true, Ordering::Relaxed);
         eprintln!("rusty-fish: stopping");
+        // Wer jetzt noch bedient wird, liest, dass der Fisch geht. Erst danach
+        // meldet er sich ab: die Zeile geht über die Schnittstelle hinaus, und
+        // die braucht den Zugang, nicht die Verbindung, aber ein Fisch, der
+        // schon grau ist und dann noch schreibt, sähe falsch aus.
+        let leaving: Vec<Arc<Served<M>>> = fish.served.read().await.clone();
+        announce(&http, &leaving, false).await;
         shards.shutdown_all().await;
     });
 
@@ -305,19 +324,32 @@ where
     /// Nimmt ein Profil in den Lauf. Steht die Verbindung schon (`http`),
     /// teilt der Fisch gleich mit, wer eingeladen ist, und holt nach, was in
     /// den Kanälen dieses Profils verpasst wurde.
-    async fn start(&self, http: Option<&Http>, profile: Profile<M>) -> Result<(), String> {
+    ///
+    /// `said_on`: der Fisch hat an diesen Tischen schon gesagt, dass er
+    /// eingeschaltet ist (ein Profil, das nur neu geladen wird).
+    async fn start(
+        &self,
+        http: Option<&Arc<Http>>,
+        profile: Profile<M>,
+        said_on: bool,
+    ) -> Result<(), String> {
         // Lehnt diese Tür ein Profil ab, das auch an einer anderen steht,
         // muss das Programm es hören: es hält das Profil dann überall an.
         let shared = profile.shared.as_ref().map(|shared| shared.lines.clone());
         let name = profile.name.clone();
-        let started = self.take_in(http, profile).await;
+        let started = self.take_in(http, profile, said_on).await;
         if let (Err(why), Some(lines), Some(name)) = (&started, shared, name) {
             lines.refuse(Door::Discord, &name, why);
         }
         started
     }
 
-    async fn take_in(&self, http: Option<&Http>, profile: Profile<M>) -> Result<(), String> {
+    async fn take_in(
+        &self,
+        http: Option<&Arc<Http>>,
+        profile: Profile<M>,
+        said_on: bool,
+    ) -> Result<(), String> {
         if !profile.config.doors.contains(&Door::Discord) {
             return Err(format!(
                 "this profile stands at the {} door, not at Discord",
@@ -341,6 +373,7 @@ where
             house,
             lines,
             retired: AtomicBool::new(false),
+            said_on: AtomicBool::new(said_on),
             hooks: Mutex::new(HashMap::new()),
         });
         // Prüfen und Aufnehmen unter einem Schloss, zusammen mit der Frage,
@@ -368,6 +401,7 @@ where
         served.say("serving");
         if ready && let Some(http) = http {
             served.look_at_channels(http).await;
+            announce(http, std::slice::from_ref(&served), true).await;
             served.tell_the_invited(http).await;
             served.catch_up(http, self.me.load(Ordering::Relaxed)).await;
         }
@@ -381,11 +415,15 @@ where
     /// Lässt sich das neue nicht aufnehmen, etwa weil es nach der Änderung
     /// einen Kanal mit einem anderen laufenden Profil teilt, läuft danach
     /// keines von beiden: das alte gälte nicht mehr, und das neue darf nicht.
-    async fn restart(&self, http: &Http, profile: Profile<M>) -> Result<(), String> {
+    async fn restart(&self, http: &Arc<Http>, profile: Profile<M>) -> Result<(), String> {
+        // Neu geladen ist nicht aus- und wieder eingeschaltet: an den Tischen
+        // steht dazu nichts, wenn dort schon steht, dass der Fisch da ist.
+        let mut said_on = false;
         let mut gone: Vec<Arc<Served<M>>> = Vec::new();
         if let Some(name) = profile.name.as_deref() {
             let mut list = self.served.write().await;
             gone = list.iter().filter(|s| s.name.as_deref() == Some(name)).cloned().collect();
+            said_on = gone.iter().any(|served| served.said_on.load(Ordering::SeqCst));
             list.retain(|served| served.name.as_deref() != Some(name));
         }
         // Der alte Stand lässt, was er noch vorhatte, und was er gerade tut,
@@ -397,7 +435,7 @@ where
         for old in &gone {
             drop(old.house.lock().await);
         }
-        let started = self.start(Some(http), profile).await;
+        let started = self.start(Some(http), profile, said_on).await;
         if started.is_err() {
             let list = self.served.read().await;
             self.told(&list);
@@ -405,21 +443,29 @@ where
         started
     }
 
-    /// Nimmt ein Profil aus dem Lauf. Liefert, wie viele noch laufen.
-    async fn stop(&self, name: &str) -> usize {
-        let mut list = self.served.write().await;
-        let before = list.len();
-        for gone in list.iter().filter(|served| served.name.as_deref() == Some(name)) {
-            gone.retired.store(true, Ordering::Relaxed);
-        }
-        list.retain(|served| served.name.as_deref() != Some(name));
-        if list.len() < before {
-            eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
-            self.told(&list);
-        } else {
-            eprintln!("rusty-fish: {}was not running", label_of(Some(name)));
-        }
-        list.len()
+    /// Nimmt ein Profil aus dem Lauf und sagt an seinen Tischen, dass der
+    /// Fisch dort aus ist. Liefert, wie viele noch laufen.
+    async fn stop(&self, http: &Arc<Http>, name: &str) -> usize {
+        let (gone, left) = {
+            let mut list = self.served.write().await;
+            let gone: Vec<Arc<Served<M>>> =
+                list.iter().filter(|s| s.name.as_deref() == Some(name)).cloned().collect();
+            for old in &gone {
+                old.retired.store(true, Ordering::Relaxed);
+            }
+            list.retain(|served| served.name.as_deref() != Some(name));
+            if gone.is_empty() {
+                eprintln!("rusty-fish: {}was not running", label_of(Some(name)));
+            } else {
+                eprintln!("rusty-fish: {}no longer serving", label_of(Some(name)));
+                self.told(&list);
+            }
+            (gone, list.len())
+        };
+        // Ohne das Schloss der Liste: die anderen Profile sollen nicht warten,
+        // bis Discord die Zeile angenommen hat.
+        announce(http, &gone, false).await;
+        left
     }
 
     /// Sagt dem Aufrufer, welche Profile jetzt laufen.
@@ -483,6 +529,10 @@ where
         for profile in served {
             // Zuerst nachsehen, ob der Bot die Kanäle dieses Profils sieht.
             profile.look_at_channels(&ctx.http).await;
+            // Dann sagen, dass der Fisch da ist: vor allem, was er nachholt.
+            // Einmal je Lauf eines Profils; baut Discord die Verbindung neu
+            // auf, steht die Zeile kein zweites Mal da.
+            announce(&ctx.http, std::slice::from_ref(&profile), true).await;
             // Erst die Mitteilung, dann das Nachholen: wer eingeladen ist,
             // soll lesen, was der Fisch hier tut, bevor die ersten
             // Übersetzungen kommen.
@@ -980,6 +1030,90 @@ where
             }
             self.handle(http, msg, me).await;
         }
+    }
+}
+
+/// Sagt an den Tischen dieser Profile, dass der Fisch ein- oder ausgeschaltet
+/// ist: eine Zeile je Tisch, in der Sprache des Tisches, mit denselben Worten
+/// wie in einem Matrix-Raum.
+///
+/// Nemesus am 24.11.2026, nach dem ersten echten Lauf unter Linux: er hatte
+/// den Fisch angehalten und an seinem Tisch die Zeile erwartet, die es bis
+/// dahin nur in Matrix gab. „Bitte nachrüsten, dass die Zeile auch in Discord
+/// kommt". Bis dahin galt: bei Discord wird ein Bot grau, das genügt. Der
+/// Punkt am Bot sagt aber nur, ob der ganze Fisch läuft, nicht, ob er diesen
+/// Tisch bedient: mit `--profile` ist der Bot auch dort grün, wo der Fisch
+/// nicht bedient.
+///
+/// Dieselben Regeln wie an der Matrix-Tür:
+/// - „ein" einmal je Lauf eines Profils, sobald die Verbindung steht; „aus"
+///   nur, wo „ein" gesagt wurde.
+/// - Nur an den Tischen dieser Tür, und nur, wo dieser Fisch schreibt: am
+///   Tisch eines anderen Fischs sagt er nichts.
+/// - Ein Profil, das nur neu geladen wird, sagt nichts.
+/// - Als der Bot selbst, in der kleinen grauen Schrift von Discord (`-# `),
+///   und ohne jemanden anzupingen.
+///
+/// Benannte Grenzen: Endet der Fisch, ohne angehalten zu werden (der PC geht
+/// aus, das Netz fällt weg), steht nichts da. Beim Ausschalten hat er
+/// [`LEAVE_WITHIN`]; was bis dahin nicht ankam, bleibt ungesagt und steht in
+/// der Programmausgabe. Was in dieser Frist noch geschrieben wird, übersetzt
+/// er noch, auch wenn die Zeile schon dasteht. Sieht der Bot einen Kanal
+/// nicht, scheitert die Zeile dort wie alles andere, und der Fisch läuft
+/// weiter. Gelaufen bisher nur gegen das nachgestellte Discord der Tests.
+async fn announce<M>(http: &Arc<Http>, profiles: &[Arc<Served<M>>], on: bool)
+where
+    M: Model + Send + Sync + 'static,
+{
+    let word = if on { "on" } else { "off" };
+    // Alle Kanäle zugleich: beim Ausschalten bleibt wenig Zeit.
+    let mut posts = tokio::task::JoinSet::new();
+    for served in profiles {
+        let due = if on {
+            // Ein Profil, das inzwischen aus dem Lauf genommen wurde, sagt
+            // nichts mehr; sonst einmal je Lauf.
+            !served.retired.load(Ordering::Relaxed)
+                && !served.said_on.swap(true, Ordering::SeqCst)
+        } else {
+            // Wer nie gesagt hat, dass er da ist, sagt nicht, dass er geht.
+            served.said_on.swap(false, Ordering::SeqCst)
+        };
+        if !due {
+            continue;
+        }
+        for seat in served.config.rooms.iter().flat_map(|room| room.seats.iter()) {
+            if served.config.door_of(&seat.channel) != Some(Door::Discord)
+                || !served.config.serves(&seat.channel)
+            {
+                continue;
+            }
+            // Was keine Kennung ist, hat `look_at_channels` schon gesagt.
+            let Some(id) = seat.channel.parse::<u64>().ok().filter(|id| *id > 0) else { continue };
+            let text = format!("-# {}", switched(served.config.tongue_at(&seat.channel), on));
+            let label = label_of(served.name.as_deref());
+            let channel = seat.channel.clone();
+            let http = http.clone();
+            posts.spawn(async move {
+                let message =
+                    CreateMessage::new().content(text).allowed_mentions(CreateAllowedMentions::new());
+                let sent = ChannelId::new(id).send_message(http.as_ref(), message).await;
+                (label, channel, sent.err().map(|why| why.to_string()))
+            });
+        }
+    }
+    let all = async {
+        while let Some(done) = posts.join_next().await {
+            if let Ok((label, channel, Some(why))) = done {
+                eprintln!(
+                    "rusty-fish: {label}cannot say in channel {channel} that the fish is \
+                     switched {word}: {why}"
+                );
+            }
+        }
+    };
+    let limit = if on { Duration::from_secs(60) } else { LEAVE_WITHIN };
+    if tokio::time::timeout(limit, all).await.is_err() {
+        eprintln!("rusty-fish: not every channel was told in time that the fish is switched {word}");
     }
 }
 
