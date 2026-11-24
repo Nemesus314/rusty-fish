@@ -6,7 +6,7 @@
 //! Tür. Seit demselben Tag bedient ein Fisch mehrere Profile; die Maske sagt
 //! ihm über dieselbe Leitung, welche.
 
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// Eine Zeile der Standardeingabe, verstanden.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,8 @@ pub enum Input {
 }
 
 /// Hört zu, was dem Fisch gesagt wird: Zeilen auf der Standardeingabe (so
-/// spricht die Maske mit ihm) und Strg+C im Terminal, das wie `stop` gilt.
+/// spricht die Maske mit ihm) und das Signal des Systems zum Anhalten, das
+/// wie `stop` gilt: Strg+C im Terminal, unter Linux auch SIGTERM.
 ///
 /// Das bloße Ende der Standardeingabe hält ihn nicht an, und der Kanal bleibt
 /// offen. Als Dienst ohne Terminal hat der Fisch gar keine Eingabe, und er
@@ -43,17 +44,62 @@ pub fn listen() -> UnboundedReceiver<Input> {
             }
         }
     });
+    on_signal(said);
+    heard
+}
+
+/// Sagt `stop`, sobald das System den Fisch anhalten will.
+fn on_signal(said: UnboundedSender<Input>) {
+    // Hier schon angemeldet, nicht erst in der Aufgabe unten: ein Signal, das
+    // gleich nach dem Start kommt, soll den Fisch nicht noch hart beenden.
+    let asked = asked_to_stop();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
+        if asked.await {
             let _ = said.send(Input::StopAll);
         }
         // Dieser Sender bleibt bis zum Ende des Programms am Leben. Endet die
-        // Eingabe, oder lässt sich Strg+C nicht abfangen, sieht der Empfänger
-        // deshalb kein Ende des Kanals, das wie ein Signal aussähe.
+        // Eingabe, oder lässt sich das Signal nicht abfangen, sieht der
+        // Empfänger deshalb kein Ende des Kanals, das wie ein Signal aussähe.
         std::future::pending::<()>().await;
         drop(said);
     });
-    heard
+}
+
+/// Wartet auf das Signal zum Anhalten. Liefert `false`, wenn sich keines
+/// abfangen lässt.
+///
+/// Unter Unix sind es zwei: SIGINT (Strg+C im Terminal) und SIGTERM. Mit
+/// SIGTERM hält ein Dienstverwalter wie systemd einen Dienst an, und auch ein
+/// schlichtes `kill`. Bis zum 24.11.2026 fing der Fisch nur Strg+C: SIGTERM
+/// beendete ihn auf der Stelle, ohne die Zeile zum Ausschalten an den Tischen.
+///
+/// Benannte Grenzen:
+/// - Nur das erste Signal zählt. Ein zweites, während der Fisch anhält,
+///   beschleunigt nichts; wie bisher bei Strg+C.
+/// - SIGHUP (das Terminal wird geschlossen) bleibt, wie das System es hält:
+///   es beendet den Fisch sofort. Finge der Fisch es ab, liefe er auch unter
+///   `nohup` nicht mehr weiter.
+#[cfg(unix)]
+fn asked_to_stop() -> impl Future<Output = bool> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut interrupt = signal(SignalKind::interrupt()).ok();
+    let mut terminate = signal(SignalKind::terminate()).ok();
+    async move {
+        match (&mut interrupt, &mut terminate) {
+            (Some(interrupt), Some(terminate)) => tokio::select! {
+                got = interrupt.recv() => got.is_some(),
+                got = terminate.recv() => got.is_some(),
+            },
+            (Some(only), None) | (None, Some(only)) => only.recv().await.is_some(),
+            (None, None) => false,
+        }
+    }
+}
+
+/// Außerhalb von Unix gibt es nur Strg+C.
+#[cfg(not(unix))]
+fn asked_to_stop() -> impl Future<Output = bool> {
+    async { tokio::signal::ctrl_c().await.is_ok() }
 }
 
 /// Versteht eine Zeile der Eingabe. Groß und klein ist beim Befehl egal, beim
@@ -111,5 +157,26 @@ mod tests {
         assert_eq!(parse("nonstop"), None);
         assert_eq!(parse("restart"), None, "restart needs a name");
         assert_eq!(parse("reload probe"), None);
+    }
+
+    /// So hält systemd einen Dienst an. Das Signal geht an diesen Testlauf
+    /// selbst; weil der Fisch es abfängt, überlebt der Testlauf es.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_signal_of_a_service_manager_asks_to_stop() {
+        use std::time::Duration;
+        let (said, mut heard) = tokio::sync::mpsc::unbounded_channel();
+        super::on_signal(said);
+        let sent = std::process::Command::new("sh")
+            .args(["-c", &format!("kill -TERM {}", std::process::id())])
+            .status()
+            .expect("sh runs");
+        assert!(sent.success(), "the signal was not sent");
+        let input = tokio::time::timeout(Duration::from_secs(5), heard.recv()).await;
+        assert_eq!(input.expect("the signal was not heard"), Some(Input::StopAll));
+        // Der Kanal bleibt danach offen: kein Ende, das wie ein zweites
+        // Signal aussähe.
+        let more = tokio::time::timeout(Duration::from_millis(100), heard.recv()).await;
+        assert!(more.is_err(), "the channel closed or spoke again: {more:?}");
     }
 }
