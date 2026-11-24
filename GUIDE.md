@@ -447,7 +447,9 @@ rusty-fish`). Everything is done on the command line.
    `systemctl enable --now rusty-fish` starts it, now and with every start
    of the server. What the fish says goes to the journal (`journalctl -u
    rusty-fish`). `systemctl stop rusty-fish` halts it the way `stop` does:
-   it finishes what it is doing and says at its tables that it is off.
+   it finishes what it is doing and closes its doors. In its Matrix rooms
+   it says that it is off; on Discord the bot turns grey and no line is
+   written, as on Windows.
 
 Measured on 24 November 2026, in one place only: Ubuntu 26.04 inside Windows
 (WSL), with Rust 1.100. The program built without a change, and all its
@@ -458,9 +460,17 @@ Three made-up profiles were written to a file on Windows, read in on Linux,
 written out there and read in on Windows again; every file arrived as it
 had been, byte for byte.
 
-Not measured: a fish with real accounts on Linux, at either door, and so
-also the line at the tables after `systemctl stop`; a real server (WSL is
-not one); other Linux systems, and other processors than x86-64; the file
+Seen the same day with real accounts, in the same place, at the Discord
+door: four profiles brought over from Windows with `profile export` and
+`profile import`, the bot token and an API key stored in files, the models
+of the AI service listed, one profile started. A sentence was translated
+and the AI answered when called. Stopped the way systemd stops a service
+(the signal SIGTERM), the fish closed its door and ended, and the bot
+turned grey.
+
+Not measured: the Matrix door on Linux with a real account, and so the
+line in a Matrix room after `systemctl stop`; a real server (WSL is not
+one); other Linux systems, and other processors than x86-64; the file
 above as a service of the whole system under an account of its own (systemd
 checked its form, and the service measured ran in the session of a user).
 The window does not run there, and it cannot manage a fish on another
