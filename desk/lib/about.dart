@@ -9,8 +9,10 @@
 // und dem bürgerlichen Namen, und als Adresse nur die Webseite.
 //
 // Benannte Lücken, bis er sie füllt:
-// - Der Text über ihn und das Programm ist ein Entwurf von Fischlein.
 // - Ein Bild gibt es noch nicht.
+//
+// Den Text über das Programm hat Fischlein auf sein Wort geschrieben, der
+// Satz über ihn ist sein eigener (beides 24.11.2026).
 //
 // Seit dem 24.11.2026 ist Rusty Fish veröffentlicht, unter der AGPL 3 oder
 // später (beides von ihm an diesem Tag entschieden). Bis dahin standen hier
@@ -39,16 +41,28 @@ const licenseLine =
     'Rusty Fish is free software under the GNU Affero General Public License, '
     'version 3 or later, and comes without any warranty.';
 
-/// Wofür das Programm gebaut ist. Entwurf, bis Nemesus seinen Text liefert.
+/// Wofür das Programm gebaut ist.
+///
+/// Nemesus am 24.11.2026: „den About Fenster Text, bitte schreibe du ihn. Du
+/// weißt mehr über das Ding als ich." Bis dahin stand hier ein Entwurf, der
+/// nur Discord-Kanäle und den eigenen PC kannte; seither gibt es Matrix-Räume
+/// und den Server. Der Text sagt, was der Fisch tut, und wirbt für nichts.
 const purpose =
-    'Rusty Fish lets people write to each other, each in their own language. '
-    'Everyone types in the channel of their language, and an AI translates in passing, '
+    'Rusty Fish lets people talk to each other, each in their own language. '
+    'Everyone writes at the table of their language, in a Discord channel or a Matrix room, '
+    'and an AI translates in passing, '
     'so that nobody has to meet in a language that belongs to neither of them.';
 
 const principles =
-    'It runs on your own PC, with an AI service and a key you choose yourself. '
-    'It asks everyone once before it lets the AI read their words, '
+    'You run it yourself, on your own PC or server, with an AI service and a key you choose. '
+    'It asks everyone once before it lets an AI read their words, '
     'and it says where those words go.';
+
+/// Wer er ist, in seinen eigenen Worten vom 24.11.2026, ins Englische und in
+/// die dritte Person gesetzt; derselbe Satz wie im Leitfaden.
+const aboutHim =
+    'He codes, writes and makes videos. What drives him is the wish for '
+    'meaningful connections between people, worldwide.';
 
 /// Öffnet das Fenster über das Programm.
 Future<void> showAbout(BuildContext context) {
@@ -95,6 +109,8 @@ class AboutFish extends StatelessWidget {
                 Text('Who made it', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 6),
                 const Text(madeBy),
+                const SizedBox(height: 4),
+                const Text(aboutHim),
                 Row(
                   children: [
                     const Text(website),

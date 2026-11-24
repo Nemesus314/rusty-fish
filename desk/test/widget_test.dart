@@ -240,7 +240,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Version 0.4.0'), findsOneWidget);
       expect(find.textContaining('each in their own language'), findsOneWidget);
+      // Beide Türen, und nicht nur der eigene PC.
+      expect(find.textContaining('in a Discord channel or a Matrix room'), findsOneWidget);
+      expect(find.textContaining('on your own PC or server'), findsOneWidget);
       expect(find.text('Nemesus (Christian Ermisch)'), findsOneWidget);
+      // Wer er ist, in seinen eigenen Worten.
+      expect(find.textContaining('meaningful connections between people'), findsOneWidget);
       expect(find.text('christianermisch.com'), findsOneWidget);
       // Wo der Quelltext liegt, und unter welcher Lizenz der Fisch steht.
       expect(find.text('github.com/Nemesus314/rusty-fish'), findsOneWidget);
