@@ -474,11 +474,14 @@ of the AI service listed, one profile started. A sentence was translated
 and the AI answered when called. Stopped the way systemd stops a service
 (the signal SIGTERM), the fish closed its door and ended, and the bot
 turned grey. That run was before the fish said at its Discord tables that
-it is on or off; no line stood there, and that is why it does now.
+it is on or off; no line stood there, and that is why it does now. At the
+Matrix door: the fish logged in to its account with `matrix login`, as a
+new device that was not verified, said at both tables of a profile that it
+is on, translated, and, stopped with SIGTERM, said in the room that it is
+off.
 
 Not measured: the lines at a Discord table at the real service, on any
-system; the Matrix door on Linux with a real account, and so the line in a
-Matrix room after `systemctl stop`; a real server (WSL is not
+system; a login with the recovery key on Linux; a real server (WSL is not
 one); other Linux systems, and other processors than x86-64; the file
 above as a service of the whole system under an account of its own (systemd
 checked its form, and the service measured ran in the session of a user).
