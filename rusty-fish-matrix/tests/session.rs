@@ -251,10 +251,16 @@ async fn an_access_the_server_refuses_is_told_apart() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_server_that_does_not_answer_leaves_the_question_open() {
-    // Die Adresse eines Servers, den es nicht mehr gibt.
+    // Eine Adresse, an der niemand zuhört: einen Augenblick belegt, um sie
+    // zu kennen, und wieder freigegeben.
+    //
+    // Bis zum 24.11.2026 stand hier die Adresse eines nachgestellten Servers,
+    // der schon wieder freigegeben war. Die kommen aus einem Vorrat: ein
+    // Nachbartest bekam denselben Server und antwortete für ihn. Unter Linux
+    // gemessen scheiterte der Test daran in zwei von zwei Läufen.
     let uri = {
-        let server = MatrixMockServer::new().await;
-        server.uri()
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
     };
     match device(&access_at(&uri)).await {
         Device::Unknown(why) => {
