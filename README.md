@@ -18,7 +18,7 @@ the same conversation.
 
 ## Where it stands
 
-Version 0.3.0. It runs on Windows 11, with a window to manage it. The
+Version 0.4.0. It runs on Windows 11, with a window to manage it. The
 program itself also runs on Linux without a desktop; that has been measured
 in one place only (Ubuntu inside Windows, WSL), not on a real server. macOS
 has not been tested. There is nothing ready to download yet: you build it

@@ -238,7 +238,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('about')));
       await tester.pumpAndSettle();
-      expect(find.text('Version 0.3.0'), findsOneWidget);
+      expect(find.text('Version 0.4.0'), findsOneWidget);
       expect(find.textContaining('each in their own language'), findsOneWidget);
       expect(find.text('Nemesus (Christian Ermisch)'), findsOneWidget);
       expect(find.text('christianermisch.com'), findsOneWidget);
