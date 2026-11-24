@@ -418,11 +418,30 @@ rusty-fish`). Everything is done on the command line.
    again. On the server: `rusty-fish profile import NAME.toml --name NAME`.
    One bot runs in one place only, on the PC or on the server: two fish
    with the same bot would both translate everything.
-5. Start it with `rusty-fish run --all`. As a service of systemd, a unit
-   needs no more than `ExecStart=` with that command, the account under
-   `User=`, and `Restart=on-failure`. What the fish says goes to the
-   journal. `systemctl stop` halts it the way `stop` does: it finishes what
-   it is doing and says at its tables that it is off.
+5. Start it with `rusty-fish run --all`. To run it as a service of systemd,
+   save this as `/etc/systemd/system/rusty-fish.service`, with the account
+   of the fish in place of `fish` and the place of the program in place of
+   `/home/fish/rusty-fish`:
+
+   ```
+   [Unit]
+   Description=Rusty Fish
+   Wants=network-online.target
+   After=network-online.target
+
+   [Service]
+   User=fish
+   ExecStart=/home/fish/rusty-fish run --all
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   `systemctl enable --now rusty-fish` starts it, now and with every start
+   of the server. What the fish says goes to the journal (`journalctl -u
+   rusty-fish`). `systemctl stop rusty-fish` halts it the way `stop` does:
+   it finishes what it is doing and says at its tables that it is off.
 
 Measured on 24 November 2026, in one place only: Ubuntu 26.04 inside Windows
 (WSL), with Rust 1.100. The program built without a change, and all its
@@ -432,10 +451,11 @@ made-up account, started as a service of systemd, was stopped by it cleanly.
 
 Not measured: a fish with real accounts on Linux, at either door, and so
 also the line at the tables after `systemctl stop`; a real server (WSL is
-not one); other Linux systems, and other processors than x86-64; a service
-of the whole system under an account of its own (the one measured ran in the
-session of a user). The window does not run there, and it cannot manage a
-fish on another machine.
+not one); other Linux systems, and other processors than x86-64; the file
+above as a service of the whole system under an account of its own (systemd
+checked its form, and the service measured ran in the session of a user).
+The window does not run there, and it cannot manage a fish on another
+machine.
 
 ## Limits
 
