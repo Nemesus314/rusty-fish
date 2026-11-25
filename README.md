@@ -18,10 +18,15 @@ the same conversation.
 
 ## Where it stands
 
-Version 0.4.0. It runs on Windows 11, with a window to manage it. The
+Version 0.4.1. It runs on Windows 11, with a window to manage it. The
 program itself also runs on Linux without a desktop; that has been measured
 in one place only (Ubuntu inside Windows, WSL), not on a real server. macOS
-has not been tested. There is nothing ready to download yet: you build it
+has not been tested.
+
+For Windows there is a ready folder to download, under
+[Releases](https://github.com/Nemesus314/rusty-fish/releases): unpack it and
+start `rusty_fish_desk.exe`. It carries no paid signature, so Windows warns
+at the first start. For Linux there is nothing ready yet; there you build it
 from the source.
 
 What has been measured and what has not is written down, in the guide under
@@ -45,6 +50,11 @@ The window is a Flutter program in `desk/`:
 
     cd desk
     flutter build windows
+
+The folder for Windows that is offered under Releases is put together by
+one script, from a clean checkout:
+
+    dart run packaging/windows.dart
 
 `rusty-fish.example.toml` shows a profile with every setting explained.
 

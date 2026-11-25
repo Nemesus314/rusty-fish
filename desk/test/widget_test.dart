@@ -238,7 +238,7 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('about')));
       await tester.pumpAndSettle();
-      expect(find.text('Version 0.4.0'), findsOneWidget);
+      expect(find.text('Version 0.4.1'), findsOneWidget);
       expect(find.textContaining('each in their own language'), findsOneWidget);
       // Beide Türen, und nicht nur der eigene PC.
       expect(find.textContaining('in a Discord channel or a Matrix room'), findsOneWidget);

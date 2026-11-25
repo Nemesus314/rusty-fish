@@ -23,7 +23,7 @@ import 'package:material_ui/material_ui.dart';
 
 /// Die Version der Maske, wie sie auch in `pubspec.yaml` steht. Ein Test hält
 /// die beiden gleich.
-const deskVersion = '0.4.0';
+const deskVersion = '0.4.1';
 
 /// Wer das Programm gebaut hat.
 const madeBy = 'Nemesus (Christian Ermisch)';
