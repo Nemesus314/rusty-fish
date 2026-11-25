@@ -326,6 +326,53 @@ class FakeCli implements FishCli {
     return 'Logged out of Matrix. The device store is empty.\n';
   }
 
+  /// Was die Maske zum Schreiben eines Umschlags aufrief: wohin, und die
+  /// zwei getippten Kennwörter.
+  final envelopesWritten = <({String path, String password, String again})>[];
+
+  /// Was die Maske zum Einlesen aufrief.
+  final envelopesRead = <({String path, String password})>[];
+
+  /// Gesetzt: das Programm lehnt das Schreiben ab und sagt diesen Grund.
+  String? envelopeWriteError;
+
+  /// Gesetzt: das Programm lehnt das Einlesen ab, etwa wegen des Kennworts.
+  String? envelopeReadError;
+
+  /// Was das Programm nach dem Schreiben meldet.
+  EnvelopeWritten envelopeWritten = const EnvelopeWritten(profiles: 2, secrets: ['discord', 'openai']);
+
+  /// Was das Programm nach dem Einlesen meldet. Die aufgenommenen Profile
+  /// stehen danach in der Liste, wie beim echten Programm.
+  EnvelopeRead envelopeRead = const EnvelopeRead();
+
+  @override
+  Future<EnvelopeWritten> writeEnvelope(String path, String password, String again) async {
+    envelopesWritten.add((path: path, password: password, again: again));
+    final error = envelopeWriteError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    return envelopeWritten;
+  }
+
+  @override
+  Future<EnvelopeRead> readEnvelope(String path, String password) async {
+    envelopesRead.add((path: path, password: password));
+    final error = envelopeReadError;
+    if (error != null) {
+      throw CliException(error);
+    }
+    for (final name in envelopeRead.created) {
+      entries.add(entryOf(docOf(name)));
+    }
+    keys = KeyStatus({
+      ...keys.stored,
+      for (final entry in envelopeRead.stored) entry: true,
+    });
+    return envelopeRead;
+  }
+
   /// Gesetzt: das Programm kennt den Aufruf `guide` nicht (älterer Stand).
   String? guideError;
 

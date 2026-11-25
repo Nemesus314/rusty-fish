@@ -11,6 +11,7 @@ import 'about.dart';
 import 'cli.dart';
 import 'desk_state.dart';
 import 'editor.dart';
+import 'envelope.dart';
 import 'log_file.dart';
 import 'model.dart';
 import 'report.dart';
@@ -50,7 +51,12 @@ class OverviewPage extends StatefulWidget {
     this.startWith,
     this.theme,
     this.keepsAwake = true,
+    this.files = const SystemFileChooser(),
   });
+
+  /// Fragt nach dem Ort einer Datei, für „Export…" und „Import…". Ohne
+  /// Angabe mit dem Dialog des Systems.
+  final FileChooser files;
 
   /// Die Wahl zwischen hell und dunkel. Ohne Angabe gibt es keinen Umschalter.
   final ThemeChoice? theme;
@@ -289,6 +295,40 @@ class _OverviewPageState extends State<OverviewPage> {
     }
   }
 
+  /// „Export…": alle Profile samt Bot-Token und KI-Schlüsseln in eine Datei
+  /// mit Kennwort. Ändert hier nichts.
+  Future<void> _export() async {
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ExportDialog(
+        cli: widget.cli,
+        files: widget.files,
+        providers: _state.providers,
+        now: widget.now ?? DateTime.now,
+      ),
+    );
+  }
+
+  /// „Import…": eine solche Datei einlesen. Was dazukommt, erscheint danach
+  /// als Karte; ist der Fisch an, nimmt er es gleich auf, wie nach dem
+  /// Zurückholen aus dem Papierkorb.
+  Future<void> _import() async {
+    final read = await showDialog<EnvelopeRead>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ImportDialog(
+        cli: widget.cli,
+        files: widget.files,
+        providers: _state.providers,
+      ),
+    );
+    await _state.refresh();
+    for (final name in read?.created ?? const <String>[]) {
+      _state.saved(name);
+    }
+  }
+
   /// Legt die Beschreibung des Programms in die Zwischenablage. Wer sie einer
   /// KI seines Vertrauens gibt, kann sich die Einrichtung erklären lassen.
   Future<void> _copyGuide() async {
@@ -510,6 +550,20 @@ class _OverviewPageState extends State<OverviewPage> {
                       onPressed: _openTrash,
                       icon: const Icon(Icons.delete_outline, size: 18),
                       label: const Text('Trash'),
+                    ),
+                    // Alles in eine Datei mit Kennwort, und aus einer solchen
+                    // wieder herein: für den Umzug und als Sicherung.
+                    TextButton.icon(
+                      key: const ValueKey('open-export'),
+                      onPressed: _export,
+                      icon: const Icon(Icons.upload_file_outlined, size: 18),
+                      label: const Text('Export…'),
+                    ),
+                    TextButton.icon(
+                      key: const ValueKey('open-import'),
+                      onPressed: _import,
+                      icon: const Icon(Icons.file_open_outlined, size: 18),
+                      label: const Text('Import…'),
                     ),
                   ],
                 ),

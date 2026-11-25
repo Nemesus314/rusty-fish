@@ -106,6 +106,18 @@ abstract class FishCli {
   /// Meldet den Fisch bei Matrix ab und leert seine Geräteschlüssel.
   Future<String> matrixLogout();
 
+  /// Schreibt den Umschlag nach [path]: alle Profile, das Bot-Token und die
+  /// KI-Schlüssel, verschlossen mit dem Kennwort. Beide getippten Kennwörter
+  /// gehen über die Standardeingabe hinein; ob sie gleich und lang genug
+  /// sind, entscheidet das Programm. Eine vorhandene Datei ersetzt es nie.
+  /// Ein älteres Programm kennt den Aufruf nicht und lehnt ihn ab.
+  Future<EnvelopeWritten> writeEnvelope(String path, String password, String again);
+
+  /// Öffnet den Umschlag in [path] mit dem Kennwort und nimmt auf, was darin
+  /// liegt. Was hier schon liegt, wird nicht ersetzt, sondern abgelehnt und
+  /// genannt. Mit einem falschen Kennwort ändert sich nichts.
+  Future<EnvelopeRead> readEnvelope(String path, String password);
+
   /// Startet den Fisch mit allen gespeicherten Profilen. Eines, das sich
   /// nicht starten lässt, sagt in der Ausgabe, warum, und bleibt weg.
   Future<FishRun> runAll();
@@ -269,6 +281,26 @@ class ProcessFishCli implements FishCli {
 
   @override
   Future<String> matrixLogout() => _call(['matrix', 'logout']);
+
+  // Der Ort der Datei ist kein Geheimnis und darf ein Argument sein. Das
+  // Kennwort nicht: es geht über die Standardeingabe, beim Schreiben zweimal.
+  @override
+  Future<EnvelopeWritten> writeEnvelope(String path, String password, String again) async {
+    final out = await _call([
+      'envelope',
+      'write',
+      path,
+      '--stdin',
+      '--json',
+    ], input: '$password\n$again\n');
+    return EnvelopeWritten.fromJson(_object(out));
+  }
+
+  @override
+  Future<EnvelopeRead> readEnvelope(String path, String password) async {
+    final out = await _call(['envelope', 'read', path, '--stdin', '--json'], input: '$password\n');
+    return EnvelopeRead.fromJson(_object(out));
+  }
 
   @override
   Future<String> guide() => _call(['guide']);

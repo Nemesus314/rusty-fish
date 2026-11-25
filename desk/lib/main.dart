@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 
 import 'cli.dart';
+import 'envelope.dart';
 import 'log_file.dart';
 import 'overview.dart';
 import 'start.dart';
@@ -66,7 +67,12 @@ class DeskApp extends StatefulWidget {
     this.startWith,
     this.theme,
     this.keepsAwake = true,
+    this.files = const SystemFileChooser(),
   });
+
+  /// Fragt nach dem Ort einer Datei, für „Export…" und „Import…". In Tests
+  /// eine Attrappe, damit kein Dialog des Systems aufgeht.
+  final FileChooser files;
 
   /// Die Wahl zwischen hell und dunkel. Ohne Angabe folgt die Maske dem
   /// System und merkt sich einen Wechsel nur für diesen Lauf.
@@ -132,6 +138,7 @@ class _DeskAppState extends State<DeskApp> {
                 startWith: widget.startWith,
                 theme: _theme,
                 keepsAwake: widget.keepsAwake,
+                files: widget.files,
               ),
       ),
     );

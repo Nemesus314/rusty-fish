@@ -224,6 +224,14 @@ account there.
    On the command line: `rusty-fish profile trash`, `rusty-fish profile
    restore ID` and `rusty-fish profile erase ID`.
 
+7. "Export…", next to "Trash", writes everything into one file, locked with
+   a password: all profiles, the bot token and the AI keys. It asks for the
+   password twice and then where to save; the name it suggests carries the
+   date and ends in `.rustyfish`. "Import…" opens such a file on another PC,
+   or on this one, and takes what it holds. Nothing that is there already
+   is replaced. This is for moving and for a copy to keep, for yourself
+   alone; see "Moving and backing up".
+
 Without the window the same works on the command line: `rusty-fish key set
 openai`, `rusty-fish key set discord`, `rusty-fish profile list` and
 `rusty-fish run --all`, which serves every profile as the window does.
@@ -579,7 +587,8 @@ To move a fish to another machine, or to keep a copy of everything, there is
 the envelope: one file that holds all profiles, each with what it has
 learned, together with the bot token and the API keys, locked with a
 password. It is for yourself, never for passing on to others; "Share rooms"
-is for that.
+is for that. In the window it is "Export…" and "Import…"; on the command
+line:
 
 - `rusty-fish envelope write FILE` writes it. It asks for a password twice;
   the password needs at least twelve characters, of any kind. An existing
@@ -602,7 +611,9 @@ is for that.
 - Only the password opens the file, and nothing brings a forgotten one back.
   A copy you keep holds the token and the keys of that day; if you renew one
   later, the copy still has the old one.
-- On the command line only so far; the window has no button for it yet.
+- The window asks where to save and which file to open with the dialog of
+  the system. For that it carries one part more, a small library that comes
+  with the download (`file_selector_windows_plugin.dll` on Windows).
 
 The file is text. Its head can be read without the password and says only
 what is needed to open it, and when and by which version it was written:
@@ -634,7 +645,9 @@ this program, on Windows and on Linux Mint, in both directions; writing or
 opening took 0.15 seconds on the PC and 0.3 seconds on that Linux Mint. Not
 measured: an envelope with real profiles and real secrets; reading into the
 credential store of Windows or the keyring of a Linux desktop; an envelope
-written on one system and read on the other by this program itself.
+written on one system and read on the other by this program itself; the two
+buttons of the window against the real program (their tests run against a
+stand-in), and the dialog of the system on Linux.
 
 ## Limits
 

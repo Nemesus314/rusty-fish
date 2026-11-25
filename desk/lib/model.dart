@@ -865,6 +865,81 @@ class KeyStatus {
       KeyStatus({for (final item in json.entries) item.key: item.value == true});
 }
 
+/// Was das Programm meldet, nachdem es einen Umschlag geschrieben hat
+/// (`envelope write --json`): die Datei mit allen Profilen, dem Bot-Token und
+/// den KI-Schlüsseln, verschlossen mit einem Kennwort.
+class EnvelopeWritten {
+  const EnvelopeWritten({
+    required this.profiles,
+    required this.secrets,
+    this.matrixLeftOut = false,
+    this.running = false,
+  });
+
+  /// Wie viele Profile darin liegen.
+  final int profiles;
+
+  /// Die Einträge der Geheimnisse darin, wie die Ablage sie nennt.
+  final List<String> secrets;
+
+  /// Der Fisch ist bei Matrix angemeldet, und dieser Zugang reist nicht mit.
+  final bool matrixLeftOut;
+
+  /// Der Fisch lief beim Schreiben: was er seither lernt, steht nicht darin.
+  final bool running;
+
+  factory EnvelopeWritten.fromJson(Map<String, dynamic> json) => EnvelopeWritten(
+    profiles: _int(json['profiles']),
+    secrets: _strings(json['secrets']),
+    matrixLeftOut: json['matrix_left_out'] == true,
+    running: json['running'] == true,
+  );
+}
+
+/// Etwas, das beim Einlesen abgelehnt wurde, mit dem Grund des Programms.
+typedef Refused = ({String name, String why});
+
+/// Was das Programm meldet, nachdem es einen Umschlag eingelesen hat
+/// (`envelope read --json`). Nichts, was hier schon lag, wurde ersetzt.
+class EnvelopeRead {
+  const EnvelopeRead({
+    this.created = const [],
+    this.refused = const [],
+    this.stored = const [],
+    this.same = const [],
+    this.secretsRefused = const [],
+  });
+
+  /// Die Profile, die jetzt da sind.
+  final List<String> created;
+
+  /// Die abgelehnten Profile.
+  final List<Refused> refused;
+
+  /// Die Geheimnisse, die abgelegt wurden, nach ihren Einträgen.
+  final List<String> stored;
+
+  /// Die Geheimnisse, die hier schon genauso lagen.
+  final List<String> same;
+
+  /// Die abgelehnten Geheimnisse: hier lag schon ein anderes.
+  final List<Refused> secretsRefused;
+
+  factory EnvelopeRead.fromJson(Map<String, dynamic> json) {
+    List<Refused> refused(Object? list) => [
+      for (final item in _maps(list)) (name: '${item['name'] ?? ''}', why: '${item['why'] ?? ''}'),
+    ];
+    final secrets = _map(json['secrets']);
+    return EnvelopeRead(
+      created: _strings(json['created']),
+      refused: refused(json['refused']),
+      stored: _strings(secrets['stored']),
+      same: _strings(secrets['same']),
+      secretsRefused: refused(secrets['refused']),
+    );
+  }
+}
+
 /// Profilnamen, wie das Programm sie annimmt. Die Oberfläche prüft das nur,
 /// um den Hinweis schon beim Tippen zu geben; entscheiden tut das Programm.
 final RegExp profileNamePattern = RegExp(r'^[a-z0-9_-]{1,40}$');
