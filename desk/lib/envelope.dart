@@ -212,8 +212,12 @@ class _ExportDialogState extends State<ExportDialog> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Not in the file: the Matrix account of the fish. Log the fish in again '
-                      'where you import the file.',
+                      // Nemesus am 25.11.2026: „Bei dem Hinweis, dass Matrix nicht
+                      // übernommen wird, ein kleiner Nebensatz, der begründet,
+                      // warum nicht."
+                      'Not in the file: the Matrix account of the fish, because its login is a '
+                      'device with keys of its own, and one device cannot run in two places. Log '
+                      'the fish in again where you import the file.',
                       style: theme.textTheme.bodySmall,
                     ),
                     const SizedBox(height: 16),
@@ -296,8 +300,9 @@ class _ExportDialogState extends State<ExportDialog> {
           const Padding(
             padding: EdgeInsets.only(top: 8),
             child: Text(
-              'The Matrix account of the fish is not in it. Log the fish in again where you '
-              'import the file, under "Matrix".',
+              'The Matrix account of the fish is not in it, because its login is a device with '
+              'keys of its own, and one device cannot run in two places. Log the fish in again '
+              'where you import the file, under "Matrix".',
             ),
           ),
         if (written.running)
@@ -487,8 +492,9 @@ class _ImportDialogState extends State<ImportDialog> {
         ],
         const SizedBox(height: 12),
         const Text(
-          'The Matrix account of the fish is never in the file. If a profile has a table at '
-          'Matrix, log the fish in here under "Matrix".',
+          'The Matrix account of the fish is never in the file, because its login is a device '
+          'with keys of its own, and one device cannot run in two places. If a profile has a '
+          'table at Matrix, log the fish in here under "Matrix".',
         ),
         const SizedBox(height: 8),
         const Text(

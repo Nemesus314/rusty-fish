@@ -1127,8 +1127,11 @@ fn envelope_action(action: EnvelopeAction) -> Result<(), String> {
             );
             if matrix_left_out {
                 println!(
-                    "Note: the fish's Matrix account is not in it. Log the fish in again where you \
-                     read the file, with `rusty-fish matrix login`."
+                    // Mit dem Grund, auf sein Wort vom 25.11.2026: „ein kleiner
+                    // Nebensatz, der begründet, warum nicht."
+                    "Note: the fish's Matrix account is not in it, because its login is a device \
+                     with keys of its own, and one device cannot run in two places. Log the fish \
+                     in again where you read the file, with `rusty-fish matrix login`."
                 );
             }
             if running {
@@ -1226,8 +1229,9 @@ fn envelope_action(action: EnvelopeAction) -> Result<(), String> {
                 taken.refused.len()
             );
             println!(
-                "Note: the fish's Matrix account is never part of an envelope. If a profile has a \
-                 table at Matrix, log the fish in here with `rusty-fish matrix login`."
+                "Note: the fish's Matrix account is never part of an envelope, because its login \
+                 is a device with keys of its own, and one device cannot run in two places. If a \
+                 profile has a table at Matrix, log the fish in here with `rusty-fish matrix login`."
             );
             println!(
                 "Note: one bot runs in one place only. Switch the fish off where the file came \
