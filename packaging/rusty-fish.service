@@ -1,0 +1,12 @@
+[Unit]
+Description=Rusty Fish
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=fish
+ExecStart=/home/fish/rusty-fish run --all
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
