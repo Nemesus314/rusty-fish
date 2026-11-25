@@ -15,10 +15,13 @@ the same conversation.
   which one.
 - Secrets are kept in the credential store of the system, or, on a Linux
   server, in files that only the fish's account can read.
+- Everything moves in one file: "Export…" writes all profiles, the bot token
+  and the API keys into a file locked with a password, and "Import…" takes
+  them in on another machine. It is also a copy to keep.
 
 ## Where it stands
 
-Version 0.4.3. It runs on Windows 11, with a window to manage it. Window
+Version 0.4.4. It runs on Windows 11, with a window to manage it. Window
 and fish also run on Linux with a desktop; that has been measured in one
 place only, Linux Mint 22.3 in a virtual machine. The program itself also
 runs on Linux without a desktop; measured in Ubuntu inside Windows (WSL),

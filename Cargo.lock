@@ -3786,7 +3786,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "rusty-fish"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "argon2",
  "base64 0.23.1",
@@ -3807,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-anthropic"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "reqwest 0.13.5",
  "rusty-fish-core",
@@ -3816,11 +3816,11 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-core"
-version = "0.4.3"
+version = "0.4.4"
 
 [[package]]
 name = "rusty-fish-discord"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "futures-util",
  "rusty-fish-core",
@@ -3835,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-house"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "rusty-fish-core",
  "rusty-fish-providers",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-matrix"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "getrandom 0.4.3",
  "matrix-sdk",
@@ -3865,7 +3865,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-openai"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "reqwest 0.13.5",
  "rusty-fish-core",
@@ -3874,7 +3874,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-providers"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "rusty-fish-anthropic",
  "rusty-fish-core",
@@ -3884,7 +3884,7 @@ dependencies = [
 
 [[package]]
 name = "rusty-fish-room"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "rusty-fish-core",
 ]
