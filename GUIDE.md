@@ -642,12 +642,20 @@ envelope written in one folder of a fish and read in another gave the same
 profile files and the same secrets, byte for byte (Ubuntu inside Windows,
 secrets in files). The way of sealing was measured before in a probe outside
 this program, on Windows and on Linux Mint, in both directions; writing or
-opening took 0.15 seconds on the PC and 0.3 seconds on that Linux Mint. Not
-measured: an envelope with real profiles and real secrets; reading into the
-credential store of Windows or the keyring of a Linux desktop; an envelope
-written on one system and read on the other by this program itself; the two
-buttons of the window against the real program (their tests run against a
-stand-in), and the dialog of the system on Linux.
+opening took 0.15 seconds on the PC and 0.3 seconds on that Linux Mint.
+
+Seen the same evening with real profiles and real secrets, through the two
+buttons of the window: "Export…" on Windows 11 wrote four profiles, the bot
+token and four API keys out of the Windows Credential Manager; the dialog
+of Windows suggested the name with the date, and a second export under the
+same name was refused. "Import…" on Linux Mint 22.3 opened that file with
+the dialog of the desktop and took what was new there: two profiles and
+three keys into the keyring. Two profiles that existed there were refused
+and named, and the token and one key were reported as the same ones.
+
+Not measured: the other direction, written on Linux and read on Windows;
+reading into the Windows Credential Manager at all; an envelope read on a
+Linux server with its secrets in files, other than with made-up ones.
 
 ## Limits
 
