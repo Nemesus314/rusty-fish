@@ -435,10 +435,17 @@ seconds; closing the window stopped the fish within one. The fish of the
 download kept a made-up secret in the keyring, found it in a new process
 and deleted it again.
 
-Not measured: a fish with real accounts started from the window on Linux;
-storing a secret through the window; other desktops than Cinnamon, and
-Wayland; other Linux systems; a keyring that is locked, or a login without
-a password.
+Seen the same day with real accounts, with the download of version 0.4.3:
+bot token and API key were stored through the window, "Load models" listed
+the models, and a profile whose rooms came over with "Share rooms" was
+switched on. The fish was at the Discord door a second later and translated
+in both directions; a profile saved while it ran was taken up at once.
+"Switch off" and closing the window each took the bot offline, with the
+line at both tables.
+
+Not measured: the Matrix door from the window on Linux; other desktops than
+Cinnamon, and Wayland; other Linux systems; a keyring that is locked, or a
+login without a password.
 
 ## A Linux server
 
@@ -543,8 +550,10 @@ from the release page, it also started on a second system, Linux Mint 22.3
 in a virtual machine. Since version 0.4.3 it is built on that Linux Mint.
 Built there it passed all tests, reached an AI service over an encrypted
 connection, and, carried back to the first place, kept a secret in files,
-served a profile and stopped cleanly on SIGTERM. All these runs were with
-made-up accounts; with real accounts only the ordinary build has run.
+served a profile and stopped cleanly on SIGTERM. These runs were with
+made-up accounts. With a real account the statically linked program has run
+at the Discord door, started from the window on that Linux Mint (see "Linux
+with a desktop"); at the Matrix door only the ordinary build has.
 
 Not measured: a login with the recovery key on Linux; a real server (WSL
 and a virtual machine with a desktop are not one); other Linux systems for

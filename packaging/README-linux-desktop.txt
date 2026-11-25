@@ -53,10 +53,14 @@ stops the fish. The fish kept a made-up secret in the keyring of the
 desktop, found it in a new process and deleted it again. All tests of the
 window passed there.
 
-Not measured: a fish with real accounts started from this window on Linux
-(the fish itself has run with real accounts on Linux, on the command line);
-other desktops than Cinnamon, and Wayland; other Linux systems; a keyring
-that is locked, or a login without a password.
+Seen the same day with real accounts, with the download of version 0.4.3:
+bot token and API key stored through the window, a profile switched on, the
+fish at the Discord door a second later, translating in both directions,
+and taken offline by "Switch off" and by closing the window.
+
+Not measured: the Matrix door from this window on Linux; other desktops
+than Cinnamon, and Wayland; other Linux systems; a keyring that is locked,
+or a login without a password.
 
 There is no entry in the start menu and no icon of its own yet.
 

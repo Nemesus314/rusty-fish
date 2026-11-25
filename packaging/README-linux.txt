@@ -43,9 +43,11 @@ What has been measured
 With real accounts the fish has run on Linux at both doors, in its ordinary
 build, on Ubuntu inside Windows (WSL). The statically linked file in this
 folder is built on Linux Mint 22.3 in a virtual machine. Built that way it
-passed all tests there, and was run with made-up accounts only: on Mint it
-reached an AI service over an encrypted connection, and on Ubuntu (WSL) it
-kept a secret in files, served a profile and stopped cleanly on SIGTERM.
+passed all tests there. With made-up accounts it reached an AI service over
+an encrypted connection on Mint, and on Ubuntu (WSL) it kept a secret in
+files, served a profile and stopped cleanly on SIGTERM. With a real account
+it has run at the Discord door on Mint, started from the window of the
+download for a desktop.
 That it asks nothing of the system was read off the file. It has not been
 started on a real server yet; if it does not run on yours, the fish can be
 built from the source on the server itself.
