@@ -5,8 +5,9 @@ Everyone writes in their own language, and an AI translates in passing.
 Rusty Fish is a translator bot for Discord channels and Matrix rooms that
 you run yourself.
 
-This folder holds the fish itself, for a server without a desktop. There is
-no window for Linux; everything is done on the command line.
+This folder holds the fish itself, for a server without a desktop;
+everything is done on the command line. For a PC with Linux and a desktop
+there is another download, with a window to manage the fish.
 
 
 What is in it
@@ -42,9 +43,11 @@ What has been measured
 The fish was built and tested on Ubuntu inside Windows (WSL), and run there
 with real accounts at both doors, in its ordinary build. This statically
 linked build passed the same tests and was run with a made-up account only.
-That it asks nothing of the system was read off the file. It has not been
-started on a real server yet; if it does not run on yours, the fish can be
-built from the source on the server itself.
+That it asks nothing of the system was read off the file, and the file of
+version 0.4.2 was fetched and started on one other system, Linux Mint 22.3
+in a virtual machine. It has not been started on a real server yet; if it
+does not run on yours, the fish can be built from the source on the server
+itself.
 
 
 License

@@ -93,17 +93,21 @@ account there.
 
 ## What you need to run your own fish
 
-- A PC with Windows 11. The fish itself, without the window, also runs on a
-  Linux server; see "A Linux server" for what has been measured there. macOS
-  has not been tested.
+- A PC with Windows 11, or with Linux and a desktop; see "Linux with a
+  desktop" for what has been measured there. The fish itself, without the
+  window, also runs on a Linux server; see "A Linux server". macOS has not
+  been tested.
 - The program. It has two parts: the fish itself (`rusty-fish.exe`, a command
-  line program) and a window to manage it (`rusty_fish_desk.exe`). Its
+  line program) and a window to manage it (`rusty_fish_desk.exe`); on Linux
+  the two are called `rusty-fish` and `rusty_fish_desk`. Its
   source is at https://github.com/Nemesus314/rusty-fish. For Windows there
   is a ready folder to download there, under "Releases": unpack it and
   start `rusty_fish_desk.exe`. It carries no paid signature, so Windows
   warns at the first start ("More info", then "Run anyway"). For Linux
-  there is the fish itself, without the window, as one file that asks
-  nothing of the system it runs on; see "A Linux server".
+  there are two: for a PC with a desktop a folder with the window and the
+  fish, see "Linux with a desktop"; and for a server the fish itself,
+  without the window, as one file that asks nothing of the system it runs
+  on, see "A Linux server".
   It is free software under the GNU Affero General Public License, version
   3 or (at your option) any later version, and comes without any warranty.
   Copyright (C) 2026 Christian Ermisch (Nemesus). The full text of the
@@ -150,8 +154,8 @@ account there.
 1. Open the window (`rusty_fish_desk.exe`). The title bar shows "AI keys",
    "Discord" and "Matrix"; each opens a window of its own. Store your API
    key under "AI keys" and your bot token under "Discord". They are kept in
-   the Windows Credential Manager, not in a file, and the window never shows
-   them again. With the token stored, the window of the bot token offers
+   the Windows Credential Manager (on Linux with a desktop: in its keyring),
+   not in a file, and the window never shows them again. With the token stored, the window of the bot token offers
    "Copy the link that brings this bot onto a server". Open that link
    yourself to add the bot to your own server. To join someone else's server
    with your own fish, send the link to whoever owns that server; they open
@@ -404,6 +408,38 @@ Limits of a mixed room:
   runs. Those have run against a simulated Discord and a simulated Matrix
   server only, each door for itself.
 
+## Linux with a desktop
+
+Window and fish also run on a PC with Linux and a desktop. Under "Releases",
+at the address of the source, there is a folder for it: unpack it and start
+`rusty_fish_desk`. The window asks for GTK 3 and a C library (glibc) of 2.34
+or newer; Linux Mint 21, Ubuntu 22.04, Debian 12 and later have both. The
+fish beside it is the same statically linked file as in the download for
+servers. Everything in this guide that is done in the window is done the
+same way there. What differs:
+
+- The secrets go to the keyring of the desktop (the Secret Service; under
+  Cinnamon and GNOME that is GNOME Keyring), which opens when you log in.
+  `rusty-fish key store file` is for servers and is not needed.
+- Profiles lie in `~/.config/rusty-fish`, in folders only your account can
+  open; the window keeps its log files and its own setting there too.
+- The fish does not keep the PC awake on Linux. If yours goes to sleep by
+  itself, switch that off in the power settings while the fish should run.
+- There is no entry in the start menu and no icon of its own yet.
+
+Measured on 25 November 2026 in one place, Linux Mint 22.3 (Cinnamon) in a
+virtual machine: the window was built there and all its tests passed. It
+opens, finds the fish beside it, and shows where it looked when there is
+none. Switched on with a made-up profile, the fish served it within three
+seconds; closing the window stopped the fish within one. The fish of the
+download kept a made-up secret in the keyring, found it in a new process
+and deleted it again.
+
+Not measured: a fish with real accounts started from the window on Linux;
+storing a secret through the window; other desktops than Cinnamon, and
+Wayland; other Linux systems; a keyring that is locked, or a login without
+a password.
+
 ## A Linux server
 
 The fish itself (`rusty-fish`, not the window) also runs under Linux, on a
@@ -503,15 +539,16 @@ The program of the download was built in the same place on 25 November
 2026, statically linked. It names no library it needs, passed all tests,
 kept and found a secret in files, reached an AI service over an encrypted
 connection, and stopped cleanly on SIGTERM. That run was with a made-up
-account; with real accounts only the ordinary build has run.
+account; with real accounts only the ordinary build has run. The same day
+the file of the download was fetched and started on a second system, Linux
+Mint 22.3 in a virtual machine; see "Linux with a desktop".
 
-Not measured: the program of the download on any other system; a login with
-the recovery key on Linux; a real server (WSL is not one); other Linux
-systems for the ordinary build, and other processors than x86-64; the file
-above as a service of the whole system under an account of its own (systemd
-checked its form, and the service measured ran in the session of a user).
-The window does not run there, and it cannot manage a fish on another
-machine.
+Not measured: a login with the recovery key on Linux; a real server (WSL
+and a virtual machine with a desktop are not one); other Linux systems for
+the ordinary build, and other processors than x86-64; the file above as a
+service of the whole system under an account of its own (systemd checked
+its form, and the service measured ran in the session of a user). The
+window cannot manage a fish on another machine.
 
 ## Limits
 
@@ -530,7 +567,8 @@ machine.
   phone: Discord carries the messages, and the fish at home translates them.
   For that the host's PC must stay on and awake. While the fish is on, it
   asks Windows not to go to sleep by itself, so no setting has to be changed,
-  and no setting is changed. It cannot help it if the lid of a laptop is
+  and no setting is changed. On Linux it does not ask; there the PC must be
+  set not to sleep by itself. It cannot help it if the lid of a laptop is
   closed, the PC is put to sleep by hand, or the battery runs out. A screen
   that turns off is fine. What is written while the fish is not running is
   caught up when it starts again.
