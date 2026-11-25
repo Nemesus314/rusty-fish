@@ -40,14 +40,15 @@ encrypted; the guide says what that means.
 What has been measured
 ----------------------
 
-The fish was built and tested on Ubuntu inside Windows (WSL), and run there
-with real accounts at both doors, in its ordinary build. This statically
-linked build passed the same tests and was run with a made-up account only.
-That it asks nothing of the system was read off the file, and the file of
-version 0.4.2 was fetched and started on one other system, Linux Mint 22.3
-in a virtual machine. It has not been started on a real server yet; if it
-does not run on yours, the fish can be built from the source on the server
-itself.
+With real accounts the fish has run on Linux at both doors, in its ordinary
+build, on Ubuntu inside Windows (WSL). The statically linked file in this
+folder is built on Linux Mint 22.3 in a virtual machine. Built that way it
+passed all tests there, and was run with made-up accounts only: on Mint it
+reached an AI service over an encrypted connection, and on Ubuntu (WSL) it
+kept a secret in files, served a profile and stopped cleanly on SIGTERM.
+That it asks nothing of the system was read off the file. It has not been
+started on a real server yet; if it does not run on yours, the fish can be
+built from the source on the server itself.
 
 
 License

@@ -26,8 +26,10 @@
 # Ordner dieses Nutzers noch darin steht.
 #
 # Benannte Grenzen:
-# - Auf einem anderen Linux ist das Programm nicht gestartet worden. Dass es
-#   dort läuft, folgt daraus, dass es nichts verlangt; gesehen ist es nicht.
+# - Gestartet wurde das Programm auf zwei Systemen, je einmal über Kreuz
+#   (25.11.2026): gebaut in WSL (Ubuntu 26.04), gestartet unter Linux Mint
+#   22.3; gebaut unter Mint, gestartet in WSL. Dass es anderswo läuft, folgt
+#   daraus, dass es nichts verlangt; ein echter Server ist nicht darunter.
 # - Nur x86-64.
 # - Der Bau-Ordner liegt unter `target/package-build`. Liegt das Repository auf
 #   einem langsamen oder mit Windows geteilten Laufwerk (WSL: /mnt/…), setzt

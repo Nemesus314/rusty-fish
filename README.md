@@ -64,8 +64,8 @@ from a clean checkout:
 
     dart run packaging/windows.dart        (on Windows)
     bash packaging/linux.sh                (on Linux; the fish for servers)
-    bash packaging/linux-desktop.sh        (on Linux with Flutter; takes the
-                                            fish from the package before)
+    bash packaging/linux-desktop.sh        (on Linux, after the one before:
+                                            it takes the fish from there)
 
 `rusty-fish.example.toml` shows a profile with every setting explained.
 

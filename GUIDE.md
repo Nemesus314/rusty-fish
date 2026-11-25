@@ -428,9 +428,9 @@ same way there. What differs:
 - There is no entry in the start menu and no icon of its own yet.
 
 Measured on 25 November 2026 in one place, Linux Mint 22.3 (Cinnamon) in a
-virtual machine: the window was built there and all its tests passed. It
-opens, finds the fish beside it, and shows where it looked when there is
-none. Switched on with a made-up profile, the fish served it within three
+virtual machine: window and fish were built there, and all tests of both
+passed, the two that use the real keyring included. The window opens, finds
+the fish beside it, and shows where it looked when there is none. Switched on with a made-up profile, the fish served it within three
 seconds; closing the window stopped the fish within one. The fish of the
 download kept a made-up secret in the keyring, found it in a new process
 and deleted it again.
@@ -535,13 +535,16 @@ that had run on Linux were brought back to Windows with the same two
 commands, after the copies there had been deleted; the two other profiles
 were refused, as they still existed there.
 
-The program of the download was built in the same place on 25 November
-2026, statically linked. It names no library it needs, passed all tests,
-kept and found a secret in files, reached an AI service over an encrypted
-connection, and stopped cleanly on SIGTERM. That run was with a made-up
-account; with real accounts only the ordinary build has run. The same day
-the file of the download was fetched and started on a second system, Linux
-Mint 22.3 in a virtual machine; see "Linux with a desktop".
+The program of the download is statically linked and names no library it
+needs. For version 0.4.2 it was built in the same place on 25 November
+2026: it passed all tests, kept and found a secret in files, reached an AI
+service over an encrypted connection, and stopped cleanly on SIGTERM; fetched
+from the release page, it also started on a second system, Linux Mint 22.3
+in a virtual machine. Since version 0.4.3 it is built on that Linux Mint.
+Built there it passed all tests, reached an AI service over an encrypted
+connection, and, carried back to the first place, kept a secret in files,
+served a profile and stopped cleanly on SIGTERM. All these runs were with
+made-up accounts; with real accounts only the ordinary build has run.
 
 Not measured: a login with the recovery key on Linux; a real server (WSL
 and a virtual machine with a desktop are not one); other Linux systems for

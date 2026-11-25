@@ -7,10 +7,10 @@
 # zu erweitern, für eine Fassung für Leute, die Linux auf ihrem PC nutzen. Zur
 # Form an dem Tag: „Eigenes Desktop-Paket", neben dem für Server.
 #
-# Aufruf, unter Linux aus dem Ordner des Repositorys:
+# Aufruf, unter Linux aus dem Ordner des Repositorys, eins nach dem anderen:
 #
-#     bash packaging/linux.sh             (dort, wo Rust und musl-gcc sind)
-#     bash packaging/linux-desktop.sh     (dort, wo Flutter ist)
+#     bash packaging/linux.sh
+#     bash packaging/linux-desktop.sh
 #
 # Der Fisch und seine Lizenzhinweise kommen aus dem Paket für Server, das
 # `packaging/linux.sh` aus demselben Commit gebaut hat: derselbe statisch
@@ -18,15 +18,22 @@
 # nennt PACKAGE_SERVER die Datei. Die Maske baut dieses Skript selbst.
 #
 # Gebraucht werden: Flutter mit den Werkzeugen für Linux (clang, cmake,
-# ninja-build, pkg-config, libgtk-3-dev), python3 und git.
+# ninja-build, pkg-config, libgtk-3-dev), python3 und git; für den Fisch, was
+# `packaging/linux.sh` nennt.
 #
-# Warum zwei Rechner erlaubt sind: die Maske ist kein statisches Programm. Sie
-# verlangt GTK 3 und die C-Bibliothek des Systems, in mindestens der Fassung
-# des Rechners, auf dem sie gebaut wurde. Also baut man sie auf einem älteren
-# Linux, damit sie auch auf neueren startet. Gemessen am 25.11.2026: gebaut
-# unter Linux Mint 22.3 (Basis Ubuntu 24.04, glibc 2.39) verlangt sie glibc ab
-# 2.34. Der Fisch verlangt nichts und darf woanders gebaut sein (gemessen: in
-# WSL unter Ubuntu 26.04 gebaut, startet er unter Mint 22.3).
+# Auf welchem Rechner: auf einem älteren Linux. Die Maske ist kein statisches
+# Programm. Sie verlangt GTK 3 und die C-Bibliothek des Systems, in mindestens
+# der Fassung des Rechners, auf dem sie gebaut wurde; gebaut auf einem älteren
+# Linux startet sie auch auf neueren. Gemessen am 25.11.2026: gebaut unter
+# Linux Mint 22.3 (Basis Ubuntu 24.04, glibc 2.39) verlangt sie glibc ab 2.34.
+#
+# Der Fisch verlangt nichts und dürfte woanders gebaut sein; geprüft werden
+# nur seine Fassung und sein Commit. Am 25.11.2026 kam er zuerst aus WSL
+# (Ubuntu 26.04) und startete unter Mint. Nemesus danach: „Ich glaube, das
+# sollten wir als nächsten nachholen", das Mint sei auch sein Labor unter
+# Linux mit Desktop. Seither entstehen beide Pakete an einem Ort. Gemessen
+# dort, mit einem Prozessor: der statische Bau 57 Minuten, die Maske 25
+# Sekunden; der so gebaute Fisch startete auch unter Ubuntu 26.04 (WSL).
 #
 # Wie in den anderen Paketen bricht das Skript ab, wenn der Ordner oder der
 # Name dieses Nutzers in einer Datei der Maske steht. Gemessen am 25.11.2026:
