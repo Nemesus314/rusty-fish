@@ -67,7 +67,13 @@ fi
 BUILD="${PACKAGE_BUILD_DIR:-$REPO/target/package-build}"
 NAME="RustyFish-$VERSION-linux-x64"
 PACKAGES="$REPO/target/package"
-OUT="$PACKAGES/$NAME"
+# Der Ordner wird im Linux-Dateisystem zusammengesetzt, nicht im Repository.
+# Gemessen am 25.11.2026: lag er auf einem Laufwerk von Windows (WSL, /mnt/…),
+# trug im Archiv jede Datei die Rechte 0777, für alle schreibbar und
+# ausführbar, weil ein solches Laufwerk keine Rechte von Linux kennt.
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+OUT="$STAGE/$NAME"
 
 say "building the fish"
 # Mit dem Trennzeichen 0x1f, damit ein Pfad mit Leerzeichen heil bleibt. Für
@@ -88,20 +94,25 @@ if grep -a -q -- "$HOME/" "$FISH" || grep -a -q -- "$REPO/" "$FISH"; then
 fi
 
 say "putting the folder together"
-rm -rf "$OUT"
-mkdir -p "$OUT"
+mkdir -m 755 "$OUT"
+mkdir -p "$PACKAGES"
 install -m 755 "$FISH" "$OUT/rusty-fish"
 install -m 644 LICENSE GUIDE.md packaging/rusty-fish.service "$OUT/"
 sed -e "s/{version}/$VERSION/g" -e "s/{commit}/$COMMIT/g" packaging/README-linux.txt > "$OUT/README.txt"
 
 say "collecting the notices of the parts"
 python3 packaging/notices.py "$TARGET" "$VERSION" "$COMMIT" rusty-fish > "$OUT/THIRD-PARTY-NOTICES.txt"
+chmod 644 "$OUT/README.txt" "$OUT/THIRD-PARTY-NOTICES.txt"
 
 # Ohne den Namen und die Nummer dieses Nutzers im Archiv.
-tar -C "$PACKAGES" --owner=0 --group=0 --numeric-owner -czf "$PACKAGES/$NAME.tar.gz" "$NAME"
+tar -C "$STAGE" --owner=0 --group=0 --numeric-owner -czf "$PACKAGES/$NAME.tar.gz" "$NAME"
+# Nur das Programm ist ausführbar, und nichts ist für andere schreibbar.
+LISTED="$(tar -tvzf "$PACKAGES/$NAME.tar.gz")"
+WRONG="$(printf '%s\n' "$LISTED" | grep -v -e '^drwxr-xr-x ' -e '^-rw-r--r-- ' -e '^-rwxr-xr-x .*/rusty-fish$' || true)"
+[ -z "$WRONG" ] || fail "the archive carries rights it should not:
+$WRONG"
 
 say "done"
-echo "folder:  $OUT"
 echo "file:    $PACKAGES/$NAME.tar.gz ($(stat -c %s "$PACKAGES/$NAME.tar.gz") bytes)"
 echo "sha256:  $(sha256sum "$PACKAGES/$NAME.tar.gz" | cut -d ' ' -f 1)"
 echo "version: $VERSION, commit $COMMIT"
