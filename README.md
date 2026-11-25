@@ -28,8 +28,8 @@ Ready to download, under
 [Releases](https://github.com/Nemesus314/rusty-fish/releases):
 
 - For Windows a folder with the window and the fish: unpack it and start
-  `rusty_fish_desk.exe`. It carries no paid signature, so Windows warns at
-  the first start.
+  `rusty_fish_desk.exe`. It carries no paid signature, so Windows may warn
+  at the first start.
 - For Linux with a desktop a folder with the window and the fish: unpack it
   and start `rusty_fish_desk`. The window asks for GTK 3 and glibc 2.34 or
   newer. There is no entry in the start menu yet.

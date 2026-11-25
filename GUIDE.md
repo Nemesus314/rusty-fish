@@ -103,7 +103,7 @@ account there.
   source is at https://github.com/Nemesus314/rusty-fish. For Windows there
   is a ready folder to download there, under "Releases": unpack it and
   start `rusty_fish_desk.exe`. It carries no paid signature, so Windows
-  warns at the first start ("More info", then "Run anyway"). For Linux
+  may warn at the first start ("More info", then "Run anyway"). For Linux
   there are two: for a PC with a desktop a folder with the window and the
   fish, see "Linux with a desktop"; and for a server the fish itself,
   without the window, as one file that asks nothing of the system it runs

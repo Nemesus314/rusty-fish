@@ -12,10 +12,10 @@ Starting it
 1. Unpack this folder to any place you like. Keep its files together.
 2. Start rusty_fish_desk.exe. That is the window. The file rusty-fish.exe
    is the fish itself; the window starts it for you.
-3. The first time, Windows shows a blue warning, "Windows protected your
-   PC". It appears because this program carries no paid signature. Click
-   "More info", then "Run anyway". Do that only if you got this folder from
-   the address below or from someone you trust.
+3. The first time, Windows may show a blue warning, "Windows protected
+   your PC", because this program carries no paid signature. If it does,
+   click "More info", then "Run anyway". Do that only if you got this
+   folder from the address below or from someone you trust.
 
 What you need: Windows 11 (other versions have not been tested), a Discord
 bot or a Matrix account for the fish, and an API key of an AI service. The
