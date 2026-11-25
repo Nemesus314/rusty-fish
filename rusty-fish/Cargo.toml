@@ -8,6 +8,16 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Für den Umschlag (`envelope`): aus dem Kennwort wird der Schlüssel. Ohne die
+# Zusätze des Bausteins; mit ihnen kämen zwei weitere mit (gemessen am
+# 25.11.2026 in der Sonde). Neu sind damit `argon2` und `blake2`; die
+# Verschlüsselung, Base64, die Zufallszahlen und das Löschen aus dem Speicher
+# brachte der Fisch über die Matrix-Tür schon mit.
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "zeroize"] }
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+getrandom = "0.4.3"
+zeroize = "1.9.2"
 clap = { version = "4.6.8", features = ["derive"] }
 keyring = "4.2.0"
 rpassword = "7.5.5"

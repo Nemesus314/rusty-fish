@@ -498,7 +498,9 @@ command line.
    commands bring the profiles back to the PC, and the file is also a copy
    to keep. On the command line only; the window has no button for it yet.
    One bot runs in one place only, on the PC or on the server: two fish
-   with the same bot would both translate everything.
+   with the same bot would both translate everything. To carry the secrets
+   along in the same file, locked with a password, see "Moving and backing
+   up".
 5. Start it with `rusty-fish run --all`. To run it as a service of systemd,
    save this as `/etc/systemd/system/rusty-fish.service`, with the account
    of the fish in place of `fish` and the place of the program in place of
@@ -570,6 +572,69 @@ the ordinary build, and other processors than x86-64; the file above as a
 service of the whole system under an account of its own (systemd checked
 its form, and the service measured ran in the session of a user). The
 window cannot manage a fish on another machine.
+
+## Moving and backing up
+
+To move a fish to another machine, or to keep a copy of everything, there is
+the envelope: one file that holds all profiles, each with what it has
+learned, together with the bot token and the API keys, locked with a
+password. It is for yourself, never for passing on to others; "Share rooms"
+is for that.
+
+- `rusty-fish envelope write FILE` writes it. It asks for a password twice;
+  the password needs at least twelve characters, of any kind. An existing
+  file is never replaced. Name the file as you like; the ending `.rustyfish`
+  and the date in the name make it easy to find again.
+- `rusty-fish envelope read FILE` opens it on the other machine and takes
+  what it holds. Nothing that is there already is replaced: a profile of a
+  name that exists is refused and named, and so is a secret where another
+  one is stored. Remove the one there first to replace it. With a wrong
+  password nothing is changed.
+- The secrets go where secrets are kept on that machine: the credential
+  store of the system, or, on a Linux server with `key store file`, files
+  that are not encrypted. On such a server the envelope on its way is better
+  protected than where it arrives.
+- The fish's Matrix account is never in the envelope. It is a device with
+  keys of its own, and the same device must not run in two places. Log the
+  fish in again on the new machine.
+- One bot runs in one place only. Switch the fish off where the envelope
+  came from before you switch it on where it went.
+- Only the password opens the file, and nothing brings a forgotten one back.
+  A copy you keep holds the token and the keys of that day; if you renew one
+  later, the copy still has the old one.
+- On the command line only so far; the window has no button for it yet.
+
+The file is text. Its head can be read without the password and says only
+what is needed to open it, and when and by which version it was written:
+
+```
+RUSTY-FISH-ENVELOPE 1
+written: 2026-11-25T20:38:51Z
+program: 0.4.3
+kdf: argon2id13 2 65536 1
+cipher: xchacha20poly1305
+--
+(Base64 in lines of 76 characters)
+```
+
+Nothing about what is inside stands there: no names, no services, no counts.
+The key is derived from the password with Argon2id, version 1.3 (2 passes,
+65536 KiB of memory, 1 lane, 32 bytes out). The Base64 holds a salt of 16
+bytes, a nonce of 24 bytes, and the contents sealed with XChaCha20-Poly1305,
+with the head, up to the line of two dashes, as associated data: a changed
+head does not open. Inside is a JSON document with the text that `profile
+export` writes and the secrets under the names that `key set` knows. Only
+this program reads the file; this paragraph is its whole form.
+
+Measured on 25 November 2026 with made-up profiles and made-up secrets: an
+envelope written in one folder of a fish and read in another gave the same
+profile files and the same secrets, byte for byte (Ubuntu inside Windows,
+secrets in files). The way of sealing was measured before in a probe outside
+this program, on Windows and on Linux Mint, in both directions; writing or
+opening took 0.15 seconds on the PC and 0.3 seconds on that Linux Mint. Not
+measured: an envelope with real profiles and real secrets; reading into the
+credential store of Windows or the keyring of a Linux desktop; an envelope
+written on one system and read on the other by this program itself.
 
 ## Limits
 

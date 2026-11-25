@@ -9,6 +9,7 @@
 mod awake;
 mod botlink;
 mod doors;
+mod envelope;
 mod keys;
 mod lock;
 mod profiles;
@@ -118,6 +119,12 @@ enum Command {
         #[command(subcommand)]
         action: MatrixAction,
     },
+    /// Move or back up everything at once: all profiles with the bot token
+    /// and the API keys in one file, locked with a password
+    Envelope {
+        #[command(subcommand)]
+        action: EnvelopeAction,
+    },
     /// Open the doors (Discord, Matrix) and translate between the configured channels
     Run {
         /// Settings file; see rusty-fish.example.toml [default: rusty-fish.toml]
@@ -183,6 +190,41 @@ enum KeyAction {
     Store {
         #[arg(value_enum)]
         place: Option<Kept>,
+    },
+}
+
+/// Der Umschlag; siehe `envelope`. Die Namen des Befehls und seiner zwei
+/// Schritte hat Nemesus am 25.11.2026 gewählt.
+#[derive(Subcommand)]
+enum EnvelopeAction {
+    /// Write all profiles, the bot token and the API keys into one file,
+    /// locked with a password of at least twelve characters. Asks for the
+    /// password twice with hidden input unless --stdin is given. The fish's
+    /// Matrix account is never part of it. A forgotten password is final
+    Write {
+        /// The file to write; an existing file is never replaced
+        path: PathBuf,
+        /// Read the password as two equal lines from standard input instead
+        /// of asking
+        #[arg(long)]
+        stdin: bool,
+        /// Print what was written as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a file written by `envelope write` and take what it holds.
+    /// Nothing that is here already is replaced: a profile or a secret of
+    /// the same name is refused and named. Asks for the password with hidden
+    /// input unless --stdin is given
+    Read {
+        /// The file to read
+        path: PathBuf,
+        /// Read the password as one line from standard input instead of asking
+        #[arg(long)]
+        stdin: bool,
+        /// Print what was taken and what was refused as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -556,6 +598,7 @@ async fn run(command: Command) -> Result<(), String> {
         }
         Command::Profile { action } => profile(action),
         Command::Matrix { action } => matrix(action).await,
+        Command::Envelope { action } => envelope_action(action),
         Command::Guide => {
             print!("{}", guide());
             Ok(())
@@ -980,6 +1023,216 @@ fn profile(action: ProfileAction) -> Result<(), String> {
                      came from before you switch it on here, or everything is translated twice."
                 );
             }
+            Ok(())
+        }
+    }
+}
+
+/// Eine Zeile von der Standardeingabe, ohne ihr Zeilenende und ohne ein
+/// vorangestelltes BOM. Leerzeichen bleiben: sie können zu einem Kennwort
+/// gehören.
+fn line_from_stdin() -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|e| format!("cannot read from standard input: {e}"))?;
+    Ok(line.trim_start_matches('\u{feff}').trim_end_matches(['\r', '\n']).to_owned())
+}
+
+/// Die Befehle rund um den Umschlag.
+fn envelope_action(action: EnvelopeAction) -> Result<(), String> {
+    use zeroize::Zeroize;
+    let hidden = |prompt: &str| {
+        rpassword::prompt_password(prompt).map_err(|e| format!("cannot read from the terminal: {e}"))
+    };
+    match action {
+        EnvelopeAction::Write { path, stdin, json } => {
+            // Vor der Frage nach dem Kennwort: wer es zweimal getippt hat,
+            // soll nicht danach erfahren, dass der Name vergeben ist.
+            if path.exists() {
+                return Err(format!(
+                    "{} already exists; choose another name, nothing is replaced",
+                    path.display()
+                ));
+            }
+            let folder = folder()?;
+            let names = folder.names()?;
+            let mut secrets = Vec::new();
+            // Was man einfügt, reist mit. Der Zugang zu Matrix nie: er ist
+            // ein Gerät, und dasselbe Gerät darf nicht an zwei Orten laufen.
+            for entry in secrets::entries() {
+                if let Some(secret) = keys::load(entry)? {
+                    secrets.push((entry.to_owned(), secret.expose().to_owned()));
+                }
+            }
+            if names.is_empty() && secrets.is_empty() {
+                return Err("there is nothing to put into an envelope: no profile and no stored \
+                            secret"
+                    .to_owned());
+            }
+            // Das Kennwort steht in keinem Argument, keiner Datei und keiner
+            // Ausgabe. Zweimal, auch von einer Oberfläche: ein Tippfehler in
+            // dem Kennwort, das die einzige Kopie schützt, ist nicht zu
+            // bemerken und nicht zu heilen.
+            let (mut password, mut again) = if stdin {
+                (line_from_stdin()?, line_from_stdin()?)
+            } else {
+                (
+                    hidden("Password for the envelope, at least 12 characters (input stays hidden): ")?,
+                    hidden("The same password once more: ")?,
+                )
+            };
+            let equal = password == again;
+            again.zeroize();
+            if !equal {
+                password.zeroize();
+                return Err("the two passwords differ; nothing was written".to_owned());
+            }
+            let sealed = envelope::check_password(&password).and_then(|()| {
+                let document = if names.is_empty() { None } else { Some(folder.export(now())?.0) };
+                let body = envelope::body(document.as_deref(), &secrets);
+                envelope::seal(body.as_bytes(), &password, now())
+            });
+            password.zeroize();
+            profiles::write_new(&path, sealed?.as_bytes())?;
+
+            let matrix_left_out = keys::load(secrets::MATRIX)?.is_some();
+            let running = lock::running(folder.dir(), profiles::BOT).is_some();
+            if json {
+                let entries: Vec<&str> = secrets.iter().map(|(entry, _)| entry.as_str()).collect();
+                println!(
+                    "{}",
+                    pretty(&json!({
+                        "profiles": names.len(),
+                        "secrets": entries,
+                        "matrix_left_out": matrix_left_out,
+                        "running": running,
+                    }))
+                );
+                return Ok(());
+            }
+            let profiles = if names.len() == 1 { "profile" } else { "profiles" };
+            let word = if secrets.len() == 1 { "secret" } else { "secrets" };
+            println!(
+                "{} {profiles} and {} {word} written to {}",
+                names.len(),
+                secrets.len(),
+                path.display()
+            );
+            for (entry, _) in &secrets {
+                println!("In it: {}.", secrets::label(entry));
+            }
+            println!(
+                "Note: only the password opens this file, and nothing brings a forgotten one back."
+            );
+            if matrix_left_out {
+                println!(
+                    "Note: the fish's Matrix account is not in it. Log the fish in again where you \
+                     read the file, with `rusty-fish matrix login`."
+                );
+            }
+            if running {
+                println!(
+                    "Note: the fish is running here. What it learns from now on (who agreed, \
+                     what was read) is not in the file; to move, switch it off first and write \
+                     the envelope again."
+                );
+            }
+            Ok(())
+        }
+        EnvelopeAction::Read { path, stdin, json } => {
+            let cannot = |e: std::io::Error| format!("cannot read {}: {e}", path.display());
+            let size = std::fs::metadata(&path).map_err(cannot)?.len();
+            if size > envelope::LIMIT {
+                return Err(format!(
+                    "{} is larger than an envelope can be; nothing was changed",
+                    path.display()
+                ));
+            }
+            let text = std::fs::read_to_string(&path).map_err(cannot)?;
+            // Die Datei ohne Geheimnisse ist kein Umschlag; lieber sagen,
+            // womit man sie liest, als nach einem Kennwort fragen.
+            if profiles::is_export(&text) {
+                return Err(format!(
+                    "{} is written by `rusty-fish profile export` and has no password; read it \
+                     with `rusty-fish profile import`",
+                    path.display()
+                ));
+            }
+            let mut password = if stdin {
+                line_from_stdin()?
+            } else {
+                hidden("Password of the envelope (input stays hidden): ")?
+            };
+            let opened = envelope::open(&text, &password);
+            password.zeroize();
+            let contents = envelope::contents(&opened?)?;
+
+            let folder = folder()?;
+            let imported = match &contents.profiles {
+                Some(document) => folder.import_all(document)?,
+                None => profiles::Imported { created: Vec::new(), refused: Vec::new() },
+            };
+            let taken = envelope::take_secrets(
+                &contents.secrets,
+                &secrets::entries(),
+                &|entry| Ok(keys::load(entry)?.map(|secret| secret.expose().to_owned())),
+                &keys::store,
+            )
+            .map_err(|why| {
+                // Die Profile sind dann schon da; die Meldung sagt es, damit
+                // niemand glaubt, es sei nichts geschehen.
+                if imported.created.is_empty() {
+                    why
+                } else {
+                    format!("{why}; profiles taken before that: {}", imported.created.join(", "))
+                }
+            })?;
+
+            if json {
+                let refused: Vec<serde_json::Value> = taken
+                    .refused
+                    .iter()
+                    .map(|(name, why)| json!({ "name": name, "why": why }))
+                    .collect();
+                let mut all = imported.json();
+                all["secrets"] =
+                    json!({ "stored": taken.stored, "same": taken.same, "refused": refused });
+                println!("{}", pretty(&all));
+                return Ok(());
+            }
+            for name in &imported.created {
+                println!("Profile \"{name}\" taken.");
+            }
+            for (name, why) in &imported.refused {
+                println!("Profile \"{name}\" refused: {why}.");
+            }
+            let place = keys::described(&keys::place());
+            for entry in &taken.stored {
+                println!("{} stored in {place}.", secrets::label(entry));
+            }
+            for entry in &taken.same {
+                println!("{}: the same one is stored here already.", secrets::label(entry));
+            }
+            for (entry, why) in &taken.refused {
+                println!("{} refused: {why}.", secrets::label(entry));
+            }
+            println!(
+                "Profiles: {} taken, {} refused. Secrets: {} stored, {} here already, {} refused.",
+                imported.created.len(),
+                imported.refused.len(),
+                taken.stored.len(),
+                taken.same.len(),
+                taken.refused.len()
+            );
+            println!(
+                "Note: the fish's Matrix account is never part of an envelope. If a profile has a \
+                 table at Matrix, log the fish in here with `rusty-fish matrix login`."
+            );
+            println!(
+                "Note: one bot runs in one place only. Switch the fish off where the file came \
+                 from before you switch it on here, or everything is translated twice."
+            );
             Ok(())
         }
     }

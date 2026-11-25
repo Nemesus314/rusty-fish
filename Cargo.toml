@@ -41,3 +41,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.digest]
 opt-level = 3
+# Dasselbe gilt für den Umschlag (`envelope`): 64 MiB und zwei Durchgänge sind
+# die Arbeit, die ein Kennwort kosten soll, und unoptimiert kostet sie ein
+# Vielfaches.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
