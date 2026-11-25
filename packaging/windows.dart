@@ -94,7 +94,26 @@ Future<void> main(List<String> arguments) async {
     fail('rusty-fish.exe still carries the name of this user ($user) in its paths');
   }
   say('building the window');
-  await run('flutter', ['build', 'windows', '--release'], directory: '${repo.path}/desk', show: true);
+  // In einer Kopie an einem Ort, der nichts über diesen Rechner sagt. Seit die
+  // Maske einen Baustein mit eigenem Maschinencode trägt (`file_selector`,
+  // 25.11.2026), schreibt Flutter den Ort einer Datei hinein, die es beim
+  // Bauen erzeugt (`…/desk/.dart_tool/flutter_build/dart_plugin_registrant.dart`).
+  // Gemessen am 26.11.2026: gebaut im Repository stand so dessen ganzer Pfad
+  // in `data/app.so`. Der Ordner der öffentlichen Dateien trägt keinen Namen
+  // eines Nutzers. Kopiert wird, was git kennt oder kennen würde: keine
+  // Bau-Ausgaben.
+  final public = Platform.environment['PUBLIC'];
+  if (public == null || public.isEmpty) fail('cannot tell the folder for everyone (PUBLIC)');
+  final neutral = Directory('$public\\rusty-fish-build');
+  if (neutral.existsSync()) neutral.deleteSync(recursive: true);
+  final listed = await run('git', ['ls-files', '-co', '--exclude-standard', '--', 'desk']);
+  for (final line in const LineSplitter().convert(listed)) {
+    if (line.trim().isEmpty) continue;
+    final target = File('${neutral.path}\\${line.replaceAll('/', '\\')}');
+    target.parent.createSync(recursive: true);
+    File('${repo.path}\\${line.replaceAll('/', '\\')}').copySync(target.path);
+  }
+  await run('flutter', ['build', 'windows', '--release'], directory: '${neutral.path}\\desk', show: true);
 
   final name = 'RustyFish-$version-windows-x64';
   final packages = Directory('${repo.path}/target/package');
@@ -103,7 +122,8 @@ Future<void> main(List<String> arguments) async {
   out.createSync(recursive: true);
 
   say('putting the folder together');
-  copyTree(Directory('${repo.path}/desk/build/windows/x64/runner/Release'), out);
+  copyTree(Directory('${neutral.path}\\desk\\build\\windows\\x64\\runner\\Release'), out);
+  neutral.deleteSync(recursive: true);
   copy(fish.path, '${out.path}/rusty-fish.exe');
   final from = runtimeFolder();
   for (final file in runtime) {
@@ -128,6 +148,35 @@ Future<void> main(List<String> arguments) async {
     'as Flutter collects them. Rusty Fish $version.\n\n'
     '${utf8.decode(gzip.decode(window.readAsBytesSync()))}',
   );
+
+  // Weder der Ordner dieses Nutzers noch der des Repositorys in einer Datei
+  // des Pakets, in keiner Schreibweise. Für den Fisch allein gab es die
+  // Prüfung schon; seit dem 26.11.2026 gilt sie für alles, was hinausgeht.
+  final traces = <String>[];
+  final needles = <String>{
+    for (final path in [home, repo.path]) ...[
+      path,
+      path.replaceAll('\\', '/'),
+      path.replaceAll('/', '\\'),
+    ],
+  };
+  for (final file in out.listSync(recursive: true).whereType<File>()) {
+    final bytes = file.readAsBytesSync();
+    final plain = latin1.decode(bytes);
+    // Windows schreibt Pfade auch mit zwei Bytes je Zeichen in Programme.
+    final wide = String.fromCharCodes([
+      for (var i = 0; i + 1 < bytes.length; i += 2) bytes[i] | (bytes[i + 1] << 8),
+    ]);
+    final shifted = String.fromCharCodes([
+      for (var i = 1; i + 1 < bytes.length; i += 2) bytes[i] | (bytes[i + 1] << 8),
+    ]);
+    if (needles.any((needle) => plain.contains(needle) || wide.contains(needle) || shifted.contains(needle))) {
+      traces.add(file.path.substring(out.path.length + 1));
+    }
+  }
+  if (traces.isNotEmpty) {
+    fail('the package still carries paths of this machine:\n${traces.join('\n')}');
+  }
 
   // Windows bringt ein tar mit, das ZIP-Dateien schreibt.
   final zip = File('${packages.path}/$name.zip');

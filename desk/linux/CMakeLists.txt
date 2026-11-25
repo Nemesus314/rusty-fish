@@ -15,6 +15,13 @@ cmake_policy(SET CMP0063 NEW)
 
 # Load bundled libraries from the lib/ directory relative to the binary.
 set(CMAKE_INSTALL_RPATH "$ORIGIN/lib")
+# Kein Ordner des Bau-Rechners als Suchpfad in einer Bibliothek. Gemessen am
+# 25.11.2026 mit dem ersten Baustein, der eigenen Maschinencode mitbringt
+# (`file_selector_linux`): seine Bibliothek trug `…/desk/linux/flutter/ephemeral`
+# des Bau-Rechners als Suchpfad. Sie wird als Datei ins Paket kopiert und
+# bekommt deshalb nicht, wie das Programm, beim Zusammenstellen den Suchpfad
+# von oben. Was sie braucht, hat das Programm zu dem Zeitpunkt schon geladen.
+set(CMAKE_SKIP_BUILD_RPATH TRUE)
 
 # Root filesystem for cross-building.
 if(FLUTTER_TARGET_PLATFORM_SYSROOT)

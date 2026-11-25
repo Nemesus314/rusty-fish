@@ -36,8 +36,12 @@
 # Sekunden; der so gebaute Fisch startete auch unter Ubuntu 26.04 (WSL).
 #
 # Wie in den anderen Paketen bricht das Skript ab, wenn der Ordner oder der
-# Name dieses Nutzers in einer Datei der Maske steht. Gemessen am 25.11.2026:
-# Flutter schreibt sie nicht hinein, anders als der Rust-Compiler.
+# Name dieses Nutzers in einer Datei der Maske steht. Gemessen am 25.11.2026
+# mittags: Flutter schreibt sie nicht hinein, anders als der Rust-Compiler.
+# Am Abend desselben Tages, mit dem ersten Baustein mit eigenem Maschinencode
+# (dem Dateidialog für „Export…" und „Import…"), schrieb es doch zwei hinein;
+# seither wird die Maske in einer Kopie unter /tmp/rusty-fish-build gebaut,
+# und die Suchpfade der Bibliotheken werden geprüft.
 #
 # Benannte Grenzen:
 # - Gestartet wurde die Maske nur unter Linux Mint 22.3 (Cinnamon, X11), in
@@ -84,7 +88,9 @@ build it first with: bash packaging/linux.sh (or name the file in PACKAGE_SERVER
 # Zusammengesetzt wird im Linux-Dateisystem, nicht im Repository; siehe
 # `packaging/linux.sh`.
 STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+# Wo die Maske gebaut wird; siehe unten.
+BUILD=/tmp/rusty-fish-build
+trap 'rm -rf "$STAGE" "$BUILD"' EXIT
 OUT="$STAGE/$NAME"
 
 say "taking the fish from the package for servers"
@@ -103,16 +109,33 @@ fi
 [ "$("$FISH" --version)" = "rusty-fish $VERSION" ] || fail "the fish calls itself $("$FISH" --version), not $VERSION"
 
 say "building the window"
-# Ohne Reste eines früheren Baus im Ordner, der gleich kopiert wird.
-rm -rf desk/build/linux/x64/release
-(cd desk && FLUTTER_SUPPRESS_ANALYTICS=true flutter build linux --release 2>&1 | tail -n 2)
-BUNDLE="$REPO/desk/build/linux/x64/release/bundle"
+# In einer Kopie an einem Ort, der nichts über diesen Rechner sagt, und damit
+# ohne Reste eines früheren Baus. Seit die Maske einen Baustein mit eigenem
+# Maschinencode trägt (`file_selector`, 25.11.2026), schreibt Flutter den Ort
+# einer Datei hinein, die es beim Bauen erzeugt
+# (`…/desk/.dart_tool/flutter_build/dart_plugin_registrant.dart`). Gemessen an
+# dem Tag: gebaut im Repository stand so der Ordner des Nutzers in `libapp.so`,
+# und dieses Skript brach an der Prüfung unten ab.
+# Kopiert wird, was git kennt oder kennen würde: keine Bau-Ausgaben.
+rm -rf "$BUILD"
+mkdir -m 700 "$BUILD"
+gitc ls-files -co --exclude-standard -z -- desk | tar -c --null -T - | tar -x -C "$BUILD"
+(cd "$BUILD/desk" && FLUTTER_SUPPRESS_ANALYTICS=true flutter build linux --release 2>&1 | tail -n 2)
+BUNDLE="$BUILD/desk/build/linux/x64/release/bundle"
 [ -x "$BUNDLE/rusty_fish_desk" ] || fail "the build left no window at $BUNDLE"
 
 # Weder der Ordner noch der Name dieses Nutzers in einer Datei der Maske.
 TRACES="$(grep -a -r -l -e "$HOME/" -e "$REPO/" -e "/$(id -un)/" "$BUNDLE" || true)"
 [ -z "$TRACES" ] || fail "the window still carries paths of this machine:
 $TRACES"
+# Und keine Datei sucht ihre Bibliotheken an einem festen Ort: nur neben sich.
+for file in "$BUNDLE/rusty_fish_desk" "$BUNDLE"/lib/*.so; do
+    SEARCH="$(readelf -d "$file" | sed -n 's/.*(R\(UN\)\{0,1\}PATH).*\[\(.*\)\]/\2/p')"
+    case "$SEARCH" in
+        '' | '$ORIGIN' | '$ORIGIN/lib') ;;
+        *) fail "$(basename "$file") looks for its libraries in a fixed place: $SEARCH" ;;
+    esac
+done
 
 say "putting the folder together"
 mkdir -m 755 "$OUT"
