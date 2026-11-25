@@ -102,7 +102,8 @@ account there.
   is a ready folder to download there, under "Releases": unpack it and
   start `rusty_fish_desk.exe`. It carries no paid signature, so Windows
   warns at the first start ("More info", then "Run anyway"). For Linux
-  there is nothing ready yet; there you build the program from the source.
+  there is the fish itself, without the window, as one file that asks
+  nothing of the system it runs on; see "A Linux server".
   It is free software under the GNU Affero General Public License, version
   3 or (at your option) any later version, and comes without any warranty.
   Copyright (C) 2026 Christian Ermisch (Nemesus). The full text of the
@@ -406,9 +407,12 @@ Limits of a mixed room:
 ## A Linux server
 
 The fish itself (`rusty-fish`, not the window) also runs under Linux, on a
-server without a desktop. There is no ready program for it yet: it is built
-from the source, with Rust and a C compiler (`cargo build --release -p
-rusty-fish`). Everything is done on the command line.
+server without a desktop. Under "Releases", at the address of the source,
+there is a folder with the program as one file. It is statically linked: it
+asks nothing of the system it runs on, no library and no particular version
+of Linux. The fish can also be built from the source, with Rust and a C
+compiler (`cargo build --release -p rusty-fish`). Everything is done on the
+command line.
 
 1. Give the fish an account of its own on the server and work as that
    account. `rusty-fish profile dir` shows where the profiles lie; the
@@ -495,8 +499,15 @@ that had run on Linux were brought back to Windows with the same two
 commands, after the copies there had been deleted; the two other profiles
 were refused, as they still existed there.
 
-Not measured: a login with the recovery key on Linux; a real server (WSL is not
-one); other Linux systems, and other processors than x86-64; the file
+The program of the download was built in the same place on 25 November
+2026, statically linked. It names no library it needs, passed all tests,
+kept and found a secret in files, reached an AI service over an encrypted
+connection, and stopped cleanly on SIGTERM. That run was with a made-up
+account; with real accounts only the ordinary build has run.
+
+Not measured: the program of the download on any other system; a login with
+the recovery key on Linux; a real server (WSL is not one); other Linux
+systems for the ordinary build, and other processors than x86-64; the file
 above as a service of the whole system under an account of its own (systemd
 checked its form, and the service measured ran in the session of a user).
 The window does not run there, and it cannot manage a fish on another

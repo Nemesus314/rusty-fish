@@ -1126,6 +1126,20 @@ mod tests {
         assert!(text.contains("Copyright (C) 2026 Christian Ermisch (Nemesus)."));
     }
 
+    /// Die Datei für systemd liegt dem Linux-Paket bei, und der Leitfaden
+    /// zeigt dieselbe zum Abschreiben. Zwei Fassungen, die auseinanderlaufen,
+    /// wären schlimmer als keine.
+    #[test]
+    fn the_file_for_systemd_is_the_one_the_guide_shows() {
+        let text = guide();
+        let shown: Vec<&str> = text.lines().map(str::trim).collect();
+        for line in include_str!("../../packaging/rusty-fish.service").lines() {
+            if !line.trim().is_empty() {
+                assert!(shown.contains(&line.trim()), "the guide does not show the line {line:?}");
+            }
+        }
+    }
+
     #[test]
     fn the_guide_ends_with_the_version_it_describes() {
         let text = guide();
