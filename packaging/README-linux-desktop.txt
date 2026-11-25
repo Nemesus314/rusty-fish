@@ -56,11 +56,13 @@ window passed there.
 Seen the same day with real accounts, with the download of version 0.4.3:
 bot token and API key stored through the window, a profile switched on, the
 fish at the Discord door a second later, translating in both directions,
-and taken offline by "Switch off" and by closing the window.
+and taken offline by "Switch off" and by closing the window. The Matrix
+door was seen the same evening: the fish logged in through the window with
+the recovery key, a profile at Matrix beside one at Discord in the same
+fish, agreement by the sign "OK", and translation in both directions.
 
-Not measured: the Matrix door from this window on Linux; other desktops
-than Cinnamon, and Wayland; other Linux systems; a keyring that is locked,
-or a login without a password.
+Not measured: other desktops than Cinnamon, and Wayland; other Linux
+systems; a keyring that is locked, or a login without a password.
 
 There is no entry in the start menu and no icon of its own yet.
 

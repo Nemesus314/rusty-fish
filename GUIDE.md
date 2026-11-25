@@ -317,9 +317,10 @@ Limits of the Matrix door:
   again. On 22 November 2026 this happened after the account of the fish had
   also been opened and confirmed in a Matrix app. Whether that was the cause
   is not known. The window then says "Matrix: refused" in the title bar.
-- The login with a recovery key ran once against a real server, on 23
-  November 2026 with an account at matrix.org; the server has shown the
-  fish's device as verified since.
+- The login with a recovery key ran against a real server on 23 November
+  2026, on Windows with an account at matrix.org; the server has shown that
+  device of the fish as verified since. On 25 November 2026 it ran on Linux,
+  from the window, and the title bar said "Matrix: verified".
 - A message the fish cannot decrypt does not appear at the other tables; the
   output of the program says so.
 - The login needs a server that accepts a password. A server that only
@@ -443,9 +444,17 @@ in both directions; a profile saved while it ran was taken up at once.
 "Switch off" and closing the window each took the bot offline, with the
 line at both tables.
 
-Not measured: the Matrix door from the window on Linux; other desktops than
-Cinnamon, and Wayland; other Linux systems; a keyring that is locked, or a
-login without a password.
+The Matrix door was seen there the same evening, with an account at
+matrix.org: the fish was logged in through the window with the recovery
+key and showed "Matrix: verified", while the login on the Windows PC stayed
+as it was. A profile at Matrix and one at Discord ran in the same fish; it
+was at both doors four seconds after "Switch on". Seen in the two Matrix
+rooms: the lines on being switched on and off, two accounts asked for
+agreement and translated after tapping "OK", each with the message written
+before, and translation in both directions.
+
+Not measured: other desktops than Cinnamon, and Wayland; other Linux
+systems; a keyring that is locked, or a login without a password.
 
 ## A Linux server
 
@@ -551,11 +560,11 @@ in a virtual machine. Since version 0.4.3 it is built on that Linux Mint.
 Built there it passed all tests, reached an AI service over an encrypted
 connection, and, carried back to the first place, kept a secret in files,
 served a profile and stopped cleanly on SIGTERM. These runs were with
-made-up accounts. With a real account the statically linked program has run
-at the Discord door, started from the window on that Linux Mint (see "Linux
-with a desktop"); at the Matrix door only the ordinary build has.
+made-up accounts. With real accounts the statically linked program has run
+at both doors, started from the window on that Linux Mint (see "Linux with
+a desktop"); the login with the recovery key ran there too.
 
-Not measured: a login with the recovery key on Linux; a real server (WSL
+Not measured: a real server (WSL
 and a virtual machine with a desktop are not one); other Linux systems for
 the ordinary build, and other processors than x86-64; the file above as a
 service of the whole system under an account of its own (systemd checked
