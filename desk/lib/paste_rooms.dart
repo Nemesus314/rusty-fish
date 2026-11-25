@@ -72,11 +72,9 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
     final theme = Theme.of(context);
     final read = _read;
     final error = _error;
-    // Der Gastgeber braucht eine Kennung: an ihr erkennt der Fisch ihn.
-    final candidates = [
-      for (final person in read?.people ?? const <Person>[])
-        if (person.id.isNotEmpty || person.matrix.isNotEmpty) person,
-    ];
+    // Der Gastgeber braucht eine Kennung: an ihr erkennt der Fisch ihn. Zur
+    // Wahl steht auch, wem ein Tisch gehört, ohne unter den Menschen zu stehen.
+    final candidates = read == null ? const <String>[] : hostCandidates(read);
     return AlertDialog(
       title: const Text('Paste rooms'),
       content: SizedBox(
@@ -133,10 +131,10 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
                           value: '',
                           child: Text('none of them; I will enter my own user ID'),
                         ),
-                        for (final person in candidates)
+                        for (final ref in candidates)
                           DropdownMenuItem(
-                            value: person.ref,
-                            child: Text(person.ref, overflow: TextOverflow.ellipsis),
+                            value: ref,
+                            child: Text(ref, overflow: TextOverflow.ellipsis),
                           ),
                       ],
                     ),

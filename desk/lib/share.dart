@@ -135,6 +135,43 @@ SharedRooms? readSharedRooms(String text) {
   return SharedRooms(rooms: rooms, people: people);
 }
 
+/// Wer der Einfügende sein kann: womit das neue Profil auf ihn als Gastgeber
+/// zeigt. Das sind die genannten Menschen mit einer Kennung, und dazu jede
+/// Kennung, der ein Tisch gehört, ohne dass ein Mensch zu ihr eingetragen ist.
+///
+/// Das Zweite ist der Fall eines Gastgebers, der nur mit seiner Kennung im
+/// Profil steht und dem die Tische selbst gehören. Gemessen am 25.11.2026 in
+/// Linux Mint mit einem Profil an der Matrix-Tür: die Auswahl bot niemanden
+/// an, obwohl beide Tische im Text dieselbe Kennung trugen. Nemesus tippte
+/// seine Kennung von Hand, und sie passte zu keinem seiner zwei Konten. Das
+/// Profil lief trotzdem: der Fisch behandelte beide Konten als Gäste und bat
+/// beide um Zustimmung (20:41:12 und 20:41:59), und nichts sagte, dass der
+/// Gastgeber nicht erkannt war. Nemesus dazu: „Ja, beheben."
+///
+/// Ob eine solche Kennung stimmt, entscheidet wie bei allem hier erst das
+/// Programm beim Speichern.
+List<String> hostCandidates(SharedRooms shared) {
+  final refs = <String>[
+    for (final person in shared.people)
+      if (person.id.isNotEmpty || person.matrix.isNotEmpty) person.ref,
+  ];
+  for (final room in shared.rooms) {
+    for (final seat in room.seats) {
+      final owner = seat.owner;
+      if (owner == null || owner.isEmpty || refs.contains(owner)) {
+        continue;
+      }
+      // Gehört der Tisch einem genannten Menschen, steht der schon da, oder
+      // er hat noch keine Kennung und kann darum kein Gastgeber sein.
+      if (shared.people.any((person) => person.answersTo(owner))) {
+        continue;
+      }
+      refs.add(owner);
+    }
+  }
+  return refs;
+}
+
 /// Derselbe Mensch, aber nicht eingeladen: wen ein Fisch einlädt, entscheidet
 /// sein Gastgeber, nicht der Text eines anderen.
 Person _uninvited(Person person) => Person(

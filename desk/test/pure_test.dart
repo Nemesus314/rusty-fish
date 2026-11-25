@@ -638,6 +638,46 @@ void main() {
       expect(shared.people[1].neutral, ['English']);
     });
 
+    test('whoever pastes can be a named person or the bare ID a table belongs to', () {
+      // Nur Menschen mit Kennung: die Auswahl ist, wie sie war.
+      expect(hostCandidates(readSharedRooms(shareRoomsText(hosted()))!), ['Nemo', 'Robin']);
+
+      // Gemessen am 25.11.2026: ein Gastgeber, der nur mit seiner Kennung im
+      // Profil steht und dem beide Tische gehören, stand nicht zur Wahl.
+      const shared = SharedRooms(
+        rooms: [
+          Room(
+            passThrough: [],
+            contextLines: 10,
+            seats: [
+              Seat(
+                door: matrixDoor,
+                channel: '!a:example.org',
+                lang: 'English',
+                owner: '@host:example.org',
+              ),
+              Seat(
+                door: matrixDoor,
+                channel: '!b:example.org',
+                lang: 'German',
+                owner: '@host:example.org',
+              ),
+              Seat(channel: '333', lang: 'Russian', owner: 'Robin'),
+              Seat(channel: '444', lang: 'French', owner: 'Kim'),
+              Seat(channel: '555', lang: 'Korean'),
+            ],
+          ),
+        ],
+        people: [
+          Person(id: '200', name: 'Robin'),
+          // Noch ohne Kennung: an nichts könnte der Fisch diesen Gastgeber erkennen.
+          Person(name: 'Kim'),
+        ],
+      );
+      // Jede Kennung einmal, die Menschen zuerst; ein Tisch ohne Besitzer zählt nicht.
+      expect(hostCandidates(shared), ['Robin', '@host:example.org']);
+    });
+
     test('what belongs to each fish alone stays at home', () {
       final text = shareRoomsText(hosted());
       // Wer eingeladen ist, wer der Gastgeber ist, welche KI, welche Grenzen.

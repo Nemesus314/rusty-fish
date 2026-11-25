@@ -1482,6 +1482,47 @@ void startRequests() {
       expect(saved.people.every((p) => !p.invited), isTrue);
     });
 
+    testWidgets('a host who is only an ID at their own tables can say so too', (tester) async {
+      // Gemessen am 25.11.2026 in Linux Mint: stand im Profil kein Mensch,
+      // bot die Auswahl niemanden an, und die Kennung wurde von Hand getippt.
+      final text = shareRoomsText(
+        docOf(
+          'solo',
+          seats: const [
+            Seat(channel: '111', lang: 'German', owner: '300'),
+            Seat(channel: '222', lang: 'English', owner: '300'),
+          ],
+        ),
+      );
+      final fake = hosted();
+      await open(tester, fake);
+      await tester.tap(inCard('study', find.text('Edit')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('paste-rooms')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('shared-rooms-text')), text);
+      await tester.tap(find.byKey(const ValueKey('read-shared-rooms')));
+      await tester.pumpAndSettle();
+      expect(find.text('German ⇄ English'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('shared-me')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('300').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('use-shared-rooms')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      // Der Gastgeber ist die Kennung, der die Tische gehören, ohne Tippen.
+      expect(saved.host, '300');
+      expect(saved.rooms.single.seats.map((s) => s.owner), ['300', '300']);
+      expect(saved.people, isEmpty);
+    });
+
     testWidgets('a text that is no room text says so and changes nothing', (tester) async {
       final fake = hosted();
       await open(tester, fake);
