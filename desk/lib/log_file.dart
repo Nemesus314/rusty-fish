@@ -10,6 +10,8 @@
 
 import 'dart:io';
 
+import 'private_folder.dart';
+
 /// Eine geöffnete Protokolldatei: wo sie liegt und wie man eine Zeile anhängt.
 class OpenLog {
   const OpenLog(this.path, this.write);
@@ -27,7 +29,7 @@ class OpenLog {
 OpenLog openLogFile(String profilesDir, String profile, {int maxBytes = 1 << 20}) {
   final sep = Platform.pathSeparator;
   final dir = Directory('${Directory(profilesDir).parent.path}${sep}logs');
-  dir.createSync(recursive: true);
+  createPrivate(dir);
   final file = File('${dir.path}$sep$profile.log');
   if (file.existsSync() && file.lengthSync() > maxBytes) {
     final old = File('${dir.path}$sep$profile.old.log');

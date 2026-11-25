@@ -20,6 +20,25 @@ import 'start.dart';
 import 'theme_choice.dart';
 import 'trash.dart';
 
+/// Was der Hinweis über den wachen Rechner sagt.
+///
+/// Unter Windows bittet der Fisch das System, nicht von selbst einzuschlafen;
+/// auf anderen Systemen tut er das nicht (`rusty-fish/src/awake.rs`). Bis zum
+/// 25.11.2026 sagte der Hinweis überall, der Fisch halte Windows wach.
+/// Nemesus an dem Tag, als die Maske zum ersten Mal unter Linux lief: „Text
+/// ehrlich machen". Gemessen im Linux Mint 22.3 seiner virtuellen Maschine:
+/// der Fisch meldet dort kein Wachhalten, und Mint schläft am Netz in der
+/// Voreinstellung nicht von selbst ein (Einstellung 0, „nie").
+String awakeHint({required bool keepsAwake}) {
+  final sleep = keepsAwake
+      ? 'While the fish is on, it keeps Windows from going to sleep by itself.'
+      : 'On this system the fish does not keep the PC awake: if it goes to sleep '
+            'by itself, switch that off in the power settings.';
+  return 'Writing from a phone works too, through the Discord app, as long '
+      'as this PC stays on and awake. $sleep Closing a laptop lid '
+      'still stops it. A screen that turns off is fine.';
+}
+
 class OverviewPage extends StatefulWidget {
   const OverviewPage({
     super.key,
@@ -30,10 +49,14 @@ class OverviewPage extends StatefulWidget {
     this.openLog,
     this.startWith,
     this.theme,
+    this.keepsAwake = true,
   });
 
   /// Die Wahl zwischen hell und dunkel. Ohne Angabe gibt es keinen Umschalter.
   final ThemeChoice? theme;
+
+  /// Ob der Fisch auf diesem System den Rechner wach hält; siehe [awakeHint].
+  final bool keepsAwake;
 
   final FishCli cli;
   final Duration? refreshEvery;
@@ -458,13 +481,9 @@ class _OverviewPageState extends State<OverviewPage> {
                           // braucht zu Hause einen wachen Rechner. Dass ein
                           // schlafender PC den Fisch anhält, sieht man dem
                           // Fenster sonst nicht an.
-                          const Tooltip(
-                            message:
-                                'Writing from a phone works too, through the Discord app, as long '
-                                'as this PC stays on and awake. While the fish is on, it keeps '
-                                'Windows from going to sleep by itself. Closing a laptop lid '
-                                'still stops it. A screen that turns off is fine.',
-                            child: Text(
+                          Tooltip(
+                            message: awakeHint(keepsAwake: widget.keepsAwake),
+                            child: const Text(
                               'The fish runs while this window is open and this PC is awake.',
                             ),
                           ),

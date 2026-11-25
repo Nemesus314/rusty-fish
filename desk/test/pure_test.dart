@@ -10,6 +10,7 @@ import 'package:rusty_fish_desk/cli.dart';
 import 'package:rusty_fish_desk/desk_state.dart';
 import 'package:rusty_fish_desk/log_file.dart';
 import 'package:rusty_fish_desk/model.dart';
+import 'package:rusty_fish_desk/overview.dart';
 import 'package:rusty_fish_desk/share.dart';
 import 'package:rusty_fish_desk/theme_choice.dart';
 
@@ -115,6 +116,36 @@ void main() {
       expect(old.readAsStringSync(), 'second run\n');
       expect(File(third.path).readAsStringSync(), 'third run\n');
     });
+
+    // Die Rechte eines Ordners: die neun Schalter für Konto, Gruppe, andere.
+    int rights(String path) => FileStat.statSync(path).mode & 0x1FF;
+
+    test('its folder is for this account only, like the folders of the fish', () {
+      final sep = Platform.pathSeparator;
+      openLogFile(profiles(), 'study').write('one');
+      expect(rights('${home.path}${sep}logs'), 0x1C0, reason: '0700');
+    }, skip: Platform.isWindows ? 'the rights of a folder are a matter of Unix' : null);
+
+    test('a folder that is already there stays as it is', () {
+      final sep = Platform.pathSeparator;
+      final logs = Directory('${home.path}${sep}logs')..createSync();
+      Process.runSync('chmod', ['755', logs.path]);
+      openLogFile(profiles(), 'study').write('one');
+      expect(rights(logs.path), 0x1ED, reason: '0755');
+    }, skip: Platform.isWindows ? 'the rights of a folder are a matter of Unix' : null);
+  });
+
+  test('the hint about a PC that sleeps says what the fish does on this system', () {
+    final windows = awakeHint(keepsAwake: true);
+    final elsewhere = awakeHint(keepsAwake: false);
+    expect(windows, contains('it keeps Windows from going to sleep by itself'));
+    expect(elsewhere, isNot(contains('Windows')));
+    expect(elsewhere, contains('does not keep the PC awake'));
+    // Was überall gilt, steht in beiden.
+    for (final hint in [windows, elsewhere]) {
+      expect(hint, contains('as long as this PC stays on and awake'));
+      expect(hint, contains('Closing a laptop lid still stops it.'));
+    }
   });
 
   test('numbers are grouped the English way', () {
@@ -744,8 +775,33 @@ void main() {
         r'D:\fish\desk.json',
       );
       expect(deskSettingsPath(environment: {'RUSTY_FISH_HOME': '/fish'}, windows: false), '/fish/desk.json');
+      // Unter Linux wie das Programm: erst XDG_CONFIG_HOME, sonst ~/.config.
+      expect(
+        deskSettingsPath(environment: {'HOME': '/home/x'}, windows: false),
+        '/home/x/.config/rusty-fish/desk.json',
+      );
+      expect(
+        deskSettingsPath(
+          environment: {'XDG_CONFIG_HOME': '/cfg', 'HOME': '/home/x'},
+          windows: false,
+        ),
+        '/cfg/rusty-fish/desk.json',
+      );
+      // Leer gesetzt zählt als nicht gesetzt.
+      expect(
+        deskSettingsPath(
+          environment: {'RUSTY_FISH_HOME': ' ', 'XDG_CONFIG_HOME': '', 'HOME': '/home/x'},
+          windows: false,
+        ),
+        '/home/x/.config/rusty-fish/desk.json',
+      );
+      expect(
+        deskSettingsPath(environment: {'HOME': '/Users/x'}, windows: false, macOS: true),
+        '/Users/x/Library/Application Support/rusty-fish/desk.json',
+      );
       // Ohne Ort gilt die Wahl nur, solange das Fenster offen ist.
-      expect(deskSettingsPath(environment: {'HOME': '/home/x'}, windows: false), isNull);
+      expect(deskSettingsPath(environment: {}, windows: false), isNull);
+      expect(deskSettingsPath(environment: {'HOME': '/home/x'}, windows: true), isNull);
     });
 
     test('the first click turns what is shown around, and the choice is remembered', () {

@@ -35,6 +35,7 @@ void main(List<String> args) {
   final settings = deskSettingsPath(
     environment: Platform.environment,
     windows: Platform.isWindows,
+    macOS: Platform.isMacOS,
   );
   runApp(
     DeskApp(
@@ -42,6 +43,9 @@ void main(List<String> args) {
       location: location,
       openLog: openLogFile,
       startWith: StartRequest.fromArgs(args),
+      // Nur unter Windows bittet der Fisch das System, wach zu bleiben
+      // (`rusty-fish/src/awake.rs`).
+      keepsAwake: Platform.isWindows,
       theme: ThemeChoice(
         initial: settings == null ? ThemeMode.system : readThemeMode(settings),
         remember: settings == null ? null : (mode) => writeThemeMode(settings, mode),
@@ -61,11 +65,16 @@ class DeskApp extends StatefulWidget {
     this.openLog,
     this.startWith,
     this.theme,
+    this.keepsAwake = true,
   });
 
   /// Die Wahl zwischen hell und dunkel. Ohne Angabe folgt die Maske dem
   /// System und merkt sich einen Wechsel nur für diesen Lauf.
   final ThemeChoice? theme;
+
+  /// Ob der Fisch auf diesem System den Rechner wach hält, solange er an
+  /// ist. Danach richtet sich, was der Hinweis in der Übersicht sagt.
+  final bool keepsAwake;
 
   /// Die Uhr für die Zeitstempel im Protokoll. In Tests fest.
   final DateTime Function()? now;
@@ -122,6 +131,7 @@ class _DeskAppState extends State<DeskApp> {
                 openLog: widget.openLog,
                 startWith: widget.startWith,
                 theme: _theme,
+                keepsAwake: widget.keepsAwake,
               ),
       ),
     );
