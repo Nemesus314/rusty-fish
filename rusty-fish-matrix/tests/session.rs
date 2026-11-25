@@ -269,3 +269,35 @@ async fn a_server_that_does_not_answer_leaves_the_question_open() {
         other => panic!("expected an open question, got {other:?}"),
     }
 }
+
+/// Die Geräteschlüssel liegen unter Unix in einem Ordner, in den nur das
+/// Konto des Fischs sehen kann, auch wenn ein Fisch startet, ohne dass auf
+/// diesem Rechner je angemeldet wurde. Gemessen am 25.11.2026: bis dahin
+/// legte dann die Bibliothek den Ordner an, mit 0755.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_device_store_is_for_this_account_only_even_without_a_login_here() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = MatrixMockServer::new().await;
+    let dir = folder("private-store");
+    // Diesen Ordner gibt es noch nicht.
+    let store = dir.join("never-logged-in");
+    let secret = serde_json::json!({
+        "h": server.uri(), "u": "@fish:localhost", "d": "DEVICEID", "t": "1234",
+        "p": "not-a-real-passphrase",
+    });
+    let access = Access::parse(&secret.to_string()).unwrap();
+    {
+        let (access, store) = (access.clone(), store.clone());
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            runtime.block_on(async { connect(&access, &store).await.map(|_| ()) })
+        })
+        .join()
+        .unwrap()
+        .unwrap();
+    }
+    let mode = std::fs::metadata(&store).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700, "the folder of the device keys");
+    let _ = std::fs::remove_dir_all(&dir);
+}

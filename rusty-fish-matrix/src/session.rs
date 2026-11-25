@@ -311,6 +311,12 @@ async fn prove(client: &Client, user: &UserId, key: &str) -> Result<(), String> 
 /// Nimmt die Sitzung wieder auf: öffnet die Ablage des Geräts und stellt den
 /// Zugang ein. Spricht noch nicht mit dem Server.
 pub async fn connect(access: &Access, store: &Path) -> Result<Client, String> {
+    // Den Ordner legt sonst die Bibliothek an, mit den üblichen Rechten.
+    // Gemessen am 25.11.2026: ein Fisch, der ohne vorherige Anmeldung auf
+    // diesem Rechner startete, bekam ihn unter Linux mit 0755. Im gewöhnlichen
+    // Ablauf legt die Anmeldung ihn vorher an; hier noch einmal, damit es
+    // nicht davon abhängt.
+    create_private(store).map_err(|e| format!("cannot create {}: {e}", store.display()))?;
     let client = Client::builder()
         .homeserver_url(&access.homeserver)
         .sqlite_store(store, Some(&access.passphrase))
