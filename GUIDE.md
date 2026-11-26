@@ -200,7 +200,11 @@ account there.
    say which of the people you are. That fills in the tables and the people.
    The text holds the channels, the Discord ids and the names from their
    profile; no key, no token, and nothing about their AI. You still choose
-   your own AI service, your own model and your own call name.
+   your own AI service, your own model and your own call name. Nobody is
+   invited in such a profile: your fish writes at your own table only, and
+   at someone else's table as soon as you tick "Invited" for them under
+   People. This is not the way to move a profile of your own to another
+   machine; for that there is "Export…" (step 7).
 
 5. When a profile does not do what you expect, its card has two buttons that
    put its state on the clipboard, to paste into a chat with an AI assistant
@@ -653,9 +657,15 @@ the dialog of the desktop and took what was new there: two profiles and
 three keys into the keyring. Two profiles that existed there were refused
 and named, and the token and one key were reported as the same ones.
 
-Not measured: the other direction, written on Linux and read on Windows;
-reading into the Windows Credential Manager at all; an envelope read on a
-Linux server with its secrets in files, other than with made-up ones.
+On 26 November 2026, with the download of version 0.4.4 on Windows 11:
+"Import…" opened an envelope written on that PC and compared it with what
+lay there. Everything was there already, so nothing was changed: the
+profiles were named as existing, the secrets as the same ones.
+
+Not measured: the other direction, written on Linux and read on Windows; a
+secret stored anew in the Windows Credential Manager by "Import…"; an
+envelope read on a Linux server with its secrets in files, other than with
+made-up ones.
 
 ## Limits
 

@@ -141,9 +141,16 @@ class _PasteRoomsDialogState extends State<PasteRoomsDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                // Erst stand hier nur der Grund. Nemesus las ihn am 25.11.2026,
+                // trug ein Profil so nach Linux Mint und hielt es danach für
+                // einen Fehler, dass Deutsch nach Russisch ausblieb: der
+                // Tisch des anderen wurde nicht bedient. Seither steht die
+                // Wirkung dabei. Sein Wort am 26.11.2026 zum Abschluss: ändern.
                 Text(
                   'You become the host of this profile. Nobody is invited: '
-                  'with a fish each, everyone pays for what they read themselves.',
+                  'with a fish each, everyone pays for what they read themselves. '
+                  'So your fish writes at your own table only. At the table of someone else, '
+                  'their fish writes, or yours as soon as you tick "Invited" for them under People.',
                   style: theme.textTheme.bodySmall,
                 ),
               ],

@@ -299,7 +299,12 @@ where
             }
         }
         flag.store(true, Ordering::Relaxed);
-        eprintln!("rusty-fish: stopping");
+        // Die Tür nennt sich, wie die Matrix-Tür es tut. Gemessen am
+        // 25.11.2026 in Linux Mint: beim Anhalten stand zweimal dieselbe
+        // Zeile „stopping" im Protokoll, einmal vom Fisch und einmal von
+        // hier (19:47:22, 19:47:48). Nemesus am 26.11.2026 zum Abschluss:
+        // beheben.
+        eprintln!("rusty-fish: stopping the Discord door");
         // Wer jetzt noch bedient wird, liest, dass der Fisch geht. Erst danach
         // meldet er sich ab: die Zeile geht über die Schnittstelle hinaus, und
         // die braucht den Zugang, nicht die Verbindung, aber ein Fisch, der
