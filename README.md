@@ -21,7 +21,7 @@ the same conversation.
 
 ## Where it stands
 
-Version 0.4.5. It runs on Windows 11, with a window to manage it. Window
+Version 0.4.6. It runs on Windows 11, with a window to manage it. Window
 and fish also run on Linux with a desktop; that has been measured in one
 place only, Linux Mint 22.3 in a virtual machine. The program itself also
 runs on Linux without a desktop; measured in Ubuntu inside Windows (WSL),
