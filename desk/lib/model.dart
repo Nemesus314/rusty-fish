@@ -432,6 +432,40 @@ typedef LanguageHit = ({String name, String? via});
 /// zu German), zuletzt die, in deren Namen ein Wort so beginnt.
 ///
 /// Steht schon genau ein Name der Liste da, gibt es nichts vorzuschlagen.
+/// Was unter einem Sprachfeld steht, wenn darin ein Wort steht, das nicht
+/// genau ein Name der Liste ist. `null`, wenn alles auf der Liste steht oder
+/// das Programm keine Liste nennt (älterer Stand): dann ist nichts zu sagen.
+///
+/// Nemesus am 26.11.2026, nachdem er in seinem Profil eine neutrale Sprache
+/// nachgetragen hatte: „Wobei ich mich frage, was passiert, wenn man eine
+/// Sprache falsch schreibt?" Bis dahin geschah nichts: das Feld ist mit
+/// Absicht frei, ein Wort außerhalb der Liste wurde übernommen, wie es
+/// dastand, und nichts sagte es. Sein Wort zum Hinweis: „Ja, das bauen wir
+/// noch."
+///
+/// Das Feld bleibt frei. Der Hinweis lehnt nichts ab; er sagt nur, was mit
+/// dem Wort geschieht, und nennt den Namen der Liste, wenn genau einer passt.
+String? languageHint(List<Language> all, String text, {bool many = false}) {
+  if (all.isEmpty) {
+    return null;
+  }
+  final notes = <String>[];
+  for (final part in many ? text.split(',') : [text]) {
+    final word = part.trim();
+    if (word.isEmpty || all.any((language) => language.name == word)) {
+      continue;
+    }
+    final hits = suggestLanguages(all, word);
+    notes.add(switch (hits.length) {
+      0 =>
+        '"$word" is not on the list of languages. It is kept as typed and goes to the AI like that.',
+      1 => '"$word" is not the word the fish knows: pick "${hits.single.name}" from the suggestions.',
+      _ => '"$word" is not a whole name of the list: click into the field and pick a suggestion.',
+    });
+  }
+  return notes.isEmpty ? null : notes.join(' ');
+}
+
 List<LanguageHit> suggestLanguages(List<Language> all, String typed) {
   final exact = typed.trim();
   final start = exact.toLowerCase();

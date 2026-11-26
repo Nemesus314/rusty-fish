@@ -46,10 +46,42 @@ class _LanguageFieldState extends State<LanguageField> {
   final _focus = FocusNode();
 
   @override
+  void initState() {
+    super.initState();
+    // Der Hinweis unter dem Feld hängt daran, was darin steht und ob gerade
+    // jemand darin tippt.
+    _focus.addListener(_changed);
+    widget.controller.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(LanguageField old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      old.controller.removeListener(_changed);
+      widget.controller.addListener(_changed);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller.removeListener(_changed);
     _focus.dispose();
     super.dispose();
   }
+
+  void _changed() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// Steht ein Wort im Feld, das nicht auf der Liste ist, sagt die Maske es
+  /// darunter. Nicht während des Tippens: da ist jeder Anfang eines Namens
+  /// noch kein Name, und die Vorschläge stehen ohnehin offen.
+  String? get _hint => _focus.hasFocus
+      ? null
+      : languageHint(widget.languages, widget.controller.text, many: widget.many);
 
   List<_Option> _options(String text) {
     // Bei mehreren Sprachen zählt nur, was hinter dem letzten Komma steht.
@@ -68,14 +100,35 @@ class _LanguageFieldState extends State<LanguageField> {
       focusNode: _focus,
       displayStringForOption: (option) => option.result,
       optionsBuilder: (value) => _options(value.text),
-      fieldViewBuilder: (context, controller, focus, onSubmitted) => TextField(
-        key: widget.fieldKey,
-        controller: controller,
-        focusNode: focus,
-        decoration: widget.decoration,
-        // Eingabetaste: der hervorgehobene Vorschlag, wenn einer offen ist.
-        onSubmitted: (_) => onSubmitted(),
-      ),
+      fieldViewBuilder: (context, controller, focus, onSubmitted) {
+        final hint = _hint;
+        final theme = Theme.of(context);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: widget.fieldKey,
+              controller: controller,
+              focusNode: focus,
+              decoration: widget.decoration,
+              // Eingabetaste: der hervorgehobene Vorschlag, wenn einer offen ist.
+              onSubmitted: (_) => onSubmitted(),
+            ),
+            // Unter dem Feld und seinem eigenen Hilfstext, nicht an dessen
+            // Stelle: der sagt, wofür das Feld ist, dieser, was darin steht.
+            if (hint != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  hint,
+                  key: ValueKey('language-hint-${(widget.fieldKey as ValueKey).value}'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.tertiary),
+                ),
+              ),
+          ],
+        );
+      },
       optionsViewBuilder: (context, onSelected, options) {
         // Nach einer Wahl behält Flutter die alten Vorschläge und zeigte sie
         // wieder, sobald das Feld erneut den Fokus bekommt. Gezeigt wird

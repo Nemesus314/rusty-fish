@@ -192,4 +192,119 @@ void main() {
       expect(fake.saved.single.rooms[0].seats[0].lang, 'Ko');
     });
   });
+
+  // Nemesus am 26.11.2026: „Wobei ich mich frage, was passiert, wenn man eine
+  // Sprache falsch schreibt?" Bis dahin: nichts, und nichts sagte es.
+  group('a word that is not on the list is named under the field', () {
+    test('what the hint says depends on what the list offers for the word', () {
+      // Alles auf der Liste: nichts zu sagen.
+      expect(languageHint(fakeLanguages, 'English'), isNull);
+      expect(languageHint(fakeLanguages, ''), isNull);
+      expect(languageHint(fakeLanguages, 'English, Russian', many: true), isNull);
+
+      // Ein Tippfehler, zu dem die Liste nichts anbietet.
+      expect(
+        languageHint(fakeLanguages, 'Englich'),
+        '"Englich" is not on the list of languages. It is kept as typed and goes to the AI like that.',
+      );
+      // Der deutsche Name, oder klein geschrieben: genau ein Name passt.
+      expect(
+        languageHint(fakeLanguages, 'Deutsch'),
+        '"Deutsch" is not the word the fish knows: pick "German" from the suggestions.',
+      );
+      expect(languageHint(fakeLanguages, 'english'), contains('pick "English"'));
+      // Ein Anfang, zu dem mehrere passen.
+      expect(languageHint(fakeLanguages, 'K'), contains('not a whole name of the list'));
+
+      // Mehrere Sprachen: nur die genannt, die nicht stimmen.
+      final several = languageHint(fakeLanguages, 'English, Russisch, Klingon', many: true)!;
+      expect(several, isNot(contains('"English"')));
+      expect(several, contains('pick "Russian"'));
+      expect(several, contains('"Klingon" is not on the list'));
+      // Ohne `many` ist das Ganze ein Wort.
+      expect(languageHint(fakeLanguages, 'English, Russian'), contains('"English, Russian"'));
+
+      // Ein älteres Programm nennt keine Liste: dann weiß die Maske nichts.
+      expect(languageHint(const [], 'Englich'), isNull);
+    });
+
+    testWidgets('the hint appears when the field is left, not while typing', (tester) async {
+      final fake = FakeCli(entries: [entryOf(doc())]);
+      await open(tester, fake);
+      await edit(tester, 'tea');
+      // Was im Profil steht, steht auf der Liste: kein Hinweis.
+      expect(find.byKey(const ValueKey('language-hint-room-0-pass')), findsNothing);
+
+      await type(tester, 'room-0-pass', 'Englich');
+      // Noch im Feld: kein Hinweis, die Vorschläge wären jetzt dran.
+      expect(find.byKey(const ValueKey('language-hint-room-0-pass')), findsNothing);
+
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('language-hint-room-0-pass'))).data,
+        contains('"Englich" is not on the list of languages'),
+      );
+
+      // Das Feld bleibt frei: gespeichert wird, was dasteht.
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(fake.saved.single.rooms[0].passThrough, ['Englich']);
+    });
+
+    testWidgets('a name of the list, taken from the suggestions, clears the hint', (tester) async {
+      final fake = FakeCli(entries: [entryOf(doc())]);
+      await open(tester, fake);
+      await edit(tester, 'tea');
+      await type(tester, 'person-1-lang', 'Deutsch');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('language-hint-person-1-lang'))).data,
+        '"Deutsch" is not the word the fish knows: pick "German" from the suggestions.',
+      );
+
+      await type(tester, 'person-1-lang', 'Deu');
+      await tester.tap(suggestion('German'));
+      await tester.pumpAndSettle();
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(textOf(tester, 'person-1-lang'), 'German');
+      expect(find.byKey(const ValueKey('language-hint-person-1-lang')), findsNothing);
+    });
+
+    testWidgets('a profile opened with a word off the list shows the hint at once', (tester) async {
+      final fake = FakeCli(
+        entries: [
+          entryOf(
+            docOf(
+              'tea',
+              seats: const [
+                Seat(channel: '111', lang: 'German'),
+                Seat(channel: '222', lang: 'Rusian'),
+              ],
+            ),
+          ),
+        ],
+      );
+      await open(tester, fake);
+      await edit(tester, 'tea');
+      expect(find.byKey(const ValueKey('language-hint-seat-0-0-lang')), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('language-hint-seat-0-1-lang'))).data,
+        contains('"Rusian" is not on the list of languages'),
+      );
+    });
+
+    testWidgets('an older program names no languages: no hint at all', (tester) async {
+      final fake = FakeCli(entries: [entryOf(doc())])
+        ..languagesError = "error: unrecognized subcommand 'languages'";
+      await open(tester, fake);
+      await edit(tester, 'tea');
+      await type(tester, 'room-0-pass', 'Englich');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('language-hint-room-0-pass')), findsNothing);
+    });
+  });
 }

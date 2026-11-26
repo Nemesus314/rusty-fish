@@ -186,7 +186,9 @@ account there.
    - Languages: a language field suggests while you type. "Ko" offers
      Korean; a German or native name works too, so "Deutsch" offers German,
      the word the fish reads. Click a suggestion or press Enter. The field
-     stays free: a word that is not on the list is kept as typed.
+     stays free: a word that is not on the list is kept as typed, and once
+     you leave the field a line under it says so, naming the word of the
+     list where exactly one fits.
      `rusty-fish languages` prints the list.
 3. Save. The profile appears as a card. Press "Switch on" at the top of the
    window: the fish starts for all profiles and the bot goes online in
