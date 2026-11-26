@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 publish = false
 # Entschieden von Nemesus am 24.11.2026: die AGPL 3, „Version 3 oder später".
