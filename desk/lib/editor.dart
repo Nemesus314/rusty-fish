@@ -286,8 +286,10 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
     // Der Hinweis zum Namen erscheint schon beim Tippen.
     _name.addListener(_redraw);
     // Die Auswahl „Whose table" nennt den Gastgeber mit seiner Kennung, und
-    // der Haken „Invited" hängt davon ab, wer der Gastgeber ist.
-    _host.addListener(_redraw);
+    // der Haken „Invited" hängt davon ab, wer der Gastgeber ist. Tische, die
+    // mit seiner Kennung auf ihn zeigen, ziehen mit, wenn sie sich ändert.
+    _lastHost = _hostId;
+    _host.addListener(_followHost);
     final section = widget.scrollTo;
     if (section != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _show(section));
@@ -350,6 +352,9 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
       _pointSeatsAtPeople();
       final me = pasted.me;
       if (me != null) {
+        // Die eingefügten Tische stehen, wie der Text sie nennt: keiner
+        // zieht hier mit dem Gastgeber um.
+        _lastHost = me;
         _host.text = me;
       }
     });
@@ -404,6 +409,41 @@ class _ProfileEditorPageState extends State<ProfileEditorPage> {
         }
       }
       person.lastRef = now;
+    }
+    _redraw();
+  }
+
+  /// Was zuletzt als Gastgeber im Feld stand; siehe [_followHost].
+  String _lastHost = '';
+
+  /// Die Angabe zum Gastgeber hat sich geändert. Die Tische, die mit der
+  /// alten Kennung auf ihn zeigten, zeigen weiter auf ihn.
+  ///
+  /// Gemessen von Nemesus am 26.11.2026 in Linux Mint: in einem Profil stand
+  /// er als Gastgeber mit einer vertippten Kennung, der drei Zeichen fehlten,
+  /// und beide Tische standen auf „You (host)". Er berichtigte die Kennung
+  /// unter „General" und speicherte. Die Tische zeigten weiter auf die alte,
+  /// galten damit als die eines Fremden, und der Fisch hätte an keinem mehr
+  /// geschrieben; nichts wies darauf hin. Sein Wort dazu: „Bitte beheben."
+  void _followHost() {
+    final before = _lastHost;
+    final now = _hostId;
+    // Wie bei den Menschen: solange das Feld für einen Augenblick leer ist,
+    // bleiben die Tische, wo sie sind, und ziehen mit, sobald wieder etwas
+    // dasteht.
+    if (now.isNotEmpty && before != now) {
+      // Nur Tische, die mit der bloßen Kennung auf den Gastgeber zeigten.
+      // Steht unter den Menschen jemand mit dieser Angabe, gehören die
+      // Tische ihm und bleiben bei ihm, auch wenn er nicht mehr Gastgeber ist.
+      final someone = _people.any((person) => person.ref == before);
+      if (before.isNotEmpty && !someone) {
+        for (final seat in _rooms.expand((room) => room.seats)) {
+          if (seat.owner == before) {
+            seat.owner = now;
+          }
+        }
+      }
+      _lastHost = now;
     }
     _redraw();
   }

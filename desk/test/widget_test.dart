@@ -699,6 +699,89 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    // Der Gastgeber steht nur mit seiner Kennung im Profil, und beide Tische
+    // gehören ihm: so kam ein Profil am 25.11.2026 mit „Paste rooms" an.
+    FakeCli hostByIdAlone() => FakeCli(
+      entries: [
+        entryOf(
+          docOf(
+            'solo',
+            seats: const [
+              Seat(channel: '111', lang: 'German', owner: '100'),
+              Seat(channel: '222', lang: 'English', owner: '100'),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    testWidgets('tables that point at the host by their ID follow when that ID is corrected', (
+      tester,
+    ) async {
+      // Gemessen am 26.11.2026 in Linux Mint: die Kennung des Gastgebers
+      // unter „General" berichtigt, und beide Tische zeigten weiter auf die
+      // alte. Der Fisch hätte an keinem mehr geschrieben.
+      final fake = hostByIdAlone();
+      await edit(tester, fake, 'solo');
+      await tester.enterText(find.byKey(const ValueKey('field-host')), '100314');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      expect(saved.host, '100314');
+      expect(saved.rooms.single.seats.map((s) => s.owner), ['100314', '100314']);
+    });
+
+    testWidgets('they follow too when the field was emptied before the new ID was typed', (
+      tester,
+    ) async {
+      final fake = hostByIdAlone();
+      await edit(tester, fake, 'solo');
+      await tester.enterText(find.byKey(const ValueKey('field-host')), '');
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('field-host')), '4711');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      expect(saved.host, '4711');
+      expect(saved.rooms.single.seats.map((s) => s.owner), ['4711', '4711']);
+    });
+
+    testWidgets('a table of someone listed under People stays theirs when the host changes', (
+      tester,
+    ) async {
+      final fake = FakeCli(
+        entries: [
+          entryOf(
+            docOf(
+              'pair',
+              people: const [
+                Person(id: '100', name: 'Nemo', lang: 'German'),
+                Person(id: '200', name: 'Robin', lang: 'Russian'),
+              ],
+              seats: const [
+                Seat(channel: '111', lang: 'German', owner: 'Nemo'),
+                Seat(channel: '222', lang: 'Russian', owner: 'Robin'),
+              ],
+            ),
+          ),
+        ],
+      );
+      await edit(tester, fake, 'pair');
+      // Jetzt ist Robin der Gastgeber. Wem welcher Tisch gehört, bleibt.
+      await tester.enterText(find.byKey(const ValueKey('field-host')), '200');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+
+      final saved = fake.saved.single;
+      expect(saved.host, '200');
+      expect(saved.rooms.single.seats.map((s) => s.owner), ['Nemo', 'Robin']);
+    });
+
     testWidgets('whose table and the invitation are saved with the profile', (
       tester,
     ) async {
